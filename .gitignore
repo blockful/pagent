@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+.env.local
+.DS_Store
+*.log
+.playwright-mcp/
+
+# Local test artifacts (Playwright screenshots, ad-hoc fixtures)
+*.png
+/tmp-*
