@@ -5,6 +5,7 @@ import * as db from './db.ts';
 import { env } from './schemas.ts';
 import { app, PORT, PUBLIC_URL } from './app.ts';
 import { logger } from './logger.ts';
+import { shutdownTracing } from './tracing.ts';
 
 // --- Boot --------------------------------------------------------------------
 
@@ -56,6 +57,12 @@ const shutdown = async (signal: string) => {
     logger.error({ err }, 'error draining server connections');
   } finally {
     clearTimeout(forceClose);
+  }
+
+  try {
+    await shutdownTracing();
+  } catch (err) {
+    logger.error({ err }, 'error during OpenTelemetry shutdown');
   }
 
   await db.shutdown();

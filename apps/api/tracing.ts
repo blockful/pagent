@@ -12,8 +12,10 @@ import { describeTracing, tracingBootLog } from './tracing-status.ts';
 
 const status = describeTracing();
 
+let sdk: NodeSDK | undefined;
+
 if (status.enabled) {
-  const sdk = new NodeSDK({
+  sdk = new NodeSDK({
     serviceName: status.serviceName,
     traceExporter: new OTLPTraceExporter({
       // The exporter appends /v1/traces. Grafana Cloud's gateway accepts the
@@ -32,10 +34,13 @@ if (status.enabled) {
   });
 
   sdk.start();
-  process.on('SIGTERM', () => sdk.shutdown().catch(() => {}));
 }
 
 console.log(tracingBootLog(status));
+
+export async function shutdownTracing(): Promise<void> {
+  if (sdk) await sdk.shutdown();
+}
 
 function parseOtlpHeaders(raw: string | undefined): Record<string, string> | undefined {
   if (!raw) return undefined;
