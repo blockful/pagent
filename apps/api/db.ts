@@ -82,24 +82,34 @@ type PageRow = {
 };
 
 export async function getActivePage(id: string): Promise<Page | null> {
-  const c = client();
-  const rows = await c<PageRow[]>`
-    select id, spec, state, result, created_at, expires_at
-    from pages
-    where id = ${id} and expires_at > now()
-  `;
-  if (rows.length === 0) return null;
-  const r = rows[0];
-  return {
-    id: r.id,
-    spec: r.spec,
-    state: r.state,
-    result: r.result,
-    createdAt: r.created_at.getTime(),
-    expiresAt: r.expires_at.getTime(),
-  };
+  return withRetry(async () => {
+    const c = client();
+    const rows = await c<PageRow[]>`
+      select id, spec, state, result, created_at, expires_at
+      from pages
+      where id = ${id} and expires_at > now()
+    `;
+    if (rows.length === 0) return null;
+    const r = rows[0]!;
+    return {
+      id: r.id,
+      spec: r.spec,
+      state: r.state,
+      result: r.result,
+      createdAt: r.created_at.getTime(),
+      expiresAt: r.expires_at.getTime(),
+    };
+  });
 }
 
+/**
+ * Atomic open→submitted transition. Returns 'ok', 'conflict', or 'not_found'.
+ *
+ * NOT wrapped in withRetry: if attempt 1 commits but its response is lost on
+ * the network, attempt 2 finds state='submitted' and (incorrectly) reports
+ * 'conflict' — caller would conclude someone else submitted. Better to
+ * surface the network error to the caller, who can decide.
+ */
 export async function submitPage(
   id: string,
   action: unknown,
@@ -119,6 +129,14 @@ export async function submitPage(
   return exists.length > 0 ? 'conflict' : 'not_found';
 }
 
+/**
+ * Read the result and atomically flip submitted→received on the first read.
+ *
+ * NOT wrapped in withRetry: if attempt 1's UPDATE commits but the response
+ * drops, attempt 2 sees state='received' and the caller (the agent) treats
+ * the result as "already handled" — they'd discard it. Better to surface
+ * the error to the agent's polling loop, which retries at the HTTP level.
+ */
 export async function fetchAndAdvanceResult(
   id: string,
 ): Promise<{ stateAtRead: PageState; result: unknown } | null> {
