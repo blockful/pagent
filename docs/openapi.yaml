@@ -81,6 +81,7 @@ paths:
               example:
                 ok: false
                 db: error
+                message: Database connection failed
 
   /openapi.yaml:
     get:
@@ -802,7 +803,7 @@ components:
 
     HealthError:
       type: object
-      required: [ok, db]
+      required: [ok, db, message]
       properties:
         ok:
           type: boolean
@@ -810,13 +811,22 @@ components:
         db:
           type: string
           enum: [error]
+        message:
+          type: string
+          description: Human-readable description of the failure.
+          example: Database connection failed
 
     Error400:
       type: object
+      required: [error, message]
       properties:
         error:
           type: string
           enum: [bad_request]
+        message:
+          type: string
+          description: Human-readable description of why the request was rejected.
+          example: Request body did not match the expected schema
         issues:
           type: array
           description: Zod validation issues describing what failed.
@@ -826,20 +836,31 @@ components:
 
     Error404:
       type: object
+      required: [error, message]
       properties:
         error:
           type: string
           enum: [not_found]
+        message:
+          type: string
+          description: Human-readable description of what was not found.
+          example: Page not found or expired
 
     Error409:
       type: object
+      required: [error, message]
       properties:
         error:
           type: string
           enum: [conflict]
+        message:
+          type: string
+          description: Human-readable description of the conflict.
+          example: Page was already submitted; create a new page if you need another submission
 
     Error413:
       type: object
+      required: [error, max_bytes, message]
       properties:
         error:
           type: string
@@ -848,9 +869,14 @@ components:
           type: integer
           description: Maximum allowed body size in bytes.
           example: 262144
+        message:
+          type: string
+          description: Human-readable description of the size limit.
+          example: Request body exceeds the 262144-byte limit
 
     Error429:
       type: object
+      required: [error, retry_after_seconds, message]
       properties:
         error:
           type: string
@@ -859,9 +885,14 @@ components:
           type: integer
           description: Seconds to wait before retrying.
           example: 60
+        message:
+          type: string
+          description: Human-readable rate limit message including the retry delay.
+          example: Too many requests; retry after 60 seconds
 
     Error500:
       type: object
+      required: [error, request_id, message]
       properties:
         error:
           type: string
@@ -872,3 +903,7 @@ components:
             The `X-Request-ID` for this request. Quote it in bug reports so
             maintainers can locate the matching log lines and traces.
           example: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6
+        message:
+          type: string
+          description: Human-readable description of the error. Always safe to show to users.
+          example: An unexpected error occurred; quote the request_id when reporting this

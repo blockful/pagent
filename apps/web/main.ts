@@ -34,6 +34,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
   static properties = {
     status: { state: true },
     error: { state: true },
+    submitError: { state: true },
     awaiting: { state: true },
     awaitingMessage: { state: true },
     awaitingStalled: { state: true },
@@ -148,6 +149,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
 
   declare status: 'connecting' | 'live' | 'closed' | 'error';
   declare error: string | null;
+  declare submitError: string | null;
   declare awaiting: boolean;
   declare awaitingMessage: string;
   declare awaitingStalled: boolean;
@@ -156,6 +158,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
     super();
     this.status = 'connecting';
     this.error = null;
+    this.submitError = null;
     this.awaiting = false;
     this.awaitingMessage = 'Sent — waiting for the agent…';
     this.awaitingStalled = false;
@@ -168,6 +171,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       // Optimistic lock — the page is single-shot, so prevent further submits
       // and surface the "waiting for the agent" banner immediately.
       this.awaiting = true;
+      this.submitError = null;
       this.awaitingMessage = 'Sent — waiting for the agent…';
       try {
         const res = await fetch(`${API_BASE}/v1/${pageId}/result`, {
@@ -183,12 +187,15 @@ class AgentUIApp extends SignalWatcher(LitElement) {
         });
         if (!res.ok) {
           console.warn('result POST failed', res.status);
+          const body = (await res.json().catch(() => ({}))) as { message?: string };
+          this.submitError = body.message ?? 'Submit failed — please try again';
           this.awaiting = false;
           return;
         }
         this.startPollingForReceived();
       } catch (err) {
         console.error('result POST error', err);
+        this.submitError = 'Submit failed — please check your connection and try again';
         this.awaiting = false;
       }
     },
@@ -325,6 +332,9 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       </div>`;
     }
     return html`<section id="surfaces" class="surface-wrap ${this.awaiting ? 'is-awaiting' : ''}">
+      ${this.submitError
+        ? html`<div class="error" role="alert" aria-live="assertive">${this.submitError}</div>`
+        : nothing}
       ${this.awaiting
         ? html`<div
             class="awaiting-banner ${this.awaitingStalled ? 'is-stalled' : ''}"

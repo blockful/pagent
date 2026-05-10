@@ -21100,6 +21100,15 @@ var StdioServerTransport = class {
 
 // apps/mcp/server.ts
 var SERVICE_URL = (process.env.PAGENT_URL ?? "https://pagent.up.railway.app").replace(/\/$/, "");
+function formatRetryHint(body) {
+  if (typeof body.retry_after_seconds === "number") {
+    return `Retry after ${body.retry_after_seconds}s`;
+  }
+  if (typeof body.max_bytes === "number") {
+    return `Reduce body to \u2264${body.max_bytes} bytes`;
+  }
+  return "";
+}
 var server = new McpServer({
   name: "pagent",
   version: "0.0.1"
@@ -21122,7 +21131,10 @@ server.registerTool(
       body: JSON.stringify({ spec })
     });
     if (!res.ok) {
-      throw new Error(`Failed to create page: ${res.status} ${await res.text()}`);
+      const body = await res.json().catch(() => ({}));
+      const hint = formatRetryHint(body);
+      const message = body?.message ?? `HTTP ${res.status}`;
+      throw new Error(`show_ui failed (${res.status}): ${message}${hint ? `. ${hint}` : ""}`);
     }
     const created = await res.json();
     return {
@@ -21157,10 +21169,15 @@ server.registerTool(
       headers: { accept: "application/json" }
     });
     if (res.status === 404) {
-      throw new Error(`Page ${page_id} not found (expired or deleted).`);
+      const body2 = await res.json().catch(() => ({}));
+      const message = body2?.message ?? "Page not found (expired or deleted)";
+      throw new Error(`check_result failed (404): ${message}`);
     }
     if (!res.ok) {
-      throw new Error(`check_result failed: ${res.status} ${await res.text()}`);
+      const body2 = await res.json().catch(() => ({}));
+      const hint = formatRetryHint(body2);
+      const message = body2?.message ?? `HTTP ${res.status}`;
+      throw new Error(`check_result failed (${res.status}): ${message}${hint ? `. ${hint}` : ""}`);
     }
     const body = await res.json();
     const text = body.result == null ? `User has not responded yet (state: ${body.state}). Call check_result again in a few seconds.` : `User submitted: ${JSON.stringify(body.result)}`;
@@ -21174,4 +21191,9 @@ server.registerTool(
     };
   }
 );
-await server.connect(new StdioServerTransport());
+if (import.meta.url === new URL(process.argv[1], import.meta.url).href) {
+  await server.connect(new StdioServerTransport());
+}
+export {
+  formatRetryHint
+};

@@ -60,7 +60,14 @@ const newPageLimiter = rateLimiter({
   handler: (c) => {
     const retryAfter = Math.ceil(env.RATE_LIMIT_WINDOW_MS / 1000);
     c.header('Retry-After', String(retryAfter));
-    return c.json({ error: 'rate_limited', retry_after_seconds: retryAfter }, 429);
+    return c.json(
+      {
+        error: 'rate_limited',
+        retry_after_seconds: retryAfter,
+        message: `Too many requests; retry after ${retryAfter} seconds`,
+      },
+      429,
+    );
   },
 });
 
@@ -90,7 +97,15 @@ app.use(
   '*',
   bodyLimit({
     maxSize: MAX_BODY_BYTES,
-    onError: (c) => c.json({ error: 'payload_too_large', max_bytes: MAX_BODY_BYTES }, 413),
+    onError: (c) =>
+      c.json(
+        {
+          error: 'payload_too_large',
+          max_bytes: MAX_BODY_BYTES,
+          message: `Request body exceeds the ${MAX_BODY_BYTES}-byte limit`,
+        },
+        413,
+      ),
   }),
 );
 
@@ -115,7 +130,14 @@ app.use('*', async (c, next) => {
 
 app.onError((err, c) => {
   getLog(c).error({ err, method: c.req.method, path: c.req.path }, 'unhandled error');
-  return c.json({ error: 'internal_error', request_id: getRequestId(c) }, 500);
+  return c.json(
+    {
+      error: 'internal_error',
+      request_id: getRequestId(c),
+      message: 'An unexpected error occurred; quote the request_id when reporting this',
+    },
+    500,
+  );
 });
 
 // --- Health (unversioned — ops endpoint, not part of the API contract) -------
@@ -126,7 +148,7 @@ app.get('/health', async (c) => {
     return c.json({ ok: true, db: 'ok' });
   } catch (err) {
     logger.error({ err }, 'health check db ping failed');
-    return c.json({ ok: false, db: 'error' }, 503);
+    return c.json({ ok: false, db: 'error', message: 'Database connection failed' }, 503);
   }
 });
 
@@ -145,7 +167,14 @@ const newPageHandler = async (c: Context) => {
   const raw = await c.req.json().catch(() => null);
   const result = newPageBodySchema.safeParse(raw);
   if (!result.success) {
-    return c.json({ error: 'bad_request', issues: result.error.issues }, 400);
+    return c.json(
+      {
+        error: 'bad_request',
+        issues: result.error.issues,
+        message: 'Request body did not match the expected schema',
+      },
+      400,
+    );
   }
   const now = Date.now();
   const page: Page = {
@@ -162,9 +191,10 @@ const newPageHandler = async (c: Context) => {
 
 const getPageHandler = async (c: Context) => {
   const idResult = pageIdSchema.safeParse(c.req.param('id'));
-  if (!idResult.success) return c.json({ error: 'not_found' }, 404);
+  if (!idResult.success)
+    return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
   const p = await db.getActivePage(idResult.data);
-  if (!p) return c.json({ error: 'not_found' }, 404);
+  if (!p) return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
   return c.json({
     spec: p.spec,
     state: p.state,
@@ -175,24 +205,41 @@ const getPageHandler = async (c: Context) => {
 
 const submitResultHandler = async (c: Context) => {
   const idResult = pageIdSchema.safeParse(c.req.param('id'));
-  if (!idResult.success) return c.json({ error: 'not_found' }, 404);
+  if (!idResult.success)
+    return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
   const raw = await c.req.json().catch(() => null);
   const bodyResult = resultBodySchema.safeParse(raw);
   if (!bodyResult.success) {
-    return c.json({ error: 'bad_request', issues: bodyResult.error.issues }, 400);
+    return c.json(
+      {
+        error: 'bad_request',
+        issues: bodyResult.error.issues,
+        message: 'Request body did not match the expected schema',
+      },
+      400,
+    );
   }
   const action = bodyResult.data;
   const outcome = await db.submitPage(idResult.data, action);
-  if (outcome === 'not_found') return c.json({ error: 'not_found' }, 404);
-  if (outcome === 'conflict') return c.json({ error: 'conflict' }, 409);
+  if (outcome === 'not_found')
+    return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
+  if (outcome === 'conflict')
+    return c.json(
+      {
+        error: 'conflict',
+        message: 'Page was already submitted; create a new page if you need another submission',
+      },
+      409,
+    );
   return c.json({ ok: true });
 };
 
 const getResultHandler = async (c: Context) => {
   const idResult = pageIdSchema.safeParse(c.req.param('id'));
-  if (!idResult.success) return c.json({ error: 'not_found' }, 404);
+  if (!idResult.success)
+    return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
   const r = await db.fetchAndAdvanceResult(idResult.data);
-  if (!r) return c.json({ error: 'not_found' }, 404);
+  if (!r) return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
   return c.json({ state: r.stateAtRead, result: r.result });
 };
 

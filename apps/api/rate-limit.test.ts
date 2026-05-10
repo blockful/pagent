@@ -82,6 +82,9 @@ describe('rate-limits at the configured cap and returns 429', () => {
     expect(body.error).toBe('rate_limited');
     expect(body.retry_after_seconds).toBe(60);
     expect(limited.headers.get('Retry-After')).toBe('60');
+    // message field is present and references the retry delay
+    expect(typeof body.message).toBe('string');
+    expect(body.message as string).toContain('60');
 
     // A different IP should still succeed (201).
     const other = await app.fetch(postNew(ip2));
@@ -112,5 +115,7 @@ describe('falls back to "anonymous" bucket when x-forwarded-for is absent', () =
     const body = await json(limited);
     expect(body.error).toBe('rate_limited');
     expect(body.retry_after_seconds).toBe(60);
+    expect(typeof body.message).toBe('string');
+    expect(body.message as string).toContain('60');
   });
 });

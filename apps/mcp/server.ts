@@ -10,6 +10,23 @@ import { z } from 'zod';
 
 const SERVICE_URL = (process.env.PAGENT_URL ?? 'https://pagent.up.railway.app').replace(/\/$/, '');
 
+/**
+ * Build a short, actionable hint from a structured API error body.
+ * Rate-limit hint takes precedence over size hint (more urgent signal).
+ */
+export function formatRetryHint(body: {
+  retry_after_seconds?: number;
+  max_bytes?: number;
+}): string {
+  if (typeof body.retry_after_seconds === 'number') {
+    return `Retry after ${body.retry_after_seconds}s`;
+  }
+  if (typeof body.max_bytes === 'number') {
+    return `Reduce body to ≤${body.max_bytes} bytes`;
+  }
+  return '';
+}
+
 const server = new McpServer({
   name: 'pagent',
   version: '0.0.1',
@@ -38,7 +55,14 @@ server.registerTool(
       body: JSON.stringify({ spec }),
     });
     if (!res.ok) {
-      throw new Error(`Failed to create page: ${res.status} ${await res.text()}`);
+      const body = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        retry_after_seconds?: number;
+        max_bytes?: number;
+      };
+      const hint = formatRetryHint(body);
+      const message = body?.message ?? `HTTP ${res.status}`;
+      throw new Error(`show_ui failed (${res.status}): ${message}${hint ? `. ${hint}` : ''}`);
     }
     const created = (await res.json()) as { id: string; url: string; expires_at: number };
 
@@ -75,10 +99,19 @@ server.registerTool(
       headers: { accept: 'application/json' },
     });
     if (res.status === 404) {
-      throw new Error(`Page ${page_id} not found (expired or deleted).`);
+      const body = (await res.json().catch(() => ({}))) as { message?: string };
+      const message = body?.message ?? 'Page not found (expired or deleted)';
+      throw new Error(`check_result failed (404): ${message}`);
     }
     if (!res.ok) {
-      throw new Error(`check_result failed: ${res.status} ${await res.text()}`);
+      const body = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        retry_after_seconds?: number;
+        max_bytes?: number;
+      };
+      const hint = formatRetryHint(body);
+      const message = body?.message ?? `HTTP ${res.status}`;
+      throw new Error(`check_result failed (${res.status}): ${message}${hint ? `. ${hint}` : ''}`);
     }
     const body = (await res.json()) as {
       state: 'open' | 'submitted' | 'received';
@@ -101,4 +134,8 @@ server.registerTool(
   },
 );
 
-await server.connect(new StdioServerTransport());
+// Boot guard — only start the stdio transport when run directly (not imported
+// by tests or other modules). Mirrors the pattern in apps/api/server.ts.
+if (import.meta.url === new URL(process.argv[1], import.meta.url).href) {
+  await server.connect(new StdioServerTransport());
+}
