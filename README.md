@@ -168,11 +168,15 @@ Deploy Railway first to get the API URL. Then deploy Vercel with `VITE_API_URL` 
 ## API
 
 ```
-POST   /new                  body: { spec }     -> { id, url, expires_at }
-GET    /:id                                     -> { spec, state, result, expires_at }
-POST   /:id/result           body: <action>     -> { ok }              (browser submits)
-GET    /:id/result                              -> { state, result }   (agent reads, marks "received" on first read)
+POST   /v1/new                  body: { spec }     -> { id, url, expires_at }
+GET    /v1/:id                                     -> { spec, state, result, expires_at }
+POST   /v1/:id/result           body: <action>     -> { ok }              (browser submits)
+GET    /v1/:id/result                              -> { state, result }   (agent reads, marks "received" on first read)
 ```
+
+The unversioned paths (`/new`, `/:id`, `/:id/result`) remain wired to the same
+handlers for the lifetime of the v1 series, but every response carries a
+`Deprecation: true` header. New integrations MUST use `/v1/...`.
 
 The `spec` body is opaque to the service. V0 assumes A2UI v0.9 — there is no `format` tag on the wire.
 
@@ -192,13 +196,13 @@ Or with curl, end-to-end:
 
 ```bash
 # 1. Create a page with a spec.
-curl -s -X POST http://localhost:8787/new \
+curl -s -X POST http://localhost:8787/v1/new \
   -H 'content-type: application/json' \
   -d '{"spec":[{"createSurface":{"surfaceId":"main","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json"}},{"updateComponents":{"surfaceId":"main","components":[{"id":"root","component":"Column","children":["t","f","s"]},{"id":"t","component":"Text","text":"Color?"},{"id":"f","component":"TextField","label":"Color","value":{"path":"/color"}},{"id":"sl","component":"Text","text":"Send"},{"id":"s","component":"Button","child":"sl","variant":"primary","action":{"event":{"name":"submitted","context":{"color":{"path":"/color"}}}}}]}}]}'
 # -> { "id": "<pageId>", "url": "http://localhost:8788/<pageId>", "expires_at": ... }
 
 # 2. Open the URL in a browser and click Send. Then poll:
-curl -s http://localhost:8787/<pageId>/result
+curl -s http://localhost:8787/v1/<pageId>/result
 # -> { "state": "open",      "result": null }       (before submit)
 # -> { "state": "submitted", "result": { ... } }    (first read after submit; flips to received)
 # -> { "state": "received",  "result": { ... } }    (subsequent reads)

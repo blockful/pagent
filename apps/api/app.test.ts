@@ -69,26 +69,28 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /new
+// POST /v1/new
 // ---------------------------------------------------------------------------
 
-describe('POST /new', () => {
+describe('POST /v1/new', () => {
   it('returns 400 on non-JSON body', async () => {
-    const res = await app.fetch(new Request(`${BASE}/new`, { method: 'POST', body: 'not json' }));
+    const res = await app.fetch(
+      new Request(`${BASE}/v1/new`, { method: 'POST', body: 'not json' }),
+    );
     expect(res.status).toBe(400);
     const body = await json(res);
     expect(body.error).toBe('bad_request');
   });
 
   it('returns 400 on {} (no spec key)', async () => {
-    const res = await app.fetch(req('POST', '/new', {}));
+    const res = await app.fetch(req('POST', '/v1/new', {}));
     expect(res.status).toBe(400);
     const body = await json(res);
     expect(body.error).toBe('bad_request');
   });
 
   it('returns 201 with id, url, expires_at on valid body', async () => {
-    const res = await app.fetch(req('POST', '/new', { spec: { anything: 1 } }));
+    const res = await app.fetch(req('POST', '/v1/new', { spec: { anything: 1 } }));
     expect(res.status).toBe(201);
     const body = await json(res);
     expect(body.id).toMatch(/^[a-f0-9]{32}$/);
@@ -97,7 +99,7 @@ describe('POST /new', () => {
   });
 
   it('calls db.insertPage once with state open', async () => {
-    await app.fetch(req('POST', '/new', { spec: { anything: 1 } }));
+    await app.fetch(req('POST', '/v1/new', { spec: { anything: 1 } }));
     expect(db.insertPage).toHaveBeenCalledOnce();
     const [calledPage] = vi.mocked(db.insertPage).mock.calls[0];
     expect(calledPage.state).toBe('open');
@@ -106,7 +108,7 @@ describe('POST /new', () => {
   it('rejects bodies over 256 KB with 413', async () => {
     const body = JSON.stringify({ spec: 'x'.repeat(300_000) });
     const res = await app.fetch(
-      new Request(`${BASE}/new`, {
+      new Request(`${BASE}/v1/new`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body,
@@ -122,7 +124,7 @@ describe('POST /new', () => {
   it('accepts a body just under 256 KB', async () => {
     const body = JSON.stringify({ spec: 'x'.repeat(250_000) });
     const res = await app.fetch(
-      new Request(`${BASE}/new`, {
+      new Request(`${BASE}/v1/new`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body,
@@ -133,25 +135,25 @@ describe('POST /new', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /:id
+// GET /v1/:id
 // ---------------------------------------------------------------------------
 
-describe('GET /:id', () => {
+describe('GET /v1/:id', () => {
   it('returns 404 for unknown valid-format id', async () => {
     // getActivePage already returns null by default
-    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
+    const res = await app.fetch(req('GET', `/v1/${UNKNOWN_ID}`));
     expect(res.status).toBe(404);
   });
 
   it('returns 404 for a malformed id', async () => {
-    const res = await app.fetch(req('GET', `/${BAD_ID}`));
+    const res = await app.fetch(req('GET', `/v1/${BAD_ID}`));
     expect(res.status).toBe(404);
   });
 
   it('returns 200 with spec and state open for an active page', async () => {
     const page = fakePage({ spec: { foo: 'bar' }, state: 'open' });
     (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(page);
-    const res = await app.fetch(req('GET', `/${page.id}`));
+    const res = await app.fetch(req('GET', `/v1/${page.id}`));
     expect(res.status).toBe(200);
     const body = await json(res);
     expect(body.spec).toEqual({ foo: 'bar' });
@@ -161,22 +163,22 @@ describe('GET /:id', () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /:id/result
+// POST /v1/:id/result
 // ---------------------------------------------------------------------------
 
 const validAction = { name: 'clicked', surfaceId: 'main' };
 
-describe('POST /:id/result', () => {
+describe('POST /v1/:id/result', () => {
   it('returns 404 for unknown id', async () => {
     // submitPage returns 'not_found' by default
-    const res = await app.fetch(req('POST', `/${UNKNOWN_ID}/result`, validAction));
+    const res = await app.fetch(req('POST', `/v1/${UNKNOWN_ID}/result`, validAction));
     expect(res.status).toBe(404);
   });
 
   it('returns 200 and calls db.submitPage when page is open', async () => {
     const page = fakePage();
     (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce('ok');
-    const res = await app.fetch(req('POST', `/${page.id}/result`, validAction));
+    const res = await app.fetch(req('POST', `/v1/${page.id}/result`, validAction));
     expect(res.status).toBe(200);
     const body = await json(res);
     expect(body.ok).toBe(true);
@@ -186,7 +188,7 @@ describe('POST /:id/result', () => {
   it('returns 409 on conflict (already submitted)', async () => {
     const page = fakePage({ state: 'submitted' });
     (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce('conflict');
-    const res = await app.fetch(req('POST', `/${page.id}/result`, validAction));
+    const res = await app.fetch(req('POST', `/v1/${page.id}/result`, validAction));
     expect(res.status).toBe(409);
     const body = await json(res);
     expect(body.error).toBe('conflict');
@@ -194,7 +196,9 @@ describe('POST /:id/result', () => {
 
   it('returns 400 for result body with name: "" (empty name)', async () => {
     // Validation happens before db call, so no need to stub submitPage
-    const res = await app.fetch(req('POST', `/${UNKNOWN_ID}/result`, { name: '', surfaceId: 'x' }));
+    const res = await app.fetch(
+      req('POST', `/v1/${UNKNOWN_ID}/result`, { name: '', surfaceId: 'x' }),
+    );
     expect(res.status).toBe(400);
     const body = await json(res);
     expect(body.error).toBe('bad_request');
@@ -202,28 +206,28 @@ describe('POST /:id/result', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /:id/result
+// GET /v1/:id/result
 // ---------------------------------------------------------------------------
 
-describe('GET /:id/result', () => {
+describe('GET /v1/:id/result', () => {
   it('returns 200 with state open and null result before submit', async () => {
     (db.fetchAndAdvanceResult as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       stateAtRead: 'open',
       result: null,
     });
-    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}/result`));
+    const res = await app.fetch(req('GET', `/v1/${UNKNOWN_ID}/result`));
     expect(res.status).toBe(200);
     const body = await json(res);
     expect(body.state).toBe('open');
     expect(body.result).toBeNull();
   });
 
-  it('returns submitted result after POST /:id/result', async () => {
+  it('returns submitted result after POST /v1/:id/result', async () => {
     (db.fetchAndAdvanceResult as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       stateAtRead: 'submitted',
       result: validAction,
     });
-    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}/result`));
+    const res = await app.fetch(req('GET', `/v1/${UNKNOWN_ID}/result`));
     expect(res.status).toBe(200);
     const body = await json(res);
     // stateAtRead captures 'submitted' before flipping to 'received'
@@ -237,15 +241,15 @@ describe('GET /:id/result', () => {
       stateAtRead: 'received',
       result: validAction,
     });
-    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}/result`));
+    const res = await app.fetch(req('GET', `/v1/${UNKNOWN_ID}/result`));
     expect(res.status).toBe(200);
     const body = await json(res);
     expect(body.state).toBe('received');
   });
 
-  it('returns 404 for unknown id on GET /:id/result', async () => {
+  it('returns 404 for unknown id on GET /v1/:id/result', async () => {
     // fetchAndAdvanceResult returns null by default
-    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}/result`));
+    const res = await app.fetch(req('GET', `/v1/${UNKNOWN_ID}/result`));
     expect(res.status).toBe(404);
   });
 });
@@ -309,8 +313,41 @@ describe('security headers', () => {
   });
 
   it('sets headers on error responses too', async () => {
-    const res = await app.fetch(new Request('http://test/new', { method: 'POST' }));
+    const res = await app.fetch(new Request('http://test/v1/new', { method: 'POST' }));
     expect(res.status).toBe(400);
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Deprecation shim
+// ---------------------------------------------------------------------------
+
+describe('deprecation shim', () => {
+  it('unversioned POST /new still works and emits Deprecation header', async () => {
+    const res = await app.fetch(req('POST', '/new', { spec: { anything: 1 } }));
+    expect(res.status).toBe(201);
+    expect(db.insertPage).toHaveBeenCalledOnce();
+    expect(res.headers.get('Deprecation')).toBe('true');
+    const link = res.headers.get('Link') ?? '';
+    expect(link).toContain('rel="successor-version"');
+  });
+
+  it('unversioned GET /:id still works and emits Deprecation header', async () => {
+    const page = fakePage({ spec: { foo: 'bar' }, state: 'open' });
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(page);
+    const res = await app.fetch(req('GET', `/${page.id}`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Deprecation')).toBe('true');
+    const link = res.headers.get('Link') ?? '';
+    expect(link).toContain('rel="successor-version"');
+  });
+
+  it('/v1/... paths do NOT emit Deprecation header', async () => {
+    const page = fakePage({ spec: { foo: 'bar' }, state: 'open' });
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(page);
+    const res = await app.fetch(req('GET', `/v1/${page.id}`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Deprecation')).toBeNull();
   });
 });

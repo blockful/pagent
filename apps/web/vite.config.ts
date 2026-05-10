@@ -14,13 +14,13 @@ export default defineConfig({
     port: CLIENT_PORT,
     strictPort: true,
     proxy: {
-      '/new': { target: API_TARGET, changeOrigin: true },
+      '/v1/new': { target: API_TARGET, changeOrigin: true },
       '/health': { target: API_TARGET, changeOrigin: true },
-      // /:id/result — always API.
-      [`^/${PAGE_ID}/result(?:\\?.*)?$`]: { target: API_TARGET, changeOrigin: true },
-      // /:id — content-negotiated. Browser navigation (Accept: text/html) gets
+      // /v1/:id/result — always API.
+      [`^/v1/${PAGE_ID}/result(?:\\?.*)?$`]: { target: API_TARGET, changeOrigin: true },
+      // /v1/:id — content-negotiated. Browser navigation (Accept: text/html) gets
       // the SPA; fetch() from the renderer (Accept: */*) is proxied to the API.
-      [`^/${PAGE_ID}(?:\\?.*)?$`]: {
+      [`^/v1/${PAGE_ID}(?:\\?.*)?$`]: {
         target: API_TARGET,
         changeOrigin: true,
         bypass(req) {

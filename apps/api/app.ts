@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
-import type { Context } from 'hono';
+import type { Context, Next } from 'hono';
 import { rateLimiter } from 'hono-rate-limiter';
 import { randomBytes } from 'node:crypto';
 import * as db from './db.ts';
@@ -89,6 +89,8 @@ app.use('*', async (c, next) => {
   );
 });
 
+// --- Health (unversioned — ops endpoint, not part of the API contract) -------
+
 app.get('/health', async (c) => {
   try {
     await db.ping();
@@ -99,7 +101,9 @@ app.get('/health', async (c) => {
   }
 });
 
-app.post('/new', newPageLimiter, async (c) => {
+// --- Route handlers (shared between /v1 and compat shim) --------------------
+
+const newPageHandler = async (c: Context) => {
   const raw = await c.req.json().catch(() => null);
   const result = newPageBodySchema.safeParse(raw);
   if (!result.success) {
@@ -116,9 +120,9 @@ app.post('/new', newPageLimiter, async (c) => {
   };
   await db.insertPage(page);
   return c.json({ id: page.id, url: `${PUBLIC_URL}/${page.id}`, expires_at: page.expiresAt }, 201);
-});
+};
 
-app.get('/:id', async (c) => {
+const getPageHandler = async (c: Context) => {
   const idResult = pageIdSchema.safeParse(c.req.param('id'));
   if (!idResult.success) return c.json({ error: 'not_found' }, 404);
   const p = await db.getActivePage(idResult.data);
@@ -129,9 +133,9 @@ app.get('/:id', async (c) => {
     result: p.result,
     expires_at: p.expiresAt,
   });
-});
+};
 
-app.post('/:id/result', async (c) => {
+const submitResultHandler = async (c: Context) => {
   const idResult = pageIdSchema.safeParse(c.req.param('id'));
   if (!idResult.success) return c.json({ error: 'not_found' }, 404);
   const raw = await c.req.json().catch(() => null);
@@ -144,12 +148,34 @@ app.post('/:id/result', async (c) => {
   if (outcome === 'not_found') return c.json({ error: 'not_found' }, 404);
   if (outcome === 'conflict') return c.json({ error: 'conflict' }, 409);
   return c.json({ ok: true });
-});
+};
 
-app.get('/:id/result', async (c) => {
+const getResultHandler = async (c: Context) => {
   const idResult = pageIdSchema.safeParse(c.req.param('id'));
   if (!idResult.success) return c.json({ error: 'not_found' }, 404);
   const r = await db.fetchAndAdvanceResult(idResult.data);
   if (!r) return c.json({ error: 'not_found' }, 404);
   return c.json({ state: r.stateAtRead, result: r.result });
-});
+};
+
+// --- Canonical /v1 routes ----------------------------------------------------
+
+app.post('/v1/new', newPageLimiter, newPageHandler);
+app.get('/v1/:id', getPageHandler);
+app.post('/v1/:id/result', submitResultHandler);
+app.get('/v1/:id/result', getResultHandler);
+
+// --- Deprecation shim: unversioned paths stay wired to the same handlers -----
+// Every response carries Deprecation: true + a Link header pointing at /v1
+// so operators can spot stale callers in logs. No redirect — handler reuse.
+
+const deprecationShim = async (c: Context, next: Next) => {
+  await next();
+  c.header('Deprecation', 'true');
+  c.header('Link', '</v1>; rel="successor-version"');
+};
+
+app.post('/new', deprecationShim, newPageLimiter, newPageHandler);
+app.get('/:id', deprecationShim, getPageHandler);
+app.post('/:id/result', deprecationShim, submitResultHandler);
+app.get('/:id/result', deprecationShim, getResultHandler);

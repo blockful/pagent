@@ -32,7 +32,7 @@ server.registerTool(
     },
   },
   async ({ spec }) => {
-    const res = await fetch(`${SERVICE_URL}/new`, {
+    const res = await fetch(`${SERVICE_URL}/v1/new`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ spec }),
@@ -71,7 +71,7 @@ server.registerTool(
     },
   },
   async ({ page_id }) => {
-    const res = await fetch(`${SERVICE_URL}/${page_id}/result`, {
+    const res = await fetch(`${SERVICE_URL}/v1/${page_id}/result`, {
       headers: { accept: 'application/json' },
     });
     if (res.status === 404) {
