@@ -21,7 +21,7 @@ Each page is single-shot. For the next step in a flow, the agent creates a new p
 
 ## Why it exists
 
-Terminal agents like Claude Code and Cursor can only output text. When a task needs a form, they either fake it in prose or ask you to type structured input by hand. Generative UI frameworks like A2UI and Vercel's streamUI solve the rendering side, but they assume a host app owns the renderer. That breaks when the agent *is* the host: a CLI, an SSH session, an IDE extension in someone else's editor. This service is the shared rendezvous so the agent can hand off a real UI without owning one.
+Terminal agents like Claude Code and Cursor can only output text. When a task needs a form, they either fake it in prose or ask you to type structured input by hand. Generative UI frameworks like A2UI and Vercel's streamUI solve the rendering side, but they assume a host app owns the renderer. That breaks when the agent _is_ the host: a CLI, an SSH session, an IDE extension in someone else's editor. This service is the shared rendezvous so the agent can hand off a real UI without owning one.
 
 ## Stack
 

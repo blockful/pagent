@@ -57,9 +57,7 @@ beforeEach(() => {
 
 describe('POST /new', () => {
   it('returns 400 on non-JSON body', async () => {
-    const res = await app.fetch(
-      new Request(`${BASE}/new`, { method: 'POST', body: 'not json' }),
-    );
+    const res = await app.fetch(new Request(`${BASE}/new`, { method: 'POST', body: 'not json' }));
     expect(res.status).toBe(400);
     const body = await json(res);
     expect(body.error).toBe('bad_request');

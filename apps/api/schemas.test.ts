@@ -3,12 +3,7 @@
  * DATABASE_URL is injected via vitest.config.ts test.env so schemas.ts parses cleanly.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  pageIdSchema,
-  newPageBodySchema,
-  resultBodySchema,
-  envSchema,
-} from './schemas.ts';
+import { pageIdSchema, newPageBodySchema, resultBodySchema, envSchema } from './schemas.ts';
 
 // ---------------------------------------------------------------------------
 // pageIdSchema

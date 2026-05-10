@@ -28,10 +28,23 @@
         --bb-grid-size-4: calc(var(--bb-grid-size) * 4);
         --bb-grid-size-6: calc(var(--bb-grid-size) * 6);
         --font-family: 'Outfit', system-ui, -apple-system, sans-serif;
-        --background: radial-gradient(at 0% 0%, light-dark(rgba(161, 196, 253, 0.3), rgba(6, 182, 212, 0.15)) 0px, transparent 50%),
-          radial-gradient(at 100% 100%, light-dark(rgba(162, 210, 255, 0.3), rgba(20, 184, 166, 0.15)) 0px, transparent 50%);
+        --background:
+          radial-gradient(
+            at 0% 0%,
+            light-dark(rgba(161, 196, 253, 0.3), rgba(6, 182, 212, 0.15)) 0px,
+            transparent 50%
+          ),
+          radial-gradient(
+            at 100% 100%,
+            light-dark(rgba(162, 210, 255, 0.3), rgba(20, 184, 166, 0.15)) 0px,
+            transparent 50%
+          );
       }
-      html, body { margin: 0; height: 100%; }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
       body {
         font-family: var(--font-family);
         background: var(--bg) var(--background) fixed;
@@ -61,16 +74,30 @@
         border-radius: 8px;
         margin: 16px 0;
       }
-      .pending { display: flex; flex-direction: column; gap: 16px; align-items: center; padding: 64px 16px; }
+      .pending {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        align-items: center;
+        padding: 64px 16px;
+      }
       .spinner {
-        width: 40px; height: 40px;
-        border: 4px solid rgba(127,127,127,0.2);
+        width: 40px;
+        height: 40px;
+        border: 4px solid rgba(127, 127, 127, 0.2);
         border-left-color: var(--primary);
         border-radius: 50%;
         animation: spin 1s linear infinite;
       }
-      @keyframes spin { to { transform: rotate(360deg); } }
-      .material-symbols { font-family: 'Material Symbols Outlined', sans-serif; font-variation-settings: 'FILL' 1; }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .material-symbols {
+        font-family: 'Material Symbols Outlined', sans-serif;
+        font-variation-settings: 'FILL' 1;
+      }
     </style>
   </head>
   <body>

@@ -13,15 +13,30 @@ The `spec` is an array of A2UI v0.9 messages: one `createSurface`, then `updateC
 
 ```json
 [
-  { "createSurface": { "surfaceId": "main", "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json" } },
-  { "updateComponents": { "surfaceId": "main", "components": [
-    { "id": "root", "component": "Column", "children": ["title", "field", "submit"] },
-    { "id": "title", "component": "Text", "text": "What's your name?" },
-    { "id": "field", "component": "TextField", "label": "Name", "value": { "path": "/name" } },
-    { "id": "submit-label", "component": "Text", "text": "Submit" },
-    { "id": "submit", "component": "Button", "child": "submit-label", "variant": "primary",
-      "action": { "event": { "name": "submitted", "context": { "name": { "path": "/name" } } } } }
-  ] } }
+  {
+    "createSurface": {
+      "surfaceId": "main",
+      "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json"
+    }
+  },
+  {
+    "updateComponents": {
+      "surfaceId": "main",
+      "components": [
+        { "id": "root", "component": "Column", "children": ["title", "field", "submit"] },
+        { "id": "title", "component": "Text", "text": "What's your name?" },
+        { "id": "field", "component": "TextField", "label": "Name", "value": { "path": "/name" } },
+        { "id": "submit-label", "component": "Text", "text": "Submit" },
+        {
+          "id": "submit",
+          "component": "Button",
+          "child": "submit-label",
+          "variant": "primary",
+          "action": { "event": { "name": "submitted", "context": { "name": { "path": "/name" } } } }
+        }
+      ]
+    }
+  }
 ]
 ```
 

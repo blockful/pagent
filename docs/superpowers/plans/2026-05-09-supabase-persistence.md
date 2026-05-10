@@ -32,6 +32,7 @@
 ## Task 1: Project setup — dependency, env template, type extraction
 
 **Files:**
+
 - Modify: `package.json`
 - Create: `.env.example`
 - Create: `types.ts`
@@ -117,6 +118,7 @@ git commit -m "chore(db): extract types, add postgres dep, env template"
 ## Task 2: Schema migration
 
 **Files:**
+
 - Create: `db/init.sql`
 
 - [ ] **Step 1: Create the schema file**
@@ -164,6 +166,7 @@ psql "$DATABASE_URL" -f db/init.sql
 If `psql` isn't installed, paste the contents of `db/init.sql` into the Supabase SQL editor (Project → SQL Editor → New query → Run).
 
 Expected output (psql):
+
 ```
 CREATE TABLE
 CREATE INDEX
@@ -190,6 +193,7 @@ git commit -m "feat(db): schema for sessions + session_events"
 ## Task 3: `db.ts` foundations — init, shutdown, ping
 
 **Files:**
+
 - Create: `db.ts`
 - Create: `db.test.ts`
 
@@ -275,6 +279,7 @@ git commit -m "feat(db): init/shutdown with connection ping"
 ## Task 4: `db.ts` — `insertSession`, `deleteSession`, `touchExpiry`
 
 **Files:**
+
 - Modify: `db.ts`
 - Modify: `db.test.ts`
 
@@ -385,6 +390,7 @@ git commit -m "feat(db): insertSession, touchExpiry, deleteSession"
 ## Task 5: `db.ts` — `updateSurface` and `appendEvent`
 
 **Files:**
+
 - Modify: `db.ts`
 - Modify: `db.test.ts`
 
@@ -399,17 +405,27 @@ test('updateSurface + appendEvent + cascade delete', async () => {
   const now = Date.now();
 
   await db.insertSession({
-    id, createdAt: now, expiresAt: now + 60_000,
-    surface: null, events: [], waiters: new Set(),
+    id,
+    createdAt: now,
+    expiresAt: now + 60_000,
+    surface: null,
+    events: [],
+    waiters: new Set(),
   });
 
   await db.updateSurface(id, 'a2ui-v0.9', { hello: 'world' });
   await db.appendEvent(id, {
-    id: 1, type: 'surface_updated', format: 'a2ui-v0.9',
-    spec: { hello: 'world' }, ts: now,
+    id: 1,
+    type: 'surface_updated',
+    format: 'a2ui-v0.9',
+    spec: { hello: 'world' },
+    ts: now,
   });
   await db.appendEvent(id, {
-    id: 2, type: 'user_action', action: { name: 'submit', value: 42 }, ts: now + 100,
+    id: 2,
+    type: 'user_action',
+    action: { name: 'submit', value: 42 },
+    ts: now + 100,
   });
 
   const [s] = await c<Array<{ surface_format: string; surface_spec: { hello: string } }>>`
@@ -506,6 +522,7 @@ git commit -m "feat(db): updateSurface and appendEvent"
 ## Task 6: `db.ts` — `loadActiveSessions`
 
 **Files:**
+
 - Modify: `db.ts`
 - Modify: `db.test.ts`
 
@@ -522,20 +539,35 @@ test('loadActiveSessions rehydrates surface + events, skips expired', async () =
   const now = Date.now();
 
   await db.insertSession({
-    id: live, createdAt: now, expiresAt: now + 60_000,
-    surface: null, events: [], waiters: new Set(),
+    id: live,
+    createdAt: now,
+    expiresAt: now + 60_000,
+    surface: null,
+    events: [],
+    waiters: new Set(),
   });
   await db.updateSurface(live, 'a2ui-v0.9', { kind: 'form' });
   await db.appendEvent(live, {
-    id: 1, type: 'surface_updated', format: 'a2ui-v0.9', spec: { kind: 'form' }, ts: now,
+    id: 1,
+    type: 'surface_updated',
+    format: 'a2ui-v0.9',
+    spec: { kind: 'form' },
+    ts: now,
   });
   await db.appendEvent(live, {
-    id: 2, type: 'user_action', action: { name: 'ok' }, ts: now + 50,
+    id: 2,
+    type: 'user_action',
+    action: { name: 'ok' },
+    ts: now + 50,
   });
 
   await db.insertSession({
-    id: dead, createdAt: now - 120_000, expiresAt: now - 60_000,
-    surface: null, events: [], waiters: new Set(),
+    id: dead,
+    createdAt: now - 120_000,
+    expiresAt: now - 60_000,
+    surface: null,
+    events: [],
+    waiters: new Set(),
   });
 
   const map = new Map<string, Session>();
@@ -605,9 +637,7 @@ export async function loadActiveSessions(into: Map<string, Session>): Promise<vo
       id: r.id,
       createdAt: r.created_at.getTime(),
       expiresAt: r.expires_at.getTime(),
-      surface: r.surface_format
-        ? { format: r.surface_format, spec: r.surface_spec }
-        : null,
+      surface: r.surface_format ? { format: r.surface_format, spec: r.surface_spec } : null,
       events: events.map(reconstructEvent),
       waiters: new Set(),
     });
@@ -618,7 +648,8 @@ function reconstructEvent(e: EventRow): SessionEvent {
   const base = { id: e.id, ts: e.ts.getTime() };
   if (e.type === 'surface_updated') {
     return {
-      ...base, type: 'surface_updated',
+      ...base,
+      type: 'surface_updated',
       format: e.payload.format as string,
       spec: e.payload.spec,
     };
@@ -650,6 +681,7 @@ git commit -m "feat(db): loadActiveSessions rehydrates Map at boot"
 ## Task 7: Wire `db.ts` into `server.ts` boot path
 
 **Files:**
+
 - Modify: `server.ts` (boot block at the bottom + new shutdown handlers)
 
 - [ ] **Step 1: Import `db` and read `DATABASE_URL`**
@@ -702,6 +734,7 @@ npm run dev:server
 ```
 
 Expected output:
+
 ```
 rehydrated 0 session(s) from db
 agent-ui-session listening on http://localhost:8787 (port 8787)
@@ -729,6 +762,7 @@ git commit -m "feat(server): db.init + rehydrate on boot, graceful shutdown"
 ## Task 8: Wire write-through into the four mutating handlers + TTL sweep
 
 **Files:**
+
 - Modify: `server.ts` (the four route handlers + the periodic sweep)
 
 - [ ] **Step 1: `POST /sessions` — write-through on create**
@@ -746,21 +780,24 @@ app.post('/sessions', async (c) => {
 
 - [ ] **Step 2: `PUT /sessions/:id/surface` — write-through on surface update**
 
-Find the existing handler (around lines 95-106). Replace the body of the success path so the DB writes happen *before* in-memory mutation. Final handler:
+Find the existing handler (around lines 95-106). Replace the body of the success path so the DB writes happen _before_ in-memory mutation. Final handler:
 
 ```ts
 app.put('/sessions/:id/surface', async (c) => {
   const s = sessions.get(c.req.param('id'));
   if (!s || isExpired(s)) return c.json({ error: 'not_found' }, 404);
-  const body = await c.req.json().catch(() => null) as { format?: string; spec?: unknown } | null;
+  const body = (await c.req.json().catch(() => null)) as { format?: string; spec?: unknown } | null;
   if (!body || typeof body.format !== 'string' || body.spec === undefined) {
     return c.json({ error: 'bad_request', detail: 'expected { format, spec }' }, 400);
   }
   const nextExpiry = Date.now() + TTL_MS;
   const evId = s.events.length + 1;
   const ev = {
-    id: evId, type: 'surface_updated' as const,
-    format: body.format, spec: body.spec, ts: Date.now(),
+    id: evId,
+    type: 'surface_updated' as const,
+    format: body.format,
+    spec: body.spec,
+    ts: Date.now(),
   };
 
   await db.updateSurface(s.id, body.format, body.spec);
@@ -791,8 +828,10 @@ app.post('/sessions/:id/actions', async (c) => {
 
   const nextExpiry = Date.now() + TTL_MS;
   const ev = {
-    id: s.events.length + 1, type: 'user_action' as const,
-    action, ts: Date.now(),
+    id: s.events.length + 1,
+    type: 'user_action' as const,
+    action,
+    ts: Date.now(),
   };
 
   await db.appendEvent(s.id, ev);
@@ -816,7 +855,8 @@ app.delete('/sessions/:id', async (c) => {
   if (!s) return c.json({ error: 'not_found' }, 404);
 
   const ev = {
-    id: s.events.length + 1, type: 'session_closed' as const,
+    id: s.events.length + 1,
+    type: 'session_closed' as const,
     ts: Date.now(),
   };
   await db.appendEvent(s.id, ev);
@@ -939,6 +979,7 @@ curl -s "http://localhost:8787/sessions/$SID/events?since=0" | python3 -m json.t
 ```
 
 Expected:
+
 - `GET /sessions/:id` returns the same surface (`kind: "persisted"`) and `cursor: 2`.
 - `GET /events?since=0` returns the original two events (`surface_updated` then `user_action`).
 
@@ -975,13 +1016,14 @@ Otherwise nothing to commit.
 ## Task 10: Update the README and finalize
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Add a "Database" section to the README**
 
 Add after the existing "Quick start" section (read the current README first to match its tone):
 
-```markdown
+````markdown
 ## Database
 
 V1 uses Supabase Postgres for durability. Sessions and the event log
@@ -992,24 +1034,26 @@ survive restarts.
    ```bash
    psql "$DATABASE_URL" -f db/init.sql
    ```
-   Or paste `db/init.sql` into the Supabase SQL editor.
-3. Copy `.env.example` to `.env` and fill in `DATABASE_URL` (use the
-   **Session pooler** connection string on port 5432).
-4. Run the integration tests:
-   ```bash
-   npm test
-   ```
+````
+
+Or paste `db/init.sql` into the Supabase SQL editor. 3. Copy `.env.example` to `.env` and fill in `DATABASE_URL` (use the
+**Session pooler** connection string on port 5432). 4. Run the integration tests:
+
+```bash
+npm test
+```
 
 See `docs/superpowers/specs/2026-05-09-supabase-persistence-design.md`
 for the full design.
-```
+
+````
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add README.md
 git commit -m "docs(readme): supabase setup instructions"
-```
+````
 
 ---
 
