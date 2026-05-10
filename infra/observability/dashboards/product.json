@@ -1,0 +1,104 @@
+{
+  "uid": "pagent-product",
+  "title": "Pagent — Product",
+  "tags": ["pagent", "product"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Pages created (1h / 24h / 7d)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 18, "x": 0, "y": 0 },
+      "options": { "textMode": "value_and_name", "colorMode": "value" },
+      "targets": [
+        { "expr": "sum(increase(pagent_pages_created_total[1h]))",  "legendFormat": "1h",  "refId": "A" },
+        { "expr": "sum(increase(pagent_pages_created_total[24h]))", "legendFormat": "24h", "refId": "B" },
+        { "expr": "sum(increase(pagent_pages_created_total[7d]))",  "legendFormat": "7d",  "refId": "C" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "barchart",
+      "title": "Submitted vs abandoned (24h)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "options": { "stacking": { "mode": "normal" } },
+      "targets": [
+        { "expr": "sum(increase(pagent_pages_submitted_total[24h]))", "legendFormat": "submitted", "refId": "A" },
+        { "expr": "sum(increase(pagent_pages_abandoned_total[24h]))", "legendFormat": "abandoned", "refId": "B" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Submission rate (per 5m)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        { "expr": "rate(pagent_pages_submitted_total[5m])", "legendFormat": "submissions/s", "refId": "A" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "heatmap",
+      "title": "Time-to-submit distribution",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "sum by (le) (rate(pagent_page_submit_latency_seconds_bucket[5m]))",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Conversion (24h)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 14 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 60 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "background" },
+      "targets": [
+        {
+          "expr": "100 * sum(increase(pagent_pages_submitted_total[24h])) / clamp_min(sum(increase(pagent_pages_submitted_total[24h])) + sum(increase(pagent_pages_abandoned_total[24h])), 1)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "In-flight (rough)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 14 },
+      "options": { "colorMode": "value" },
+      "targets": [
+        {
+          "expr": "clamp_min(sum(pagent_pages_created_total) - sum(pagent_pages_submitted_total) - sum(pagent_pages_abandoned_total), 0)",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

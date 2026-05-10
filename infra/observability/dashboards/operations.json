@@ -1,0 +1,144 @@
+{
+  "uid": "pagent-operations",
+  "title": "Pagent — Operations",
+  "tags": ["pagent", "sre"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Service status",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" } } },
+            { "type": "value", "options": { "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }] }
+        }
+      },
+      "targets": [
+        {
+          "expr": "(sum(rate(http_server_requests_total[2m])) > 0) * 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Request rate by route (req/s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        {
+          "expr": "sum by (route) (rate(http_server_requests_total[1m]))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Error rate (%) by route",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "percent" } },
+      "targets": [
+        {
+          "expr": "100 * sum by (route) (rate(http_server_requests_total{status_class=\"4xx\"}[5m])) / sum by (route) (rate(http_server_requests_total[5m]))",
+          "legendFormat": "{{route}} 4xx",
+          "refId": "A"
+        },
+        {
+          "expr": "100 * sum by (route) (rate(http_server_requests_total{status_class=\"5xx\"}[5m])) / sum by (route) (rate(http_server_requests_total[5m]))",
+          "legendFormat": "{{route}} 5xx",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Latency p50 / p95 / p99 by route (s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, route) (rate(http_server_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{route}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_server_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{route}} p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, route) (rate(http_server_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{route}} p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Rate-limit hits (429/s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        {
+          "expr": "sum (rate(http_server_requests_total{status_code=\"429\"}[1m]))",
+          "legendFormat": "429s/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "logs",
+      "title": "Recent error logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true },
+      "targets": [
+        {
+          "expr": "{service_name=\"pagent-api\"} | json | level=~\"error|warn\"",
+          "refId": "A",
+          "maxLines": 50
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "DB query p95 (s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service_name=\"pagent-api\", span_name=~\"pg.*|postgres.*\"}[5m])))",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}
