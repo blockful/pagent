@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { randomBytes } from 'node:crypto';
 import * as db from './db.ts';
@@ -16,6 +17,8 @@ export const PUBLIC_URL =
   (env.RAILWAY_ENVIRONMENT ? 'https://pagent.vercel.app' : `http://localhost:${PORT}`);
 export const PAGE_TTL_MS = env.PAGE_TTL_MS;
 export const ALLOWED_ORIGINS = env.ALLOWED_ORIGINS;
+
+export const MAX_BODY_BYTES = 256 * 1024; // 256 KB
 
 export const pages = new Map<string, Page>();
 
@@ -52,6 +55,14 @@ setInterval(() => {
 
 export const app = new Hono();
 app.use('*', cors({ origin: ALLOWED_ORIGINS ?? '*' }));
+
+app.use(
+  '*',
+  bodyLimit({
+    maxSize: MAX_BODY_BYTES,
+    onError: (c) => c.json({ error: 'payload_too_large', max_bytes: MAX_BODY_BYTES }, 413),
+  }),
+);
 
 app.use('*', async (c, next) => {
   const start = Date.now();

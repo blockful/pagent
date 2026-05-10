@@ -17,7 +17,7 @@ vi.mock('./db.ts', () => ({
 }));
 
 import * as db from './db.ts';
-import { app, pages } from './app.ts';
+import { app, pages, MAX_BODY_BYTES } from './app.ts';
 
 // A valid 32-char hex id that has never been inserted.
 const UNKNOWN_ID = 'deadbeefdeadbeefdeadbeefdeadbeef';
@@ -84,6 +84,34 @@ describe('POST /new', () => {
     expect(db.insertPage).toHaveBeenCalledOnce();
     const [calledPage] = vi.mocked(db.insertPage).mock.calls[0];
     expect(calledPage.state).toBe('open');
+  });
+
+  it('rejects bodies over 256 KB with 413', async () => {
+    const body = JSON.stringify({ spec: 'x'.repeat(300_000) });
+    const res = await app.fetch(
+      new Request(`${BASE}/new`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      }),
+    );
+    expect(res.status).toBe(413);
+    const resBody = await json(res);
+    expect(resBody.error).toBe('payload_too_large');
+    expect(resBody.max_bytes).toBe(MAX_BODY_BYTES);
+    expect(db.insertPage).not.toHaveBeenCalled();
+  });
+
+  it('accepts a body just under 256 KB', async () => {
+    const body = JSON.stringify({ spec: 'x'.repeat(250_000) });
+    const res = await app.fetch(
+      new Request(`${BASE}/new`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      }),
+    );
+    expect(res.status).toBe(201);
   });
 });
 
