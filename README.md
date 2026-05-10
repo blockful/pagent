@@ -163,13 +163,12 @@ The web app falls back to relative paths when `VITE_API_URL` is unset, so dev (`
 
 #### Security headers
 
-The renderer ships with a strict Content-Security-Policy plus
-HSTS / nosniff / frame-deny / referrer-policy / permissions-policy
-configured in `apps/web/vercel.json`. The CSP `connect-src` allowlist
-includes the production API origin (`pagent.up.railway.app`). If you
-self-host the API at a different origin, edit that entry before
-deploying — otherwise the browser will block API calls from the
-renderer.
+The renderer derives its strict Content-Security-Policy from
+`VITE_API_URL` at build time and injects it as a `<meta>` tag in
+`index.html`. Self-hosters at a different API origin only need to
+set `VITE_API_URL` correctly when deploying to Vercel — no source
+edit required. HSTS / nosniff / frame-deny / referrer-policy /
+permissions-policy are set as HTTP headers via `apps/web/vercel.json`.
 
 ### Order matters
 
