@@ -9,8 +9,9 @@ COPY provisioning/ /etc/grafana/provisioning/
 COPY dashboards/   /var/lib/grafana/dashboards/
 
 # All persistent state lives under /data — Grafana, Tempo, Loki, Prometheus.
-# Mount a Railway volume here or every redeploy wipes dashboards/data.
-VOLUME /data
+# Railway forbids Dockerfile VOLUME directives; mount a Railway Volume at /data
+# via the dashboard or `railway volume add --mount-path /data` instead, or every
+# redeploy wipes dashboards/data.
 
 # 3000 = Grafana UI, 4317 = OTLP gRPC, 4318 = OTLP HTTP.
 EXPOSE 3000 4317 4318
