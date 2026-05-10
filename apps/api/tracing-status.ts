@@ -1,9 +1,16 @@
-// Pure helpers for describing the tracing configuration at boot time.
+// Pure helpers for describing the OpenTelemetry configuration at boot time.
 // Kept in a separate file so they can be unit-tested without loading the
 // OpenTelemetry SDK or any other side-effectful module.
 
+export type TelemetrySignal = 'traces' | 'metrics' | 'logs';
+
 export type TracingStatus =
-  | { enabled: true; endpoint: string; serviceName: string }
+  | {
+      enabled: true;
+      endpoint: string;
+      serviceName: string;
+      signals: TelemetrySignal[];
+    }
   | { enabled: false; reason: string };
 
 type TracingEnv = {
@@ -23,12 +30,13 @@ export function describeTracing(env: TracingEnv): TracingStatus {
     enabled: true,
     endpoint,
     serviceName: env.OTEL_SERVICE_NAME ?? 'pagent-api',
+    signals: ['traces', 'metrics', 'logs'],
   };
 }
 
 export function tracingBootLog(status: TracingStatus): string {
   if (status.enabled) {
-    return `[tracing] enabled — service=${status.serviceName} endpoint=${status.endpoint}`;
+    return `[tracing] enabled — service=${status.serviceName} signals=${status.signals.join(',')} endpoint=${status.endpoint}`;
   }
   return `[tracing] disabled — ${status.reason}`;
 }

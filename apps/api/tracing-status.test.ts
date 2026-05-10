@@ -16,6 +16,7 @@ describe('describeTracing', () => {
     if (status.enabled) {
       expect(status.endpoint).toBe('https://x.example/otlp');
       expect(status.serviceName).toBe('pagent-api');
+      expect(status.signals).toEqual(['traces', 'metrics', 'logs']);
     }
   });
 
@@ -32,15 +33,17 @@ describe('describeTracing', () => {
 });
 
 describe('tracingBootLog', () => {
-  it('produces a one-line enabled message containing endpoint and service name', () => {
+  it('produces a one-line enabled message containing endpoint, service name, and signals', () => {
     const line = tracingBootLog({
       enabled: true,
       endpoint: 'https://x.example/otlp',
       serviceName: 'pagent-api-test',
+      signals: ['traces', 'metrics', 'logs'],
     });
     expect(line).toContain('enabled');
     expect(line).toContain('https://x.example/otlp');
     expect(line).toContain('pagent-api-test');
+    expect(line).toContain('signals=traces,metrics,logs');
     expect(line.split('\n').length).toBe(1);
   });
 
