@@ -11,9 +11,21 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { registerPagentTools, type PageOps } from '../api/mcp/tools.ts';
 
-const envSchema = z.object({
-  PAGENT_URL: z.string().url('PAGENT_URL must be a valid URL').optional(),
-});
+// Empty strings (set by some shells / launchers when a var is "unset") need
+// to be normalised to undefined before .url().optional() runs.
+const envSchema = z.preprocess(
+  (raw) => {
+    if (typeof raw !== 'object' || raw === null) return raw;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      out[k] = v === '' ? undefined : v;
+    }
+    return out;
+  },
+  z.object({
+    PAGENT_URL: z.string().url('PAGENT_URL must be a valid URL').optional(),
+  }),
+);
 
 let env: z.infer<typeof envSchema>;
 try {

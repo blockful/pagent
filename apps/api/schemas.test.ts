@@ -225,4 +225,31 @@ describe('envSchema', () => {
     const r = envSchema.safeParse({ DATABASE_URL: 'x', NODE_ENV: 'development' });
     expect(r.success).toBe(true);
   });
+
+  // Regression: Railway/Nixpacks pass unset env vars to Node as "" rather than
+  // omitting them. A previous schema rejected NODE_ENV="" as an invalid enum,
+  // crash-looping the API on every Railway boot.
+  it('treats empty-string NODE_ENV as unset', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'x', NODE_ENV: '' });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.NODE_ENV).toBeUndefined();
+  });
+
+  it('treats empty-string LOG_LEVEL as unset', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'x', LOG_LEVEL: '' });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.LOG_LEVEL).toBeUndefined();
+  });
+
+  it('treats empty-string PUBLIC_URL as unset (would otherwise fail .url())', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'x', PUBLIC_URL: '' });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.PUBLIC_URL).toBeUndefined();
+  });
+
+  it('treats empty-string PORT as unset and falls back to default', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'x', PORT: '' });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.PORT).toBe(8787);
+  });
 });

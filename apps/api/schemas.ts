@@ -24,52 +24,67 @@ export const resultBodySchema = z
 
 // --- Environment -------------------------------------------------------------
 
-export const envSchema = z
-  .object({
-    DATABASE_URL: z.string().min(1),
-    PORT: z.coerce.number().optional().default(8787),
-    PUBLIC_URL: z.string().url().optional(),
-    PAGE_TTL_MS: z.coerce.number().optional().default(1_800_000),
-    ALLOWED_ORIGINS: z
-      .string()
-      .optional()
-      .transform((v) =>
-        v
-          ? v
-              .split(',')
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : undefined,
-      ),
-    OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
-    OTEL_EXPORTER_OTLP_HEADERS: z.string().optional(),
-    OTEL_SERVICE_NAME: z.string().optional(),
-    NODE_ENV: z.enum(['development', 'production', 'test']).optional(),
-    LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).optional(),
-    RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
-    RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
-  })
-  .superRefine((cfg, ctx) => {
-    if (
-      cfg.NODE_ENV === 'production' &&
-      (!cfg.ALLOWED_ORIGINS || cfg.ALLOWED_ORIGINS.length === 0)
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['ALLOWED_ORIGINS'],
-        message:
-          'ALLOWED_ORIGINS is required in production. Set it to a comma-separated list of origins permitted to call the API (e.g. https://pagent.vercel.app).',
-      });
-    }
-    if (cfg.NODE_ENV === 'production' && !cfg.PUBLIC_URL) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['PUBLIC_URL'],
-        message:
-          'PUBLIC_URL is required in production. Set it to the renderer URL (e.g. https://pagent.vercel.app).',
-      });
-    }
-  });
+// Railway, Nixpacks, and various CI runners set unset vars as empty strings
+// rather than leaving them undefined. Treat "" as "not set" so .optional()
+// behaves how callers expect (otherwise enum/url/coerce.number all reject "").
+const stripEmptyStrings = (raw: unknown): unknown => {
+  if (typeof raw !== 'object' || raw === null) return raw;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    out[k] = v === '' ? undefined : v;
+  }
+  return out;
+};
+
+export const envSchema = z.preprocess(
+  stripEmptyStrings,
+  z
+    .object({
+      DATABASE_URL: z.string().min(1),
+      PORT: z.coerce.number().optional().default(8787),
+      PUBLIC_URL: z.string().url().optional(),
+      PAGE_TTL_MS: z.coerce.number().optional().default(1_800_000),
+      ALLOWED_ORIGINS: z
+        .string()
+        .optional()
+        .transform((v) =>
+          v
+            ? v
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean)
+            : undefined,
+        ),
+      OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
+      OTEL_EXPORTER_OTLP_HEADERS: z.string().optional(),
+      OTEL_SERVICE_NAME: z.string().optional(),
+      NODE_ENV: z.enum(['development', 'production', 'test']).optional(),
+      LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).optional(),
+      RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
+      RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+    })
+    .superRefine((cfg, ctx) => {
+      if (
+        cfg.NODE_ENV === 'production' &&
+        (!cfg.ALLOWED_ORIGINS || cfg.ALLOWED_ORIGINS.length === 0)
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['ALLOWED_ORIGINS'],
+          message:
+            'ALLOWED_ORIGINS is required in production. Set it to a comma-separated list of origins permitted to call the API (e.g. https://pagent.vercel.app).',
+        });
+      }
+      if (cfg.NODE_ENV === 'production' && !cfg.PUBLIC_URL) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['PUBLIC_URL'],
+          message:
+            'PUBLIC_URL is required in production. Set it to the renderer URL (e.g. https://pagent.vercel.app).',
+        });
+      }
+    }),
+);
 
 export type Env = z.infer<typeof envSchema>;
 
