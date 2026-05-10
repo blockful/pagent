@@ -6,7 +6,7 @@ import { basicCatalog } from '@a2ui/lit/v0_9';
 import '@a2ui/lit/v0_9'; // registers <a2ui-surface>
 import './home'; // registers <home-page>
 import { assertCatalogsAllowed } from './spec-guard.js';
-import { nextPollDelay } from './poll-backoff.js';
+import { nextPollDelay, pollTimeoutMessage } from './poll-backoff.js';
 
 /** Hard-coded allowlist of catalog URLs the renderer is permitted to use. */
 const ALLOWED_CATALOG_IDS = [basicCatalog.id] as const;
@@ -36,6 +36,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
     error: { state: true },
     awaiting: { state: true },
     awaitingMessage: { state: true },
+    awaitingStalled: { state: true },
   };
 
   static styles = css`
@@ -135,12 +136,21 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       margin-right: auto;
       animation: fadeIn 0.25s ease-out;
     }
+    .awaiting-banner.is-stalled {
+      background: light-dark(rgba(255, 245, 230, 0.95), rgba(60, 40, 20, 0.85));
+      color: light-dark(#7a4a00, #f6c89f);
+    }
+    .material-symbols {
+      font-family: 'Material Symbols Outlined', sans-serif;
+      font-variation-settings: 'FILL' 1;
+    }
   `;
 
   declare status: 'connecting' | 'live' | 'closed' | 'error';
   declare error: string | null;
   declare awaiting: boolean;
   declare awaitingMessage: string;
+  declare awaitingStalled: boolean;
 
   constructor() {
     super();
@@ -148,6 +158,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
     this.error = null;
     this.awaiting = false;
     this.awaitingMessage = 'Sent — waiting for the agent…';
+    this.awaitingStalled = false;
   }
 
   private processor = new v0_9.MessageProcessor(
@@ -258,10 +269,16 @@ class AgentUIApp extends SignalWatcher(LitElement) {
   private startPollingForReceived() {
     this.stopPolling();
     this.pollDeadline = Date.now() + POLL_TIMEOUT_MS;
+    this.awaitingStalled = false;
 
     const tick = async (delay: number) => {
       this.pollTimer = null;
-      if (!this.isConnected || Date.now() >= this.pollDeadline) return;
+      if (!this.isConnected) return;
+      if (Date.now() >= this.pollDeadline) {
+        this.awaitingMessage = pollTimeoutMessage();
+        this.awaitingStalled = true;
+        return;
+      }
       try {
         const res = await fetch(`${API_BASE}/v1/${pageId}`, {
           headers: { accept: 'application/json' },
@@ -309,8 +326,14 @@ class AgentUIApp extends SignalWatcher(LitElement) {
     }
     return html`<section id="surfaces" class="surface-wrap ${this.awaiting ? 'is-awaiting' : ''}">
       ${this.awaiting
-        ? html`<div class="awaiting-banner" role="status" aria-live="polite">
-            <div class="small-spinner"></div>
+        ? html`<div
+            class="awaiting-banner ${this.awaitingStalled ? 'is-stalled' : ''}"
+            role="status"
+            aria-live="polite"
+          >
+            ${this.awaitingStalled
+              ? html`<span class="material-symbols" aria-hidden="true">info</span>`
+              : html`<div class="small-spinner"></div>`}
             <span>${this.awaitingMessage}</span>
           </div>`
         : nothing}
