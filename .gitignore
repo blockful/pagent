@@ -1,7 +1,10 @@
 node_modules
 dist
 .env
-.env.local
+.env.*
+!.env.example
+production.env
+*.production.env
 .DS_Store
 *.log
 .playwright-mcp/
