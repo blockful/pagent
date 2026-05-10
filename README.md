@@ -52,11 +52,12 @@ apps/
 │   ├── vercel.json
 │   └── .env.example
 └── mcp/                             # stdio MCP server: show_ui + check_result
-    ├── server.ts
+    ├── server.ts                     # source
+    ├── server.bundle.js              # esbuild output, shipped to plugin users
     └── smoke.mjs
-skills/pagent/SKILL.md               # drop-in skill teaching the polling pattern
-.claude-plugin/plugin.json           # Claude Code plugin manifest
-.mcp.json                            # plugin's MCP server registration
+skills/pagent/SKILL.md                # drop-in skill teaching the polling pattern
+.claude-plugin/plugin.json            # Claude Code plugin manifest
+.mcp.json                             # plugin's MCP server registration
 ```
 
 The repo doubles as a Claude Code plugin and a self-hosted marketplace: `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `skills/`, and `.mcp.json` at the repo root make it installable from GitHub with two slash commands. The skill stays at the root because Claude Code's plugin loader looks for `skills/` next to `.claude-plugin/`, even though the skill conceptually belongs to `apps/mcp/`.
@@ -71,6 +72,8 @@ The repo doubles as a Claude Code plugin and a self-hosted marketplace: `.claude
 /plugin marketplace add blockful/pagent
 /plugin install pagent@pagent
 ```
+
+The MCP server ships pre-bundled (`apps/mcp/server.bundle.js`), so there's no `npm install` step on your side — Claude Code can spawn it directly.
 
 **2. Verify** — confirm the MCP server is connected:
 
@@ -95,6 +98,7 @@ git clone git@github.com:blockful/pagent.git
 cd pagent
 npm install                         # workspaces install for all three apps
 npm run dev                         # API on :8787, renderer on :8788
+npm run build:mcp                   # rebuild apps/mcp/server.bundle.js after editing server.ts
 ```
 
 Open `http://localhost:8788/<page_id>` to view a page. To use the local API from a Claude session, install the plugin from the local checkout instead of the marketplace:
