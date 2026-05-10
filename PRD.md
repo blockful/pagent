@@ -39,25 +39,29 @@ sequenceDiagram
   participant S as agent-ui-session service
   participant U as User (browser)
 
-  A->>S: POST /pages { spec }
+  A->>S: POST /new { spec }
   S-->>A: { id, url, expires_at }
   Note over A: print URL to terminal
 
-  A->>S: GET /pages/:id/result?wait=25
-  Note over A: blocked, long-polling
+  loop poll until result lands or agent gives up
+    A->>S: GET /:id/result
+    S-->>A: { state: "open", result: null }
+    Note over A: do other work / wait, retry
+  end
 
   U->>S: open URL
   S-->>U: static renderer page
-  U->>S: GET /pages/:id
+  U->>S: GET /:id
   S-->>U: { spec, state: "open", result: null }
   U->>U: render surface, await input
 
-  U->>S: POST /pages/:id/result { ...action }
+  U->>S: POST /:id/result { ...action }
   S-->>U: { ok }
   Note over S: state: open → submitted
   Note over U: surface visually locked
 
-  S-->>A: { result: { ...action } }
+  A->>S: GET /:id/result
+  S-->>A: { state: "submitted", result: { ...action } }
   Note over S: state: submitted → received
   Note over A: agent processes the result
 
@@ -85,14 +89,14 @@ sequenceDiagram
 ### Single-shot lifecycle
 
 A page is **single-use**. The user fills the form (or clicks the button)
-once; the moment that `POST /pages/:id/result` lands, the page is
+once; the moment that `POST /:id/result` lands, the page is
 considered consumed:
 
 - The renderer optimistically locks the UI: a banner appears
   ("Sent — waiting for the agent…"), inputs become aria-disabled,
   and any further submissions on that page are dropped client-side.
-- The result is now the agent's to pick up. The agent's pending
-  `GET /pages/:id/result?wait=N` resolves with the action.
+- The result is the agent's to pick up on its next poll of
+  `GET /:id/result`.
 - For the next step in a multi-step flow, the agent creates a **new
   page** with a new URL and prints it. There is no "replace the
   surface in place" mechanism in V0.
@@ -100,13 +104,15 @@ considered consumed:
 This is intentional. Pages are not reusable widgets; each page
 represents one decision point in the agent's workflow. Keeping pages
 single-shot is what lets us drop the event-log abstraction, drop SSE
-fan-out, and keep the API to four endpoints.
+fan-out, drop long-polling, and keep the server stateless beyond the
+page Map.
 
 ## REST API (V0)
 
-All endpoints return JSON. `:id` is a 128-bit hex page id.
+All endpoints return JSON immediately — no blocking, no streaming.
+`:id` is a 128-bit hex page id.
 
-### `POST /pages`
+### `POST /new`
 
 Create a new page with its surface in one shot.
 
@@ -117,16 +123,17 @@ Create a new page with its surface in one shot.
   - `url`: `<PUBLIC_URL>/<id>` — the page the user opens.
 - `400` if body is malformed (missing `spec`).
 
-### `GET /pages/:id`
+### `GET /:id`
 
-Read the page (used by the renderer; also safe for the agent to peek).
+Read the page (used by the renderer; safe for anyone to fetch — no
+side effect on the state machine).
 
 - Response `200`: `{ spec, state, result, expires_at }`
   - `state`: `"open" | "submitted" | "received"`.
   - `result`: the submitted action, or `null` if `state === "open"`.
 - `404` if unknown or expired.
 
-### `POST /pages/:id/result`
+### `POST /:id/result`
 
 Submit the user's action. Called by the renderer.
 
@@ -137,60 +144,64 @@ Submit the user's action. Called by the renderer.
 - `409` if the page has already been submitted (state is not `open`).
 - Side effect: transitions `open → submitted`, stores the action.
 
-### `GET /pages/:id/result?wait=25`
+### `GET /:id/result`
 
-Read the user's result. Called by the agent. Long-polls if the user has
-not submitted yet.
+Read the user's result. Called by the agent. **Returns immediately —
+no waiting, no parameters.** Polling is the agent's job (see Skill).
 
-- `wait=N` (seconds, default 25, max 60): time to block waiting for a
-  submission.
-- Response `200`: `{ result, submitted_at }` once the user has
-  submitted.
-- Response `204 No Content` (or `200` with `{ result: null }`) on
-  long-poll timeout. The agent calls again to keep waiting.
+- Response `200`: `{ state, result }`.
+  - `result` is `null` while `state === "open"`.
+  - `result` is the submitted action when `state` is `"submitted"`
+    or `"received"`.
 - `404` if unknown or expired.
-- Side effect: the **first successful read** transitions
-  `submitted → received`. This is the "agent viewed the data" signal
-  the renderer can pick up via `GET /pages/:id`.
+- Side effect: the **first read while `state === "submitted"`**
+  transitions the page to `"received"`. This is the "agent viewed the
+  data" signal the renderer can pick up via `GET /:id`.
 
 ## Distribution: MCP + Skill (no public SDK in V0)
 
-**MCP server** exposes two tools:
+**MCP server** exposes two tools, both fire-and-return (no blocking):
 
-- `show_ui(spec) -> { page_id, url }` — calls `POST /pages` and returns
+- `show_ui(spec) -> { page_id, url }` — calls `POST /new` and returns
   immediately so the agent can print the URL.
-- `wait_for_result(page_id, timeout_s?) -> result | null` — calls
-  `GET /pages/:id/result?wait=N`. Default 25 s, well under MCP host
-  timeouts. Returns `null` on timeout; the agent loops.
+- `check_result(page_id) -> { state, result }` — calls
+  `GET /:id/result`. Returns the current state plus the result (or
+  `null` while the user hasn't submitted). The agent polls.
 
 **Skill file** (`SKILL.md`) ships alongside the MCP server and teaches
-the agent the call pattern in two paragraphs:
+the polling pattern in plain prose:
 
-> When you need user input or want to show a dashboard, call `show_ui`
-> with an A2UI surface, then `wait_for_result` until the user responds.
+> Call `show_ui(spec)` and print the URL. Then call `check_result`. If
+> `state === "open"`, the user hasn't responded yet — wait a few
+> seconds (or do other work) and call again. When `result` is
+> populated, you have the user's input. The renderer detects that
+> you've fetched it (state flips to `"received"`) and shows "the
+> agent has your input" feedback to the user.
 
-The two-tool pattern is the deliberate hard-problem call: explicit,
-robust to host timeouts, no webhooks.
+Polling beats long-polling here because users can take much longer
+than any sane HTTP timeout (90 seconds, three minutes, walked away
+to make coffee). The agent decides cadence and can do useful work
+between checks.
 
 ## Renderer
 
-A static page served at `GET /:page_id` that mounts the existing
-**A2UI Lit renderer** and fetches state via `GET /pages/:id`. Reuse,
+A static page served at `GET /:id` that mounts the existing
+**A2UI Lit renderer** and fetches state via the JSON API. Reuse,
 don't reinvent. Lives in `client/`.
 
 The renderer flow is fetch-once on load, then optimistic-only on submit:
 
-1. On mount, `GET /pages/:id` to load the spec.
+1. On mount, `GET /:id` to load the spec.
 2. Render the surface with A2UI's `MessageProcessor` + `<a2ui-surface>`.
-3. On user submit, fire `POST /pages/:id/result` and immediately enter
+3. On user submit, fire `POST /:id/result` and immediately enter
    the visual lock state ("Sent — waiting for the agent…"). No further
    server signal is required for the lock.
-4. (Optional polish) The renderer may poll `GET /pages/:id` after
-   submit to detect the `received` transition and update the banner
-   from "waiting for the agent" to "the agent has your input".
+4. (Optional polish) The renderer may poll `GET /:id` after submit to
+   detect the `received` transition and upgrade the banner from
+   "waiting for the agent" to "the agent has your input".
 
-No SSE. No event stream. The renderer's only outbound write is the
-result POST.
+No SSE. No event stream. No long-poll. The renderer's only outbound
+write is the result POST.
 
 ## Storage
 
@@ -208,7 +219,8 @@ set; writes are synchronous through to Postgres. See
 - A2UI v0.9 surfaces.
 - Single-user, single-tab page.
 - MCP server (TS) + Skill file.
-- Long-poll `wait_for_result`.
+- Polling-based result delivery (agent calls `check_result` on its own
+  cadence).
 - Single-shot page lifecycle (one spec, one result).
 - `received` state as the "agent viewed it" signal.
 
@@ -217,8 +229,9 @@ set; writes are synchronous through to Postgres. See
 - **Multi-turn surface replacement.** A page is single-shot; for a
   multi-step flow, the agent creates a new page. PUT/PATCH on a page
   is not supported.
-- **Event streaming (SSE).** Removed in favour of fetch-once + optimistic
-  lock. Re-add only if a real use case appears.
+- **Event streaming (SSE) and long-polling.** Removed in favour of
+  fetch-once + optimistic lock + agent-side polling. Users routinely
+  take longer than any sane HTTP timeout, so blocking is dead weight.
 - **Multi-format spec.** The wire shape today does not carry a `format`
   tag; the renderer assumes A2UI v0.9. Adding format negotiation is a
   future wire change, not a V0 guarantee.
@@ -241,8 +254,8 @@ set; writes are synchronous through to Postgres. See
 
 - Agent in Claude Code calls `show_ui` → user sees working form in
   browser within **2 s**.
-- Agent receives form submission as structured action within **1 s**
-  of user click (long-poll resolves promptly).
+- Agent receives form submission as structured action on its **next
+  poll** of `check_result` after the user clicks (≤ poll interval).
 - MCP server install is one config line; Skill file is drop-in.
 - End-to-end demo runs locally with `npm run dev`.
 - The renderer can show three distinct states reflecting the page's
@@ -255,6 +268,8 @@ set; writes are synchronous through to Postgres. See
 - Terminal URL clickability (iTerm vs Alacritty vs Windows Terminal) —
   handle in Skill prose.
 - Rate limits / abuse — add per-IP cap when public.
-- Whether the renderer should poll `GET /pages/:id` to upgrade the
+- Whether the renderer should poll `GET /:id` to upgrade the
   "waiting" banner to "received", or whether the optimistic lock alone
   is enough UX.
+- Recommended polling cadence in the Skill prose (start at 2 s? back
+  off? cap?). For now, leave it to the agent's judgement.
