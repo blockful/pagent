@@ -161,6 +161,16 @@ The `/health` endpoint is configured as the healthcheck path. Returns 200 only w
 
 The web app falls back to relative paths when `VITE_API_URL` is unset, so dev (`npm run dev`) still works through Vite's proxy.
 
+#### Security headers
+
+The renderer ships with a strict Content-Security-Policy plus
+HSTS / nosniff / frame-deny / referrer-policy / permissions-policy
+configured in `apps/web/vercel.json`. The CSP `connect-src` allowlist
+includes the production API origin (`pagent.up.railway.app`). If you
+self-host the API at a different origin, edit that entry before
+deploying — otherwise the browser will block API calls from the
+renderer.
+
 ### Order matters
 
 Deploy Railway first to get the API URL. Then deploy Vercel with `VITE_API_URL` set to it. Then go back to Railway and set `PUBLIC_URL` + `ALLOWED_ORIGINS` to the Vercel URL.
