@@ -1,20 +1,24 @@
 // OTel bootstrap — imported first by server.ts so that auto-instrumentation
 // can wrap http/postgres before they are required. No-op when
 // OTEL_EXPORTER_OTLP_ENDPOINT is not set.
+//
+// Uses console.log (not the pino logger) for the boot line because this
+// module loads before pino is instrumented by PinoInstrumentation.
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { PinoInstrumentation } from '@opentelemetry/instrumentation-pino';
+import { describeTracing, tracingBootLog } from './tracing-status.ts';
 
-const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+const status = describeTracing();
 
-if (endpoint) {
+if (status.enabled) {
   const sdk = new NodeSDK({
-    serviceName: process.env.OTEL_SERVICE_NAME ?? 'pagent-api',
+    serviceName: status.serviceName,
     traceExporter: new OTLPTraceExporter({
       // The exporter appends /v1/traces. Grafana Cloud's gateway accepts the
       // base /otlp path; users set OTEL_EXPORTER_OTLP_ENDPOINT to that base.
-      url: `${endpoint.replace(/\/$/, '')}/v1/traces`,
+      url: `${status.endpoint.replace(/\/$/, '')}/v1/traces`,
       headers: parseOtlpHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
     }),
     instrumentations: [
@@ -30,6 +34,8 @@ if (endpoint) {
   sdk.start();
   process.on('SIGTERM', () => sdk.shutdown().catch(() => {}));
 }
+
+console.log(tracingBootLog(status));
 
 function parseOtlpHeaders(raw: string | undefined): Record<string, string> | undefined {
   if (!raw) return undefined;
