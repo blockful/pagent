@@ -3,14 +3,26 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { buildCsp } from './csp.js';
 
-const envSchema = z.object({
-  API_PORT: z.coerce.number().int().min(1).max(65535).optional().default(8787),
-  CLIENT_PORT: z.coerce.number().int().min(1).max(65535).optional().default(8788),
-  VITE_API_URL: z
-    .string()
-    .url('VITE_API_URL must be a valid URL (e.g. https://pagent.up.railway.app)')
-    .optional(),
-});
+// Vercel and other CI runners surface unset env vars as empty strings, which
+// would otherwise fail .url() / .coerce.number(). Normalise "" → undefined.
+const envSchema = z.preprocess(
+  (raw) => {
+    if (typeof raw !== 'object' || raw === null) return raw;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      out[k] = v === '' ? undefined : v;
+    }
+    return out;
+  },
+  z.object({
+    API_PORT: z.coerce.number().int().min(1).max(65535).optional().default(8787),
+    CLIENT_PORT: z.coerce.number().int().min(1).max(65535).optional().default(8788),
+    VITE_API_URL: z
+      .string()
+      .url('VITE_API_URL must be a valid URL (e.g. https://pagent.up.railway.app)')
+      .optional(),
+  }),
+);
 
 // 128-bit hex page id (must match server.ts).
 const PAGE_ID = String.raw`[a-f0-9]{32}`;

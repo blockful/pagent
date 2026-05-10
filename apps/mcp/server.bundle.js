@@ -21178,9 +21178,19 @@ page_id: ${created.id}`
 }
 
 // apps/mcp/server.ts
-var envSchema = external_exports.object({
-  PAGENT_URL: external_exports.string().url("PAGENT_URL must be a valid URL").optional()
-});
+var envSchema = external_exports.preprocess(
+  (raw) => {
+    if (typeof raw !== "object" || raw === null) return raw;
+    const out = {};
+    for (const [k, v] of Object.entries(raw)) {
+      out[k] = v === "" ? void 0 : v;
+    }
+    return out;
+  },
+  external_exports.object({
+    PAGENT_URL: external_exports.string().url("PAGENT_URL must be a valid URL").optional()
+  })
+);
 var env;
 try {
   env = envSchema.parse(process.env);
