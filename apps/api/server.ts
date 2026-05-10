@@ -32,7 +32,7 @@ const mcpHandler = makeMcpHttpHandler({ publicUrl: PUBLIC_URL, pageTtlMs: PAGE_T
 
 const server: HttpServer = createServer((req, res) => {
   const path = req.url?.split('?', 1)[0];
-  if (path === '/mcp') {
+  if (path === '/mcp' || path?.startsWith('/mcp/')) {
     void mcpHandler(req, res);
     return;
   }
