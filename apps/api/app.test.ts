@@ -14,6 +14,7 @@ vi.mock('./db.ts', () => ({
   markSubmitted: vi.fn(() => Promise.resolve()),
   markReceived: vi.fn(() => Promise.resolve()),
   deletePage: vi.fn(() => Promise.resolve()),
+  ping: vi.fn().mockResolvedValue(undefined),
 }));
 
 import * as db from './db.ts';
@@ -223,6 +224,30 @@ describe('GET /:id/result', () => {
   it('returns 404 for unknown id on GET /:id/result', async () => {
     const res = await app.fetch(req('GET', `/${UNKNOWN_ID}/result`));
     expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /health
+// ---------------------------------------------------------------------------
+
+describe('GET /health', () => {
+  it('returns 200 ok when db ping succeeds', async () => {
+    const res = await app.fetch(new Request('http://test/health'));
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.ok).toBe(true);
+    expect(body.db).toBe('ok');
+    expect(typeof body.pages).toBe('number');
+  });
+
+  it('returns 503 when db ping rejects', async () => {
+    (db.ping as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+    const res = await app.fetch(new Request('http://test/health'));
+    expect(res.status).toBe(503);
+    const body = await json(res);
+    expect(body.ok).toBe(false);
+    expect(body.db).toBe('error');
   });
 });
 

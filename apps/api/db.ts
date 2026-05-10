@@ -33,6 +33,11 @@ export async function init(connectionString: string): Promise<void> {
   await sql`create index if not exists pages_expires_at_idx on pages (expires_at)`;
 }
 
+export async function ping(): Promise<void> {
+  const c = client();
+  await c`select 1`;
+}
+
 export async function shutdown(): Promise<void> {
   if (!sql) return;
   await sql.end({ timeout: 5 });

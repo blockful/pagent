@@ -121,7 +121,15 @@ app.use('*', async (c, next) => {
   );
 });
 
-app.get('/health', (c) => c.json({ ok: true, pages: pages.size }));
+app.get('/health', async (c) => {
+  try {
+    await db.ping();
+    return c.json({ ok: true, db: 'ok', pages: pages.size });
+  } catch (err) {
+    logger.error({ err }, 'health check db ping failed');
+    return c.json({ ok: false, db: 'error' }, 503);
+  }
+});
 
 app.post('/new', newPageLimiter, async (c) => {
   const raw = await c.req.json().catch(() => null);

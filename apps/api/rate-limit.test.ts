@@ -20,6 +20,7 @@ vi.mock('./db.ts', () => ({
   markSubmitted: vi.fn(() => Promise.resolve()),
   markReceived: vi.fn(() => Promise.resolve()),
   deletePage: vi.fn(() => Promise.resolve()),
+  ping: vi.fn().mockResolvedValue(undefined),
 }));
 
 import * as db from './db.ts';

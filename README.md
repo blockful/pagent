@@ -136,7 +136,7 @@ To bypass in an emergency: `git push --no-verify` (don't make this a habit).
    - `OTEL_EXPORTER_OTLP_ENDPOINT` — optional. Grafana Cloud OTLP HTTP base URL (e.g. `https://otlp-gateway-prod-us-central-0.grafana.net/otlp`). Leave unset to disable observability entirely. See `apps/api/.env.example` for the rest of the OTel envs.
 4. Deploy. Railway runs `npm install` (which walks up to the workspace root) and starts the API with `npm -w @pagent/api run start`.
 
-The `/health` endpoint is configured as the healthcheck path.
+The `/health` endpoint is configured as the healthcheck path. Returns 200 only when the DB is reachable; 503 otherwise.
 
 ### `apps/web/` → Vercel
 
