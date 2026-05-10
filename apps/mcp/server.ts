@@ -8,9 +8,22 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
 import { registerPagentTools, type PageOps } from '../api/mcp/tools.ts';
 
-const SERVICE_URL = (process.env.PAGENT_URL ?? 'https://pagent.up.railway.app').replace(/\/$/, '');
+const envSchema = z.object({
+  PAGENT_URL: z.string().url('PAGENT_URL must be a valid URL').optional(),
+});
+
+let env: z.infer<typeof envSchema>;
+try {
+  env = envSchema.parse(process.env);
+} catch (e) {
+  console.error('Invalid environment for pagent MCP:', e);
+  process.exit(1);
+}
+
+const SERVICE_URL = (env.PAGENT_URL ?? 'https://pagent.up.railway.app').replace(/\/$/, '');
 
 /**
  * Build a short, actionable hint from a structured API error body.
