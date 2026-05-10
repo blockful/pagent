@@ -9,6 +9,8 @@ import * as db from './db.ts';
 import type { Page } from './db.ts';
 import { env, pageIdSchema, newPageBodySchema, resultBodySchema } from './schemas.ts';
 import { logger } from './logger.ts';
+import type { RequestIdVariables } from './request-id.ts';
+import { requestId, getLog } from './request-id.ts';
 
 // --- Config ------------------------------------------------------------------
 
@@ -48,7 +50,8 @@ const newPageLimiter = rateLimiter({
 
 // --- App ---------------------------------------------------------------------
 
-export const app = new Hono();
+export const app = new Hono<{ Variables: RequestIdVariables }>();
+app.use('*', requestId());
 app.use(
   '*',
   secureHeaders({
@@ -78,7 +81,7 @@ app.use(
 app.use('*', async (c, next) => {
   const start = Date.now();
   await next();
-  logger.info(
+  getLog(c).info(
     {
       method: c.req.method,
       path: c.req.path,

@@ -219,8 +219,12 @@ every event is one JSON object per line. In dev the output is pretty-printed via
 per-event fields. Request log lines look like:
 
 ```
-{"level":30,"time":1709120000000,"method":"POST","path":"/v1/new","status":201,"duration_ms":17,"msg":"request"}
+{"level":30,"time":1709120000000,"req_id":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6","method":"POST","path":"/v1/new","status":201,"duration_ms":17,"msg":"request"}
 ```
+
+Every response carries `X-Request-ID` (32-char hex). Quote it in bug
+reports — the same ID appears on every log line for that request and
+any traces in Grafana.
 
 Where to find them: **Railway dashboard → API service → Logs tab**.
 

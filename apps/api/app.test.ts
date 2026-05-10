@@ -320,6 +320,74 @@ describe('security headers', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Request-ID middleware
+// ---------------------------------------------------------------------------
+
+describe('request-id middleware', () => {
+  it('sets X-Request-ID on response when client does not send one', async () => {
+    const res = await app.fetch(new Request('http://test/health'));
+    expect(res.status).toBe(200);
+    const id = res.headers.get('x-request-id');
+    expect(id).toMatch(/^[a-f0-9]{32}$/);
+  });
+
+  it('echoes a valid client-supplied X-Request-ID', async () => {
+    const res = await app.fetch(
+      new Request('http://test/health', {
+        headers: { 'X-Request-ID': 'abc123-test' },
+      }),
+    );
+    expect(res.headers.get('x-request-id')).toBe('abc123-test');
+  });
+
+  it('regenerates ID when client supplies a malformed X-Request-ID (spaces/semicolons)', async () => {
+    const bad = 'has spaces and ;';
+    const res = await app.fetch(
+      new Request('http://test/health', {
+        headers: { 'X-Request-ID': bad },
+      }),
+    );
+    const id = res.headers.get('x-request-id');
+    expect(id).not.toBe(bad);
+    expect(id).toMatch(/^[a-f0-9]{32}$/);
+  });
+
+  it('regenerates ID when client-supplied X-Request-ID exceeds 128 chars', async () => {
+    const oversized = 'a'.repeat(129);
+    const res = await app.fetch(
+      new Request('http://test/health', {
+        headers: { 'X-Request-ID': oversized },
+      }),
+    );
+    const id = res.headers.get('x-request-id');
+    expect(id).not.toBe(oversized);
+    expect(id).toMatch(/^[a-f0-9]{32}$/);
+  });
+
+  it('sets X-Request-ID on every endpoint including 404 paths', async () => {
+    const resHealth = await app.fetch(new Request('http://test/health'));
+    const resNew = await app.fetch(req('POST', '/v1/new', { spec: {} }));
+    const resNotFound = await app.fetch(new Request('http://test/no-such-path'));
+    expect(resHealth.headers.get('x-request-id')).toMatch(/^[a-f0-9]{32}$/);
+    expect(resNew.headers.get('x-request-id')).toMatch(/^[a-f0-9]{32}$/);
+    expect(resNotFound.headers.get('x-request-id')).toMatch(/^[a-f0-9]{32}$/);
+  });
+
+  it('sets X-Request-ID even when bodyLimit fires (413)', async () => {
+    const body = JSON.stringify({ spec: 'x'.repeat(300_000) });
+    const res = await app.fetch(
+      new Request(`${BASE}/v1/new`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      }),
+    );
+    expect(res.status).toBe(413);
+    expect(res.headers.get('x-request-id')).toMatch(/^[a-f0-9]{32}$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Deprecation shim
 // ---------------------------------------------------------------------------
 
