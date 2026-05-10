@@ -6,6 +6,7 @@ import { basicCatalog } from '@a2ui/lit/v0_9';
 import '@a2ui/lit/v0_9'; // registers <a2ui-surface>
 import './home'; // registers <home-page>
 import { assertCatalogsAllowed } from './spec-guard.js';
+import { nextPollDelay } from './poll-backoff.js';
 
 /** Hard-coded allowlist of catalog URLs the renderer is permitted to use. */
 const ALLOWED_CATALOG_IDS = [basicCatalog.id] as const;
@@ -22,7 +23,11 @@ const pageId = location.pathname.replace(/^\/+/, '').split('/')[0];
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
-const POLL_INTERVAL_MS = 2000;
+// Backoff: 2s → 4s → 8s → 16s → 30s (capped). Across the 60s POLL_TIMEOUT_MS
+// window, this fires ~6 polls instead of the 30 a fixed 2s cadence would.
+const POLL_INITIAL_MS = 2000;
+const POLL_MAX_MS = 30_000;
+const POLL_BACKOFF_FACTOR = 2;
 const POLL_TIMEOUT_MS = 60_000;
 
 class AgentUIApp extends SignalWatcher(LitElement) {
@@ -252,10 +257,10 @@ class AgentUIApp extends SignalWatcher(LitElement) {
   private startPollingForReceived() {
     this.stopPolling();
     this.pollDeadline = Date.now() + POLL_TIMEOUT_MS;
-    const tick = async () => {
+
+    const tick = async (delay: number) => {
       this.pollTimer = null;
-      if (!this.isConnected) return;
-      if (Date.now() >= this.pollDeadline) return;
+      if (!this.isConnected || Date.now() >= this.pollDeadline) return;
       try {
         const res = await fetch(`${API_BASE}/v1/${pageId}`, {
           headers: { accept: 'application/json' },
@@ -272,11 +277,12 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       } catch (err) {
         console.warn('poll GET failed', err);
       }
-      if (!this.isConnected) return;
-      if (Date.now() >= this.pollDeadline) return;
-      this.pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+      if (!this.isConnected || Date.now() >= this.pollDeadline) return;
+      const next = nextPollDelay(delay, POLL_BACKOFF_FACTOR, POLL_MAX_MS);
+      this.pollTimer = setTimeout(() => tick(next), next);
     };
-    this.pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+
+    this.pollTimer = setTimeout(() => tick(POLL_INITIAL_MS), POLL_INITIAL_MS);
   }
 
   private stopPolling() {
