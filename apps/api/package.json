@@ -1,9 +1,9 @@
 {
-  "name": "@agent-ui-session/api",
+  "name": "@pagent/api",
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "REST + state-machine service for agent-ui-session",
+  "description": "REST + state-machine service for pagent",
   "main": "server.ts",
   "scripts": {
     "dev": "node --watch --experimental-strip-types server.ts",

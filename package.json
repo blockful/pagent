@@ -1,5 +1,5 @@
 {
-  "name": "agent-ui-session",
+  "name": "pagent",
   "version": "0.0.1",
   "private": true,
   "description": "Hosted UI rendering for terminal-bound AI agents — monorepo root",
@@ -10,10 +10,10 @@
   ],
   "scripts": {
     "dev": "concurrently -n api,web -c blue,magenta \"npm:dev:api\" \"npm:dev:web\"",
-    "dev:api": "npm -w @agent-ui-session/api run dev",
-    "dev:web": "npm -w @agent-ui-session/web run dev",
-    "build:web": "npm -w @agent-ui-session/web run build",
-    "start:api": "npm -w @agent-ui-session/api run start",
+    "dev:api": "npm -w @pagent/api run dev",
+    "dev:web": "npm -w @pagent/web run dev",
+    "build:web": "npm -w @pagent/web run build",
+    "start:api": "npm -w @pagent/api run start",
     "smoke": "node apps/mcp/smoke.mjs"
   },
   "devDependencies": {

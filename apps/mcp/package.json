@@ -1,11 +1,11 @@
 {
-  "name": "@agent-ui-session/mcp",
+  "name": "@pagent/mcp",
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "MCP server exposing show_ui + check_result tools for agent-ui-session",
+  "description": "MCP server exposing show_ui + check_result tools for pagent",
   "bin": {
-    "agent-ui-session-mcp": "server.ts"
+    "pagent-mcp": "server.ts"
   },
   "scripts": {
     "start": "node --experimental-strip-types server.ts"

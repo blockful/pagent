@@ -1,4 +1,4 @@
-# Agent UI Session
+# Pagent
 
 Hosted UI rendering for terminal-bound AI agents. The agent emits an A2UI surface to this service, prints a short URL, and reads the user's interactions back via API.
 
@@ -16,7 +16,7 @@ sequenceDiagram
     autonumber
     participant U as You
     participant A as Your AI agent
-    participant S as agent-ui-session
+    participant S as pagent
     participant B as Browser
 
     Note over A: A bundled skill teaches the agent <br/>when a real form beats faking one in chat.
@@ -54,7 +54,7 @@ apps/
 └── mcp/                             # stdio MCP server: show_ui + check_result
     ├── server.ts
     └── smoke.mjs
-skills/agent-ui-session/SKILL.md     # drop-in skill teaching the polling pattern
+skills/pagent/SKILL.md               # drop-in skill teaching the polling pattern
 .claude-plugin/plugin.json           # Claude Code plugin manifest
 .mcp.json                            # plugin's MCP server registration
 ```
@@ -68,8 +68,8 @@ The repo doubles as a Claude Code plugin and a self-hosted marketplace: `.claude
 **1. Install** — paste these two commands into any Claude Code session:
 
 ```
-/plugin marketplace add blockful/agent-ui-session
-/plugin install agent-ui-session@agent-ui-session
+/plugin marketplace add blockful/pagent
+/plugin install pagent@pagent
 ```
 
 **2. Verify** — confirm the MCP server is connected:
@@ -78,21 +78,21 @@ The repo doubles as a Claude Code plugin and a self-hosted marketplace: `.claude
 /mcp
 ```
 
-You should see `agent-ui-session` listed with `show_ui` and `check_result` tools. The plugin also ships a skill (`agent-ui-session`) that teaches the polling pattern.
+You should see `pagent` listed with `show_ui` and `check_result` tools. The plugin also ships a skill (`pagent`) that teaches the polling pattern.
 
 **3. Use it** — try this prompt:
 
-> "Use the agent-ui-session skill to ask me my favorite color via a UI form."
+> "Use the pagent skill to ask me my favorite color via a UI form."
 
 The agent calls `show_ui`, prints a URL (hosted at `https://pagent.vercel.app`), you submit, and the conversation continues.
 
-**Point at a different service?** Set `AGENT_UI_SESSION_URL` before launching Claude. By default the MCP talks to `https://pagent.up.railway.app`.
+**Point at a different service?** Set `PAGENT_URL` before launching Claude. By default the MCP talks to `https://pagent.up.railway.app`.
 
 ## Quick start (development)
 
 ```bash
-git clone git@github.com:blockful/agent-ui-session.git
-cd agent-ui-session
+git clone git@github.com:blockful/pagent.git
+cd pagent
 npm install                         # workspaces install for all three apps
 npm run dev                         # API on :8787, renderer on :8788
 ```
@@ -100,8 +100,8 @@ npm run dev                         # API on :8787, renderer on :8788
 Open `http://localhost:8788/<page_id>` to view a page. To use the local API from a Claude session, install the plugin from the local checkout instead of the marketplace:
 
 ```bash
-claude --plugin-dir /absolute/path/to/agent-ui-session
-AGENT_UI_SESSION_URL=http://localhost:8787 claude   # then talk to local API
+claude --plugin-dir /absolute/path/to/pagent
+PAGENT_URL=http://localhost:8787 claude   # then talk to local API
 ```
 
 ## Deploy
@@ -117,7 +117,7 @@ AGENT_UI_SESSION_URL=http://localhost:8787 claude   # then talk to local API
    - `ALLOWED_ORIGINS` — comma-separated origins allowed to call the API (set to your Vercel URL).
    - `PORT` — Railway sets this automatically; the server reads it.
    - `PAGE_TTL_MS` — optional; default 30 minutes.
-4. Deploy. Railway runs `npm install` (which walks up to the workspace root) and starts the API with `npm -w @agent-ui-session/api run start`.
+4. Deploy. Railway runs `npm install` (which walks up to the workspace root) and starts the API with `npm -w @pagent/api run start`.
 
 The `/health` endpoint is configured as the healthcheck path.
 

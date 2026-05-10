@@ -118,7 +118,7 @@ await db.loadActivePages(pages);
 console.log(`rehydrated ${pages.size} page(s) from db`);
 
 const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
-  console.log(`agent-ui-session listening on ${PUBLIC_URL} (port ${info.port})`);
+  console.log(`pagent listening on ${PUBLIC_URL} (port ${info.port})`);
 });
 
 const shutdown = async (signal: string) => {

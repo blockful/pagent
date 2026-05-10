@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "agent-ui-session": {
+    "pagent": {
       "command": "node",
       "args": [
         "--experimental-strip-types",

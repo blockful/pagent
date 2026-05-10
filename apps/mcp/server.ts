@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * MCP server for agent-ui-session.
+ * MCP server for pagent.
  * Exposes two tools: show_ui (creates a page in one shot) and
  * check_result (fetches the page's current state + result, fire-and-return).
  */
@@ -8,10 +8,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-const SERVICE_URL = (process.env.AGENT_UI_SESSION_URL ?? 'https://pagent.up.railway.app').replace(/\/$/, '');
+const SERVICE_URL = (process.env.PAGENT_URL ?? 'https://pagent.up.railway.app').replace(/\/$/, '');
 
 const server = new McpServer({
-  name: 'agent-ui-session',
+  name: 'pagent',
   version: '0.0.1',
 });
 

@@ -1,5 +1,5 @@
 ---
-name: agent-ui-session
+name: pagent
 description: Show interactive UI to the user without owning a renderer. Use when text or markdown can't express what you need — a form, a confirmation, a multi-step picker, a small dashboard.
 ---
 
@@ -49,4 +49,4 @@ That first read flips the page to `received`; the renderer picks that up and tel
 
 ## Setup expectation
 
-These tools talk to the hosted `agent-ui-session` REST service at `https://pagent.up.railway.app` by default. Set the `AGENT_UI_SESSION_URL` env var to point at a self-hosted instance (e.g. `http://localhost:8787` if you're running the repo locally).
+These tools talk to the hosted `pagent` REST service at `https://pagent.up.railway.app` by default. Set the `PAGENT_URL` env var to point at a self-hosted instance (e.g. `http://localhost:8787` if you're running the repo locally).

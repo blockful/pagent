@@ -5,7 +5,7 @@
     "buildCommand": "npm install"
   },
   "deploy": {
-    "startCommand": "npm -w @agent-ui-session/api run start",
+    "startCommand": "npm -w @pagent/api run start",
     "healthcheckPath": "/health",
     "restartPolicyType": "ON_FAILURE"
   }

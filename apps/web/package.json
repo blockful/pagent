@@ -1,9 +1,9 @@
 {
-  "name": "@agent-ui-session/web",
+  "name": "@pagent/web",
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "A2UI v0.9 renderer for agent-ui-session",
+  "description": "A2UI v0.9 renderer for pagent",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

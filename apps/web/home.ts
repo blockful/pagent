@@ -21,8 +21,8 @@ class HomePage extends LitElement {
 
   private async _onCopy() {
     const cmds =
-      '/plugin marketplace add blockful/agent-ui-session\n' +
-      '/plugin install agent-ui-session@agent-ui-session';
+      '/plugin marketplace add blockful/pagent\n' +
+      '/plugin install pagent@pagent';
     try {
       await navigator.clipboard.writeText(cmds);
     } catch {
@@ -418,7 +418,7 @@ class HomePage extends LitElement {
       <div class="page">
         <div class="container">
           <nav class="nav">
-            <span class="badge"><span class="dot"></span>Agent UI Session</span>
+            <span class="badge"><span class="dot"></span>Pagent</span>
             <span>v0.9 &nbsp;/&nbsp; A2UI</span>
           </nav>
 
@@ -442,8 +442,8 @@ class HomePage extends LitElement {
                   aria-live="polite"
                 >${this.copied ? 'Copied ✓' : 'Copy'}</button>
               </div>
-              <pre class="install-body"><code><span class="prompt">›</span>/plugin marketplace add blockful/agent-ui-session
-<span class="prompt">›</span>/plugin install agent-ui-session@agent-ui-session</code></pre>
+              <pre class="install-body"><code><span class="prompt">›</span>/plugin marketplace add blockful/pagent
+<span class="prompt">›</span>/plugin install pagent@pagent</code></pre>
               <div class="install-foot">Verify with <code>/mcp</code> — you'll see <code>show_ui</code> &amp; <code>check_result</code>.</div>
             </div>
 
@@ -464,7 +464,7 @@ class HomePage extends LitElement {
             <article class="step">
               <div class="step-num">ii.</div>
               <h3>Ask your agent</h3>
-              <p>Try: <code>"Use the agent-ui-session skill to ask me my favorite color via a UI form."</code> The skill teaches the agent the polling pattern; the MCP gives it the tools.</p>
+              <p>Try: <code>"Use the pagent skill to ask me my favorite color via a UI form."</code> The skill teaches the agent the polling pattern; the MCP gives it the tools.</p>
             </article>
             <article class="step">
               <div class="step-num">iii.</div>
@@ -475,7 +475,7 @@ class HomePage extends LitElement {
 
           <div class="footer">
             <span>Hono · Vite · A2UI · Supabase</span>
-            <a href="https://github.com/blockful/agent-ui-session" target="_blank" rel="noopener noreferrer">
+            <a href="https://github.com/blockful/pagent" target="_blank" rel="noopener noreferrer">
               View on GitHub <span class="arrow">↗</span>
             </a>
           </div>
