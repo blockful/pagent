@@ -8,7 +8,11 @@ import type { Page } from './db.ts';
 // --- Storage -----------------------------------------------------------------
 
 const PORT = Number(process.env.PORT ?? 8787);
-const PUBLIC_URL = process.env.PUBLIC_URL ?? `http://localhost:${PORT}`;
+// Prefer PUBLIC_URL; on Railway fall back to the known Vercel renderer rather
+// than the container's localhost (Railway env injection has been flaky for this var).
+const PUBLIC_URL =
+  process.env.PUBLIC_URL ??
+  (process.env.RAILWAY_ENVIRONMENT ? 'https://pagent.vercel.app' : `http://localhost:${PORT}`);
 const PAGE_TTL_MS = Number(process.env.PAGE_TTL_MS ?? 30 * 60 * 1000);
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ?.split(',')
