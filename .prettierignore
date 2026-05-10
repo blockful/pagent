@@ -1,0 +1,7 @@
+node_modules/
+**/dist/
+**/coverage/
+apps/web/vendor/
+apps/mcp/server.bundle.js
+apps/web/.vercel/
+package-lock.json

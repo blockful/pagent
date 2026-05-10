@@ -1,0 +1,3 @@
+# Allow vendored dist/ directories (root .gitignore ignores all dist/)
+!vendor/**/dist/
+!vendor/**/dist/**

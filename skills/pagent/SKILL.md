@@ -13,15 +13,30 @@ The `spec` is an array of A2UI v0.9 messages: one `createSurface`, then `updateC
 
 ```json
 [
-  { "createSurface": { "surfaceId": "main", "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json" } },
-  { "updateComponents": { "surfaceId": "main", "components": [
-    { "id": "root", "component": "Column", "children": ["title", "field", "submit"] },
-    { "id": "title", "component": "Text", "text": "What's your name?" },
-    { "id": "field", "component": "TextField", "label": "Name", "value": { "path": "/name" } },
-    { "id": "submit-label", "component": "Text", "text": "Submit" },
-    { "id": "submit", "component": "Button", "child": "submit-label", "variant": "primary",
-      "action": { "event": { "name": "submitted", "context": { "name": { "path": "/name" } } } } }
-  ] } }
+  {
+    "createSurface": {
+      "surfaceId": "main",
+      "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json"
+    }
+  },
+  {
+    "updateComponents": {
+      "surfaceId": "main",
+      "components": [
+        { "id": "root", "component": "Column", "children": ["title", "field", "submit"] },
+        { "id": "title", "component": "Text", "text": "What's your name?" },
+        { "id": "field", "component": "TextField", "label": "Name", "value": { "path": "/name" } },
+        { "id": "submit-label", "component": "Text", "text": "Submit" },
+        {
+          "id": "submit",
+          "component": "Button",
+          "child": "submit-label",
+          "variant": "primary",
+          "action": { "event": { "name": "submitted", "context": { "name": { "path": "/name" } } } }
+        }
+      ]
+    }
+  }
 ]
 ```
 
@@ -46,6 +61,34 @@ Call pattern:
 ```
 
 That first read flips the page to `received`; the renderer picks that up and tells the user the agent has their input.
+
+## Polling cadence
+
+Polling is your call — the service does no waiting on your behalf — so
+spend that latitude wisely. A reasonable shape:
+
+- **Start at 2-3 seconds.** Most users submit fast on simple forms;
+  responsiveness matters more than load.
+- **Back off exponentially up to ~30 seconds.** Doubles each miss:
+  `2 → 4 → 8 → 16 → 30 → 30 → 30 …`. Each call is a cheap GET; the
+  ceiling keeps load bounded for users who walk away.
+- **Cap total wait at the page's TTL** (default 30 minutes — see the
+  `expires_at` returned by `show_ui`). Beyond TTL the page is gone
+  and `check_result` will throw "Page not found".
+- **Do other useful work in between calls.** The polling pattern is
+  meant to be cooperative — read context, summarize prior steps,
+  prepare follow-up plans. Don't sleep blocking the conversation.
+
+When `check_result` throws "Page not found" — either the user closed
+the tab without submitting and the TTL elapsed, or some upstream
+issue evicted the page. **Don't retry the same `page_id`.** Decide:
+ask the user (in chat) whether they still want the form, and if so
+call `show_ui` again with a fresh spec. Don't loop forever assuming
+they'll come back.
+
+When `check_result` returns `state: "received"`, the user previously
+submitted AND you've already read the result on a prior poll. Treat
+this as "already handled" — usually means a duplicate poll snuck in.
 
 ## Setup expectation
 

@@ -20,9 +20,7 @@ class HomePage extends LitElement {
   }
 
   private async _onCopy() {
-    const cmds =
-      '/plugin marketplace add blockful/pagent\n' +
-      '/plugin install pagent@pagent';
+    const cmds = '/plugin marketplace add blockful/pagent\n' + '/plugin install pagent@pagent';
     try {
       await navigator.clipboard.writeText(cmds);
     } catch {
@@ -51,8 +49,7 @@ class HomePage extends LitElement {
       min-height: 100vh;
       background:
         radial-gradient(ellipse at 12% -10%, rgba(200, 71, 47, 0.08), transparent 55%),
-        radial-gradient(ellipse at 100% 110%, rgba(21, 20, 15, 0.05), transparent 55%),
-        var(--paper);
+        radial-gradient(ellipse at 100% 110%, rgba(21, 20, 15, 0.05), transparent 55%), var(--paper);
       color: var(--ink);
       padding: clamp(28px, 5vw, 64px) clamp(20px, 5vw, 56px);
       position: relative;
@@ -97,7 +94,8 @@ class HomePage extends LitElement {
     }
 
     .dot {
-      width: 7px; height: 7px;
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
       background: var(--accent);
       box-shadow: 0 0 0 4px var(--accent-soft);
@@ -105,19 +103,30 @@ class HomePage extends LitElement {
     }
 
     @keyframes pulse {
-      0%, 100% { box-shadow: 0 0 0 4px var(--accent-soft); }
-      50%      { box-shadow: 0 0 0 7px rgba(200, 71, 47, 0.06); }
+      0%,
+      100% {
+        box-shadow: 0 0 0 4px var(--accent-soft);
+      }
+      50% {
+        box-shadow: 0 0 0 7px rgba(200, 71, 47, 0.06);
+      }
     }
 
     .hero {
       padding: clamp(56px, 10vw, 128px) 0 clamp(48px, 8vw, 96px);
       max-width: 920px;
-      animation: rise .9s cubic-bezier(.2,.7,.2,1) both;
+      animation: rise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
     }
 
     @keyframes rise {
-      from { opacity: 0; transform: translateY(14px); }
-      to   { opacity: 1; transform: none; }
+      from {
+        opacity: 0;
+        transform: translateY(14px);
+      }
+      to {
+        opacity: 1;
+        transform: none;
+      }
     }
 
     .eyebrow {
@@ -157,7 +166,9 @@ class HomePage extends LitElement {
     h1 em::after {
       content: '';
       position: absolute;
-      left: 0; right: 0; bottom: 0.08em;
+      left: 0;
+      right: 0;
+      bottom: 0.08em;
       height: 0.08em;
       background: var(--accent);
       opacity: 0.18;
@@ -172,7 +183,10 @@ class HomePage extends LitElement {
       margin: 0;
     }
 
-    .lede strong { color: var(--ink); font-weight: 500; }
+    .lede strong {
+      color: var(--ink);
+      font-weight: 500;
+    }
 
     .install {
       margin-top: 44px;
@@ -182,13 +196,13 @@ class HomePage extends LitElement {
       border-radius: 12px;
       border: 1px solid rgba(200, 71, 47, 0.28);
       box-shadow:
-        0 1px 0 rgba(255,255,255,0.06) inset,
+        0 1px 0 rgba(255, 255, 255, 0.06) inset,
         0 0 0 6px rgba(200, 71, 47, 0.05),
         0 30px 60px -30px rgba(21, 20, 15, 0.45),
         0 12px 30px -12px rgba(21, 20, 15, 0.25);
       overflow: hidden;
-      animation: rise 1.05s cubic-bezier(.2,.7,.2,1) both;
-      animation-delay: .12s;
+      animation: rise 1.05s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+      animation-delay: 0.12s;
     }
 
     .install-head {
@@ -197,7 +211,7 @@ class HomePage extends LitElement {
       justify-content: space-between;
       gap: 12px;
       padding: 11px 14px 11px 18px;
-      background: rgba(255,255,255,0.025);
+      background: rgba(255, 255, 255, 0.025);
       border-bottom: 1px solid rgba(235, 226, 210, 0.08);
       font-family: 'JetBrains Mono', ui-monospace, monospace;
       font-size: 11px;
@@ -214,7 +228,8 @@ class HomePage extends LitElement {
     }
     .install-label::before {
       content: '';
-      width: 6px; height: 6px;
+      width: 6px;
+      height: 6px;
       border-radius: 50%;
       background: var(--accent);
       box-shadow: 0 0 0 3px rgba(200, 71, 47, 0.22);
@@ -229,7 +244,10 @@ class HomePage extends LitElement {
       padding: 5px 11px;
       border-radius: 6px;
       cursor: pointer;
-      transition: background .15s ease, border-color .15s ease, color .15s ease;
+      transition:
+        background 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease;
     }
     .copy-btn:hover {
       background: rgba(235, 226, 210, 0.06);
@@ -250,7 +268,11 @@ class HomePage extends LitElement {
       white-space: pre;
       overflow-x: auto;
     }
-    .install-body .prompt { color: var(--accent); user-select: none; margin-right: 12px; }
+    .install-body .prompt {
+      color: var(--accent);
+      user-select: none;
+      margin-right: 12px;
+    }
 
     .install-foot {
       padding: 11px 20px 14px;
@@ -278,27 +300,51 @@ class HomePage extends LitElement {
       border-radius: 10px;
       padding: 14px 20px;
       box-shadow:
-        0 1px 0 rgba(255,255,255,0.04) inset,
+        0 1px 0 rgba(255, 255, 255, 0.04) inset,
         0 18px 30px -20px rgba(21, 20, 15, 0.35);
       line-height: 1.75;
     }
 
-    .terminal .prompt { color: var(--accent); user-select: none; margin-right: 10px; }
-    .terminal .dim    { color: #8c8478; }
-    .terminal .cmd    { color: #ebe2d2; user-select: text; }
-    .terminal .ok     { color: #9bc78a; }
-    .terminal .url    { color: #f6c89f; text-decoration: underline; text-decoration-color: rgba(246, 200, 159, 0.4); }
-    .terminal .rule   { height: 1px; background: rgba(235, 226, 210, 0.08); margin: 10px -22px; }
+    .terminal .prompt {
+      color: var(--accent);
+      user-select: none;
+      margin-right: 10px;
+    }
+    .terminal .dim {
+      color: #8c8478;
+    }
+    .terminal .cmd {
+      color: #ebe2d2;
+      user-select: text;
+    }
+    .terminal .ok {
+      color: #9bc78a;
+    }
+    .terminal .url {
+      color: #f6c89f;
+      text-decoration: underline;
+      text-decoration-color: rgba(246, 200, 159, 0.4);
+    }
+    .terminal .rule {
+      height: 1px;
+      background: rgba(235, 226, 210, 0.08);
+      margin: 10px -22px;
+    }
     .caret {
       display: inline-block;
-      width: 8px; height: 1em;
+      width: 8px;
+      height: 1em;
       background: #ebe2d2;
       vertical-align: -2px;
       margin-left: 4px;
       animation: blink 1.05s steps(2, jump-none) infinite;
     }
 
-    @keyframes blink { 50% { opacity: 0; } }
+    @keyframes blink {
+      50% {
+        opacity: 0;
+      }
+    }
 
     .section-label {
       display: flex;
@@ -327,17 +373,26 @@ class HomePage extends LitElement {
     }
 
     @media (max-width: 760px) {
-      .steps { grid-template-columns: 1fr; }
-      .step + .step { border-top: 1px solid var(--rule); border-left: 0; }
+      .steps {
+        grid-template-columns: 1fr;
+      }
+      .step + .step {
+        border-top: 1px solid var(--rule);
+        border-left: 0;
+      }
     }
 
     .step {
       padding: 36px 28px 40px;
       position: relative;
-      transition: background .25s ease;
+      transition: background 0.25s ease;
     }
-    .step + .step { border-left: 1px solid var(--rule); }
-    .step:hover { background: rgba(255,255,255,0.35); }
+    .step + .step {
+      border-left: 1px solid var(--rule);
+    }
+    .step:hover {
+      background: rgba(255, 255, 255, 0.35);
+    }
 
     .step-num {
       font-family: 'Instrument Serif', Georgia, serif;
@@ -370,9 +425,11 @@ class HomePage extends LitElement {
       text-decoration: none;
       border-bottom: 1px solid var(--accent);
       padding-bottom: 1px;
-      transition: color .15s ease;
+      transition: color 0.15s ease;
     }
-    .step-link:hover { color: var(--accent); }
+    .step-link:hover {
+      color: var(--accent);
+    }
 
     .step code {
       font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -406,11 +463,18 @@ class HomePage extends LitElement {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      transition: color .2s ease;
+      transition: color 0.2s ease;
     }
-    .footer a:hover { color: var(--accent); }
-    .footer .arrow { transition: transform .2s ease; display: inline-block; }
-    .footer a:hover .arrow { transform: translate(2px, -2px); }
+    .footer a:hover {
+      color: var(--accent);
+    }
+    .footer .arrow {
+      transition: transform 0.2s ease;
+      display: inline-block;
+    }
+    .footer a:hover .arrow {
+      transform: translate(2px, -2px);
+    }
   `;
 
   render() {
@@ -426,8 +490,8 @@ class HomePage extends LitElement {
             <p class="eyebrow">Generative UI · for terminal agents</p>
             <h1>Give your agent a <em>real UI</em>—<br />not a fake form in prose.</h1>
             <p class="lede">
-              Your terminal agent posts a form spec, gets back a short URL, and waits.
-              You open it, fill it out, submit. The agent reads the result and keeps going.
+              Your terminal agent posts a form spec, gets back a short URL, and waits. You open it,
+              fill it out, submit. The agent reads the result and keeps going.
               <strong>One handoff. Single-shot. No host app required.</strong>
             </p>
 
@@ -440,16 +504,30 @@ class HomePage extends LitElement {
                   @click=${this._onCopy}
                   aria-label="Copy install commands to clipboard"
                   aria-live="polite"
-                >${this.copied ? 'Copied ✓' : 'Copy'}</button>
+                >
+                  ${this.copied ? 'Copied ✓' : 'Copy'}
+                </button>
               </div>
-              <pre class="install-body"><code><span class="prompt">›</span>/plugin marketplace add blockful/pagent
+              <pre
+                class="install-body"
+              ><code><span class="prompt">›</span>/plugin marketplace add blockful/pagent
 <span class="prompt">›</span>/plugin install pagent@pagent</code></pre>
-              <div class="install-foot">Verify with <code>/mcp</code> — you'll see <code>show_ui</code> &amp; <code>check_result</code>.</div>
+              <div class="install-foot">
+                Verify with <code>/mcp</code> — you'll see <code>show_ui</code> &amp;
+                <code>check_result</code>.
+              </div>
             </div>
 
             <div class="terminal" aria-hidden="true">
-              <div><span class="prompt">›</span><span class="dim">"ask me my favorite color via a UI"</span></div>
-              <div><span class="prompt">↳</span><span class="url">https://pagent.vercel.app/4f2a…b13c</span><span class="caret"></span></div>
+              <div>
+                <span class="prompt">›</span
+                ><span class="dim">"ask me my favorite color via a UI"</span>
+              </div>
+              <div>
+                <span class="prompt">↳</span
+                ><span class="url">https://pagent.vercel.app/4f2a…b13c</span
+                ><span class="caret"></span>
+              </div>
             </div>
           </header>
 
@@ -459,17 +537,29 @@ class HomePage extends LitElement {
             <article class="step">
               <div class="step-num">i.</div>
               <h3>Install in Claude Code</h3>
-              <p>Run the two commands in the <a href="#install" class="step-link">install panel above</a>. The plugin ships an MCP server (<code>show_ui</code>, <code>check_result</code>) and a skill that teaches the agent when to reach for a form.</p>
+              <p>
+                Run the two commands in the
+                <a href="#install" class="step-link">install panel above</a>. The plugin ships an
+                MCP server (<code>show_ui</code>, <code>check_result</code>) and a skill that
+                teaches the agent when to reach for a form.
+              </p>
             </article>
             <article class="step">
               <div class="step-num">ii.</div>
               <h3>Ask your agent</h3>
-              <p>Try: <code>"Use the pagent skill to ask me my favorite color via a UI form."</code> The skill teaches the agent the polling pattern; the MCP gives it the tools.</p>
+              <p>
+                Try:
+                <code>"Use the pagent skill to ask me my favorite color via a UI form."</code> The
+                skill teaches the agent the polling pattern; the MCP gives it the tools.
+              </p>
             </article>
             <article class="step">
               <div class="step-num">iii.</div>
               <h3>Open. Submit. Continue.</h3>
-              <p>The agent prints a URL. You open it, fill the form, submit. <code>check_result</code> hands the answer back and the conversation keeps going.</p>
+              <p>
+                The agent prints a URL. You open it, fill the form, submit.
+                <code>check_result</code> hands the answer back and the conversation keeps going.
+              </p>
             </article>
           </section>
 

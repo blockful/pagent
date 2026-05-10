@@ -23,10 +23,16 @@ child.stdout.on('data', (chunk) => {
     buf = buf.slice(idx + 1);
     if (!line.trim()) continue;
     let msg;
-    try { msg = JSON.parse(line); } catch { console.error('non-JSON:', line); continue; }
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      console.error('non-JSON:', line);
+      continue;
+    }
     if (msg.id != null && pending.has(msg.id)) {
       const { resolve, reject } = pending.get(msg.id);
       pending.delete(msg.id);
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions -- ternary calls one of two promise callbacks; both sides are side-effects
       msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
     }
   }
@@ -88,11 +94,20 @@ try {
   console.log(JSON.stringify(show, null, 2));
   const pageId = show.structuredContent.page_id;
 
-  console.log(`\nOpen this URL in a browser and click the button:\n  ${show.structuredContent.url}`);
-  console.log('\n--- polling check_result (up to 30 attempts, 1s apart)');
+  console.log(
+    `\nOpen this URL in a browser and click the button:\n  ${show.structuredContent.url}`,
+  );
+  console.log('\n--- polling check_result (up to 8 attempts, 2→4→8→16→30s backoff)');
+
+  // Backoff: 2→4→8→16→30→30→30→30 seconds (mirrors nextPollDelay in apps/web/poll-backoff.ts
+  // and the cadence recommended in skills/pagent/SKILL.md).
+  function nextDelay(ms) {
+    return Math.min(ms * 2, 30_000);
+  }
 
   let done = false;
-  for (let attempt = 1; attempt <= 30; attempt++) {
+  let delayMs = 2_000;
+  for (let attempt = 1; attempt <= 8; attempt++) {
     const result = await call('tools/call', {
       name: 'check_result',
       arguments: { page_id: pageId },
@@ -104,7 +119,11 @@ try {
       done = true;
       break;
     }
-    await sleep(1000);
+    if (attempt < 8) {
+      console.log(`  waiting ${delayMs / 1000}s before next attempt…`);
+      await sleep(delayMs);
+      delayMs = nextDelay(delayMs);
+    }
   }
   if (!done) {
     console.log('Gave up waiting');

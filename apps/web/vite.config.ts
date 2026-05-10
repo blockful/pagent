@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'node:path';
+import { buildCsp } from './csp.js';
 
 const API_PORT = process.env.API_PORT ?? '8787';
 const CLIENT_PORT = Number(process.env.CLIENT_PORT ?? 8788);
@@ -9,6 +10,21 @@ const API_TARGET = `http://localhost:${API_PORT}`;
 const PAGE_ID = String.raw`[a-f0-9]{32}`;
 
 export default defineConfig({
+  plugins: [
+    {
+      name: 'pagent-csp',
+      transformIndexHtml: {
+        order: 'pre',
+        handler(html) {
+          const csp = buildCsp(process.env.VITE_API_URL);
+          return html.replace(
+            /<head>/i,
+            `<head>\n    <meta http-equiv="Content-Security-Policy" content="${csp}">`,
+          );
+        },
+      },
+    },
+  ],
   // The web app is its own Vite root now (apps/web/). index.html lives here.
   server: {
     port: CLIENT_PORT,
@@ -16,6 +32,9 @@ export default defineConfig({
     proxy: {
       '/new': { target: API_TARGET, changeOrigin: true },
       '/health': { target: API_TARGET, changeOrigin: true },
+      '/openapi.json': { target: API_TARGET, changeOrigin: true },
+      '/openapi.yaml': { target: API_TARGET, changeOrigin: true },
+      '/docs': { target: API_TARGET, changeOrigin: true },
       // /:id/result — always API.
       [`^/${PAGE_ID}/result(?:\\?.*)?$`]: { target: API_TARGET, changeOrigin: true },
       // /:id — content-negotiated. Browser navigation (Accept: text/html) gets

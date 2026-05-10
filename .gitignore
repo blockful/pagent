@@ -12,3 +12,10 @@ production.env
 # Local test artifacts (Playwright screenshots, ad-hoc fixtures)
 *.png
 /tmp-*
+
+# Vitest coverage output
+coverage/
+
+# IDE / tooling state directories
+.claude/
+.vercel/

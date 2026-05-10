@@ -21,20 +21,20 @@ fully replaced.
 
 ## PRD alignment (per section)
 
-| PRD requirement | Where it's satisfied |
-| --- | --- |
-| **Page** = ephemeral, single-purpose, immutable spec | `pages.spec` is `jsonb not null`, never updated after `INSERT` |
-| **State** machine `open → submitted → received` | `pages.state text check (state in ('open','submitted','received'))` + conditional `UPDATE`s |
-| Single-shot lifecycle | `POST /:id/result` only succeeds when `state='open'`; otherwise 409 |
-| `received` is "agent viewed the data" | Side-effecting first `GET /:id/result` while `state='submitted'` flips to `'received'` |
-| `POST /new` returns immediately | One INSERT, one Map write, one response |
-| `GET /:id` is read-only | `SELECT` from Map (Map is the live working set), no state mutation |
-| `GET /:id/result` returns immediately, polling | No long-poll, no waiters, plain JSON |
-| No SSE / no event log | No `events` table, no `waiters` set, no `EventSource` in client |
-| TTL ~30 min, lazy + 60s sweep | `expires_at`; `isExpired(p)` check on every handler; `setInterval` sweep deletes from Map + DB |
-| Anonymous shareable links | 128-bit hex `id`, no auth, no RLS |
-| Map remains live working set | Eager-load on boot; reads hit Map; writes go DB-first then Map |
-| Persistence beyond TTL → V1 | Schema + writes; TTL still expires rows, just durably |
+| PRD requirement                                      | Where it's satisfied                                                                           |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **Page** = ephemeral, single-purpose, immutable spec | `pages.spec` is `jsonb not null`, never updated after `INSERT`                                 |
+| **State** machine `open → submitted → received`      | `pages.state text check (state in ('open','submitted','received'))` + conditional `UPDATE`s    |
+| Single-shot lifecycle                                | `POST /:id/result` only succeeds when `state='open'`; otherwise 409                            |
+| `received` is "agent viewed the data"                | Side-effecting first `GET /:id/result` while `state='submitted'` flips to `'received'`         |
+| `POST /new` returns immediately                      | One INSERT, one Map write, one response                                                        |
+| `GET /:id` is read-only                              | `SELECT` from Map (Map is the live working set), no state mutation                             |
+| `GET /:id/result` returns immediately, polling       | No long-poll, no waiters, plain JSON                                                           |
+| No SSE / no event log                                | No `events` table, no `waiters` set, no `EventSource` in client                                |
+| TTL ~30 min, lazy + 60s sweep                        | `expires_at`; `isExpired(p)` check on every handler; `setInterval` sweep deletes from Map + DB |
+| Anonymous shareable links                            | 128-bit hex `id`, no auth, no RLS                                                              |
+| Map remains live working set                         | Eager-load on boot; reads hit Map; writes go DB-first then Map                                 |
+| Persistence beyond TTL → V1                          | Schema + writes; TTL still expires rows, just durably                                          |
 
 ## Architecture
 
@@ -104,20 +104,20 @@ makes invalid state values impossible at the DB layer.
 
 ## Module structure
 
-| File | Role | Status |
-|---|---|---|
-| `types.ts` | `Page` and `PageState` types | **new** |
-| `db/init.sql` | schema migration | **new** |
-| `db.ts` | SQL adapter: `init`, `shutdown`, `loadActivePages`, `insertPage`, `markSubmitted`, `markReceived`, `deletePage` | **new** |
-| `db.test.ts` | integration tests against the user's Supabase project | **new** |
-| `.env.example` | `DATABASE_URL` placeholder | **new** |
-| `server.ts` | 4 routes, Map + write-through, lazy + sweep TTL | **rewritten** |
-| `client/main.ts` | fetch-once on mount, optimistic lock on submit, optional poll for `received` | **rewritten** |
-| `mcp/server.ts` | tools `show_ui` (POST /new) and `check_result` (GET /:id/result) | **rewritten** |
-| `mcp/smoke.mjs` | smoke against new endpoints | **rewritten** |
-| `mcp/SKILL.md`, `skills/agent-ui-session/SKILL.md` | prose for the polling pattern | **rewritten** |
-| `requests.http` | manual-test harness, new endpoints | **rewritten** |
-| `package.json` | `postgres` dep, `test` script | **modified** |
+| File                                               | Role                                                                                                            | Status        |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------- |
+| `types.ts`                                         | `Page` and `PageState` types                                                                                    | **new**       |
+| `db/init.sql`                                      | schema migration                                                                                                | **new**       |
+| `db.ts`                                            | SQL adapter: `init`, `shutdown`, `loadActivePages`, `insertPage`, `markSubmitted`, `markReceived`, `deletePage` | **new**       |
+| `db.test.ts`                                       | integration tests against the user's Supabase project                                                           | **new**       |
+| `.env.example`                                     | `DATABASE_URL` placeholder                                                                                      | **new**       |
+| `server.ts`                                        | 4 routes, Map + write-through, lazy + sweep TTL                                                                 | **rewritten** |
+| `client/main.ts`                                   | fetch-once on mount, optimistic lock on submit, optional poll for `received`                                    | **rewritten** |
+| `mcp/server.ts`                                    | tools `show_ui` (POST /new) and `check_result` (GET /:id/result)                                                | **rewritten** |
+| `mcp/smoke.mjs`                                    | smoke against new endpoints                                                                                     | **rewritten** |
+| `mcp/SKILL.md`, `skills/agent-ui-session/SKILL.md` | prose for the polling pattern                                                                                   | **rewritten** |
+| `requests.http`                                    | manual-test harness, new endpoints                                                                              | **rewritten** |
+| `package.json`                                     | `postgres` dep, `test` script                                                                                   | **modified**  |
 
 `client/index.html`, `vite.config.ts`, `tsconfig.json`, plugin metadata,
 top-level deps unchanged.
@@ -147,13 +147,19 @@ ordering is enough.
 ```ts
 const id = newId();
 const expiresAt = Date.now() + TTL_MS;
-const page: Page = { id, spec: body.spec, state: 'open',
-                     result: null, createdAt: Date.now(),
-                     expiresAt, submittedAt: null, receivedAt: null };
+const page: Page = {
+  id,
+  spec: body.spec,
+  state: 'open',
+  result: null,
+  createdAt: Date.now(),
+  expiresAt,
+  submittedAt: null,
+  receivedAt: null,
+};
 await db.insertPage(page);
 pages.set(id, page);
-return c.json({ id, url: `${PUBLIC_URL}/${id}`,
-                expires_at: page.expiresAt }, 201);
+return c.json({ id, url: `${PUBLIC_URL}/${id}`, expires_at: page.expiresAt }, 201);
 ```
 
 ### `GET /:id`
@@ -161,8 +167,7 @@ return c.json({ id, url: `${PUBLIC_URL}/${id}`,
 ```ts
 const p = pages.get(id);
 if (!p || isExpired(p)) return 404;
-return c.json({ spec: p.spec, state: p.state, result: p.result,
-                expires_at: p.expiresAt });
+return c.json({ spec: p.spec, state: p.state, result: p.result, expires_at: p.expiresAt });
 ```
 
 ### `POST /:id/result`
@@ -248,7 +253,7 @@ Skill prose (in `mcp/SKILL.md` and `skills/agent-ui-session/SKILL.md`):
   exits the process before binding the HTTP port. Then
   `db.loadActivePages(map)` rehydrates pages whose `expires_at > now()`.
   Server logs the count.
-- **Mutating requests:** DB write happens *before* the Map mutation. If
+- **Mutating requests:** DB write happens _before_ the Map mutation. If
   the DB write fails, the handler returns 500 and the Map is unchanged.
 - **TTL sweep:** existing 60s interval iterates expired Map entries,
   deletes them from DB, then the Map. Failures are logged and retried
@@ -275,6 +280,7 @@ Skill prose (in `mcp/SKILL.md` and `skills/agent-ui-session/SKILL.md`):
 Both `WHERE state=...` clauses provide defense-in-depth: if memory and
 DB ever drift (e.g. crash mid-write, manual DB poke), the conditional
 `UPDATE` makes a stale call a no-op rather than a corrupting overwrite.
+
 - `deletePage(id)`: `DELETE FROM pages WHERE id=$1`.
 
 ## Verification (must hold before declaring done)

@@ -1,0 +1,723 @@
+openapi: 3.1.0
+info:
+  title: Pagent API
+  version: 0.1.0
+  description: |
+    Hosted UI rendering for terminal-bound AI agents. The agent emits an
+    A2UI surface to this service, prints a short URL, and reads the user's
+    interactions back via this API.
+
+    Spec contents are opaque to the service. V0 assumes A2UI v0.9 — there
+    is no `format` tag on the wire. See https://github.com/blockful/pagent
+    for the source.
+
+    ## Page lifecycle
+
+    A page walks a 3-state machine: `open → submitted → received`.
+
+    - **open** — created, waiting for a browser submission.
+    - **submitted** — the browser has called `POST /{id}/result`. The agent
+      has not yet read the result.
+    - **received** — the agent called `GET /{id}/result` at least once after
+      submission. The state flip is idempotent; subsequent reads keep returning
+      `received`.
+  contact:
+    name: Pagent maintainers
+    url: https://github.com/blockful/pagent
+  license:
+    name: MIT
+    url: https://github.com/blockful/pagent/blob/main/LICENSE
+
+servers:
+  - url: https://pagent.up.railway.app
+    description: Production
+  - url: http://localhost:8787
+    description: Local development
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [Operations]
+      summary: Liveness probe with DB connectivity check
+      description: |
+        Returns 200 when the service and its Postgres connection are healthy.
+        Returns 503 when Postgres is unreachable. Railway polls this endpoint
+        and restarts the container on 503.
+
+        This endpoint is **not** part of the versioned API contract — it is
+        an ops endpoint and may change without notice.
+      responses:
+        '200':
+          description: Service and database are healthy.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthOk'
+              example:
+                ok: true
+                db: ok
+        '503':
+          description: |
+            Postgres is unreachable. Check the database connection string and
+            the Postgres service status before retrying.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthError'
+              example:
+                ok: false
+                db: error
+                message: Database connection failed
+
+  /openapi.json:
+    get:
+      operationId: getOpenapiJson
+      tags: [Operations]
+      summary: OpenAPI 3.1 spec (JSON — canonical machine-readable form)
+      description: |
+        Returns the canonical OpenAPI 3.1 document as `application/json`.
+        Parsed once at boot from `docs/openapi.yaml` and cached in memory.
+        This is the URL that tooling (Postman, Insomnia, OpenAPI Generator,
+        Stoplight) expects to fetch. Returns 503 if the source file was
+        missing at boot.
+      responses:
+        '200':
+          description: The OpenAPI document as JSON.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+        '503':
+          description: |
+            `docs/openapi.yaml` was not found at boot. Ensure the file is
+            present in the repository and deployed alongside the API.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [openapi_unavailable]
+
+  /openapi.yaml:
+    get:
+      operationId: getOpenapiYaml
+      tags: [Operations]
+      summary: OpenAPI 3.1 spec (YAML — human-readable courtesy copy)
+      description: |
+        Returns the same OpenAPI 3.1 document as `application/yaml`.
+        Served raw from memory (no re-serialisation). Useful for humans
+        who prefer YAML. Tooling should prefer `/openapi.json`.
+        Returns 503 if the source file was missing at boot.
+      responses:
+        '200':
+          description: The OpenAPI document as YAML.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/yaml:
+              schema:
+                type: string
+        '503':
+          description: |
+            `docs/openapi.yaml` was not found at boot. Ensure the file is
+            present in the repository and deployed alongside the API.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [openapi_unavailable]
+
+  /docs:
+    get:
+      operationId: getApiDocs
+      tags: [Operations]
+      summary: Interactive Scalar API Reference
+      description: |
+        Returns an HTML page rendering the Pagent API Reference via Scalar.
+        Scalar fetches `/openapi.json` client-side and renders an interactive
+        explorer — no build step required. Opens directly in a browser.
+      responses:
+        '200':
+          description: The Scalar API Reference HTML page.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /new:
+    post:
+      operationId: createPage
+      tags: [Pages]
+      summary: Create a new page
+      description: |
+        Creates a new page from an A2UI spec and returns a short URL to share
+        with the user. The page starts in state `open`.
+
+        The `spec` field is opaque — the service stores it verbatim and serves
+        it back to the renderer. No validation is performed on its contents.
+
+        **What to do next:** print the returned `url` in the terminal (or chat)
+        so the user can open it in a browser. Then poll `GET /{id}/result`
+        until `state` is no longer `open`.
+
+        Rate-limited to 30 requests per minute per source IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewPageRequest'
+            example:
+              spec:
+                - createSurface:
+                    surfaceId: main
+                    catalogId: https://a2ui.org/specification/v0_9/basic_catalog.json
+                - updateComponents:
+                    surfaceId: main
+                    components: []
+      responses:
+        '201':
+          description: Page created. Open the returned URL in a browser.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NewPageResponse'
+        '400':
+          description: |
+            Request body is malformed or missing the `spec` field.
+            Fix the request before retrying.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error400'
+        '413':
+          description: |
+            Request body exceeds the service limit. Reduce the spec size.
+            The service caps the body at `max_bytes` bytes (currently 262 144).
+            Simplify or paginate your spec and retry.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error413'
+              example:
+                error: payload_too_large
+                max_bytes: 262144
+        '429':
+          description: |
+            Per-IP rate limit exceeded. Wait `retry_after_seconds` seconds
+            before retrying. The `Retry-After` response header carries the
+            same value in seconds (RFC 7231).
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error429'
+              example:
+                error: rate_limited
+                retry_after_seconds: 60
+        '500':
+          description: |
+            Unexpected server error. Quote the `request_id` from the response
+            body (or the `X-Request-ID` header — they are identical) in any
+            bug report. Do not retry in a tight loop; this is unlikely to
+            self-heal without a deployment.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error500'
+
+  /{id}:
+    parameters:
+      - $ref: '#/components/parameters/PageId'
+    get:
+      operationId: getPage
+      tags: [Pages]
+      summary: Get page spec and current state
+      description: |
+        Returns the full page record including the original `spec`, the
+        current `state`, the `result` (null until submitted), and when the
+        page expires.
+
+        **What to do next:**
+        - If `state` is `open`, the user has not yet submitted. Show them the
+          URL or wait.
+        - If `state` is `submitted`, the result is ready — read it via
+          `GET /{id}/result`.
+        - If `state` is `received`, you have already consumed the result.
+        - If `expires_at` is in the past, the page has been deleted and you
+          will get 404.
+      responses:
+        '200':
+          description: Page found.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageResponse'
+        '404':
+          description: |
+            No active page with this ID exists. It may have expired (default
+            TTL 30 minutes) or never been created. Create a new page if you
+            need another.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error404'
+        '500':
+          description: Unexpected server error. See 500 on `POST /new` for guidance.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error500'
+
+  /{id}/result:
+    parameters:
+      - $ref: '#/components/parameters/PageId'
+    post:
+      operationId: submitResult
+      tags: [Pages]
+      summary: Submit a user action for a page (browser → service)
+      description: |
+        Called by the renderer (browser) when the user submits a form. The
+        body is an A2UI action object that the agent reads back via
+        `GET /{id}/result`.
+
+        Requires the page to be in state `open`. Calling this twice on the
+        same page returns 409.
+
+        **Note:** this endpoint is typically called by the Pagent renderer,
+        not directly by the agent. Agents should use `GET /{id}/result`
+        to read back the submitted action.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResultRequest'
+            example:
+              name: submitted
+              surfaceId: main
+              sourceComponentId: submit-btn
+              context:
+                color: blue
+              timestamp: '2024-01-15T12:34:56.789Z'
+      responses:
+        '200':
+          description: Result recorded. The page is now in state `submitted`.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitOk'
+        '400':
+          description: |
+            Request body is malformed or missing required fields (`name`,
+            `surfaceId`). Fix the request before retrying.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error400'
+        '404':
+          description: |
+            No active page with this ID. The page may have expired. Create
+            a new page.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error404'
+        '409':
+          description: |
+            The page was already submitted. Each page is single-shot — only
+            one result can be recorded per page. Create a new page if you
+            need another submission.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error409'
+        '500':
+          description: Unexpected server error. See 500 on `POST /new` for guidance.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error500'
+    get:
+      operationId: getResult
+      tags: [Pages]
+      summary: Poll for a submitted result (agent → service)
+      description: |
+        Returns the current `state` and `result` for the page. Agents use
+        this to poll until the user has submitted the form.
+
+        **State transitions on read:**
+        - If `state` is `open`, the user has not yet submitted. Poll again
+          after a short back-off (e.g. 1 s, doubling to 30 s max).
+        - The **first** call after submission returns `state: "submitted"` and
+          the full result, then atomically flips the page to `received`. Use
+          the returned result immediately — this is your one chance to observe
+          the `submitted` state.
+        - Subsequent calls return `state: "received"` with the same result.
+
+        **What to do next:** parse the `result` object and continue the agent
+        conversation. `result` is null until the user submits.
+      responses:
+        '200':
+          description: State and result returned.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultResponse'
+        '404':
+          description: |
+            No active page with this ID. The page may have expired. Create
+            a new page.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error404'
+        '500':
+          description: Unexpected server error. See 500 on `POST /new` for guidance.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error500'
+
+components:
+  parameters:
+    PageId:
+      name: id
+      in: path
+      required: true
+      description: 32-character lowercase hex page identifier.
+      schema:
+        $ref: '#/components/schemas/PageId'
+
+  headers:
+    XRequestId:
+      description: >
+        A unique identifier for this request (32-character lowercase hex or a
+        client-supplied value up to 128 characters). Quote it in bug reports —
+        the same ID appears on every log line for that request.
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9_-]{1,128}$'
+    RetryAfter:
+      description: Seconds to wait before the next attempt (RFC 7231).
+      schema:
+        type: integer
+        minimum: 1
+
+  schemas:
+    PageId:
+      type: string
+      pattern: '^[a-f0-9]{32}$'
+      description: 32-character lowercase hex identifier generated at page creation.
+      example: c0f2ec161aac8b1a8d26222f45ca812d
+
+    PageState:
+      type: string
+      enum: [open, submitted, received]
+      description: |
+        Lifecycle state of a page:
+        - `open` — awaiting user submission.
+        - `submitted` — user submitted; agent has not yet read the result.
+        - `received` — agent has consumed the result via `GET /{id}/result`.
+
+    Spec:
+      description: >
+        Opaque A2UI v0.9 message array. The service stores and returns this
+        verbatim without parsing or validating its structure.
+      example:
+        - createSurface:
+            surfaceId: main
+            catalogId: https://a2ui.org/specification/v0_9/basic_catalog.json
+        - updateComponents:
+            surfaceId: main
+            components: []
+
+    NewPageRequest:
+      type: object
+      required: [spec]
+      properties:
+        spec:
+          $ref: '#/components/schemas/Spec'
+
+    NewPageResponse:
+      type: object
+      required: [id, url, expires_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/PageId'
+        url:
+          type: string
+          format: uri
+          description: >
+            Short URL for the user to open in a browser. Points to the
+            Pagent renderer with this page's ID.
+          example: https://pagent.vercel.app/c0f2ec161aac8b1a8d26222f45ca812d
+        expires_at:
+          type: integer
+          description: Unix epoch milliseconds when this page will be deleted.
+          example: 1709122000000
+
+    PageResponse:
+      type: object
+      required: [spec, state, result, expires_at]
+      properties:
+        spec:
+          $ref: '#/components/schemas/Spec'
+        state:
+          $ref: '#/components/schemas/PageState'
+        result:
+          type: object
+          nullable: true
+          description: >
+            The submitted A2UI action, or null if the page is still open.
+            Shape mirrors `ResultRequest`.
+        expires_at:
+          type: integer
+          description: Unix epoch milliseconds when this page will be deleted.
+          example: 1709122000000
+
+    ResultRequest:
+      type: object
+      required: [name, surfaceId]
+      additionalProperties: true
+      description: >
+        An A2UI action object. Extra fields beyond those listed here are
+        preserved verbatim (`.passthrough()` behaviour).
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Event name emitted by the A2UI component.
+          example: submitted
+        surfaceId:
+          type: string
+          minLength: 1
+          description: ID of the surface that emitted the action.
+          example: main
+        sourceComponentId:
+          type: string
+          description: ID of the component that triggered the action.
+          example: submit-btn
+        context:
+          type: object
+          additionalProperties: true
+          description: Arbitrary key/value pairs captured from the form state.
+          example:
+            color: blue
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of when the action was triggered.
+          example: '2024-01-15T12:34:56.789Z'
+
+    ResultResponse:
+      type: object
+      required: [state, result]
+      properties:
+        state:
+          $ref: '#/components/schemas/PageState'
+        result:
+          type: object
+          nullable: true
+          description: >
+            The submitted A2UI action, or null if the page is still `open`.
+
+    SubmitOk:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+
+    HealthOk:
+      type: object
+      required: [ok, db]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        db:
+          type: string
+          enum: [ok]
+
+    HealthError:
+      type: object
+      required: [ok, db, message]
+      properties:
+        ok:
+          type: boolean
+          enum: [false]
+        db:
+          type: string
+          enum: [error]
+        message:
+          type: string
+          description: Human-readable description of the failure.
+          example: Database connection failed
+
+    Error400:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum: [bad_request]
+        message:
+          type: string
+          description: Human-readable description of why the request was rejected.
+          example: Request body did not match the expected schema
+        issues:
+          type: array
+          description: Zod validation issues describing what failed.
+          items:
+            type: object
+            additionalProperties: true
+
+    Error404:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum: [not_found]
+        message:
+          type: string
+          description: Human-readable description of what was not found.
+          example: Page not found or expired
+
+    Error409:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum: [conflict]
+        message:
+          type: string
+          description: Human-readable description of the conflict.
+          example: Page was already submitted; create a new page if you need another submission
+
+    Error413:
+      type: object
+      required: [error, max_bytes, message]
+      properties:
+        error:
+          type: string
+          enum: [payload_too_large]
+        max_bytes:
+          type: integer
+          description: Maximum allowed body size in bytes.
+          example: 262144
+        message:
+          type: string
+          description: Human-readable description of the size limit.
+          example: Request body exceeds the 262144-byte limit
+
+    Error429:
+      type: object
+      required: [error, retry_after_seconds, message]
+      properties:
+        error:
+          type: string
+          enum: [rate_limited]
+        retry_after_seconds:
+          type: integer
+          description: Seconds to wait before retrying.
+          example: 60
+        message:
+          type: string
+          description: Human-readable rate limit message including the retry delay.
+          example: Too many requests; retry after 60 seconds
+
+    Error500:
+      type: object
+      required: [error, request_id, message]
+      properties:
+        error:
+          type: string
+          enum: [internal_error]
+        request_id:
+          type: string
+          description: >
+            The `X-Request-ID` for this request. Quote it in bug reports so
+            maintainers can locate the matching log lines and traces.
+          example: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6
+        message:
+          type: string
+          description: Human-readable description of the error. Always safe to show to users.
+          example: An unexpected error occurred; quote the request_id when reporting this

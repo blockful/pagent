@@ -20,7 +20,7 @@ This is the V1 "persistence beyond TTL" item explicitly deferred by `PRD.md`
 ## PRD alignment
 
 - **Surface stays opaque + format-tagged.** Stored as `surface_format text`
-  + `surface_spec jsonb`; the service still does not parse the spec.
+  - `surface_spec jsonb`; the service still does not parse the spec.
 - **Anonymous shareable-link sessions.** No auth, no RLS. Service-side access
   only, via a single Postgres connection string in the server's environment.
 - **REST API contract unchanged.** All four endpoints behave identically;
@@ -132,7 +132,7 @@ out of scope (V2).
   If it fails, the process exits non-zero before binding the HTTP port —
   no half-started server. Then `db.loadActiveSessions(map)` rehydrates the
   Map (sessions whose `expires_at > now()` plus their event arrays).
-- **Mutating requests:** Postgres write happens *before* in-memory mutation
+- **Mutating requests:** Postgres write happens _before_ in-memory mutation
   and waiter notification. If the DB write fails, the handler returns 500
   and no in-memory state changes — memory and DB stay in lockstep.
 - **TTL sweep:** the existing 60s interval iterates expired sessions,
@@ -153,9 +153,7 @@ Exported surface (final names may vary slightly during implementation):
 export async function init(connectionString: string): Promise<void>;
 export async function shutdown(): Promise<void>;
 
-export async function loadActiveSessions(
-  into: Map<string, Session>,
-): Promise<void>;
+export async function loadActiveSessions(into: Map<string, Session>): Promise<void>;
 
 export async function insertSession(s: Session): Promise<void>;
 export async function updateSurface(
@@ -163,14 +161,8 @@ export async function updateSurface(
   format: string,
   spec: unknown,
 ): Promise<void>;
-export async function appendEvent(
-  sessionId: string,
-  ev: SessionEvent,
-): Promise<void>;
-export async function touchExpiry(
-  sessionId: string,
-  expiresAt: number,
-): Promise<void>;
+export async function appendEvent(sessionId: string, ev: SessionEvent): Promise<void>;
+export async function touchExpiry(sessionId: string, expiresAt: number): Promise<void>;
 export async function deleteSession(sessionId: string): Promise<void>;
 ```
 
@@ -191,7 +183,7 @@ Mechanical, contained edits:
 - Graceful shutdown: `process.on('SIGTERM' / 'SIGINT', () => db.shutdown())`.
 
 The `append()` helper currently both appends and notifies waiters; we
-preserve that, but the DB write happens *before* the call so the in-memory
+preserve that, but the DB write happens _before_ the call so the in-memory
 state and waiter notification only fire on a confirmed durable write.
 
 ## Verification (must hold before declaring done)
