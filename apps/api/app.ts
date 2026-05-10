@@ -10,6 +10,7 @@ import { parse as parseYaml } from 'yaml';
 import { apiReference } from '@scalar/hono-api-reference';
 import * as db from './db.ts';
 import * as store from './store.ts';
+import { clientKey } from './client-key.ts';
 import { env, pageIdSchema, newPageBodySchema, resultBodySchema } from './schemas.ts';
 import { logger } from './logger.ts';
 import type { RequestIdVariables } from './request-id.ts';
@@ -37,35 +38,11 @@ export const ALLOWED_ORIGINS = env.ALLOWED_ORIGINS;
 
 export const MAX_BODY_BYTES = 256 * 1024; // 256 KB
 
-// Extract the rate-limit key from the request. Behind Railway / Vercel the
-// real client IP arrives in x-forwarded-for. In local dev and tests no proxy
-// is present, so we collapse everything into a single bucket.
-const clientKey = (c: Context): string => {
-  const fwd = c.req.header('x-forwarded-for');
-  if (fwd) {
-    // Trust the LAST hop. Reverse proxies (Railway, Vercel, Cloudflare)
-    // append the real client IP to the right of any incoming XFF chain;
-    // the leftmost entries are whatever the client sent and so are
-    // attacker-controlled. Using the last hop assumes exactly one trusted
-    // proxy in front of the API. If you ever stack proxies, raise the
-    // index by hand.
-    const hops = fwd
-      .split(',')
-      .map((h) => h.trim())
-      .filter(Boolean);
-    if (hops.length > 0) return hops[hops.length - 1]!;
-  }
-  // Fallback for local dev / tests where no proxy is present. We deliberately
-  // collapse all unknown clients into a single bucket — anonymous traffic is
-  // rate-limited as one logical client.
-  return 'anonymous';
-};
-
 const newPageLimiter = rateLimiter({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
   limit: env.RATE_LIMIT_MAX,
   standardHeaders: 'draft-7', // sets RateLimit-* headers per IETF draft 7
-  keyGenerator: clientKey,
+  keyGenerator: (c: Context) => clientKey(c.req.header('x-forwarded-for')),
   handler: (c) => {
     const retryAfter = Math.ceil(env.RATE_LIMIT_WINDOW_MS / 1000);
     c.header('Retry-After', String(retryAfter));
