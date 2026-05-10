@@ -74,7 +74,7 @@ Recorded from:
 - `db.deleteExpiredPages` bumps `pagent.pages.abandoned` by the count of
   rows deleted in `state='open'`. This requires splitting the current
   single `delete` into a count-then-delete pair (or a `delete ... returning
-  state` with aggregation in TS) so we can distinguish abandoned pages
+state` with aggregation in TS) so we can distinguish abandoned pages
   from already-finalized ones.
 
 ### New: Logs export
@@ -128,15 +128,15 @@ controlled, applied automatically on Grafana startup.
 
 ## Operational
 
-| Concern        | Choice                                                                |
-| -------------- | --------------------------------------------------------------------- |
-| Image          | `grafana/otel-lgtm` (latest)                                          |
-| Persistence    | Railway volume mounted at `/data`                                     |
-| Auth           | Grafana admin password via `GF_SECURITY_ADMIN_PASSWORD` Railway secret |
-| Public URL     | Railway-generated (`pagent-observability.up.railway.app` or similar)  |
-| Retention      | Image defaults (~1 week) — documented as override-able                |
-| OTLP auth      | None (private Railway network only)                                   |
-| TLS            | Handled by Railway at the edge                                        |
+| Concern     | Choice                                                                 |
+| ----------- | ---------------------------------------------------------------------- |
+| Image       | `grafana/otel-lgtm` (latest)                                           |
+| Persistence | Railway volume mounted at `/data`                                      |
+| Auth        | Grafana admin password via `GF_SECURITY_ADMIN_PASSWORD` Railway secret |
+| Public URL  | Railway-generated (`pagent-observability.up.railway.app` or similar)   |
+| Retention   | Image defaults (~1 week) — documented as override-able                 |
+| OTLP auth   | None (private Railway network only)                                    |
+| TLS         | Handled by Railway at the edge                                         |
 
 ## Files
 

@@ -108,9 +108,7 @@ describe('describeTracing', () => {
   });
 
   it('returns enabled with default service name when endpoint is set', () => {
-    expect(
-      describeTracing({ OTEL_EXPORTER_OTLP_ENDPOINT: 'https://example/otlp' }),
-    ).toEqual({
+    expect(describeTracing({ OTEL_EXPORTER_OTLP_ENDPOINT: 'https://example/otlp' })).toEqual({
       enabled: true,
       endpoint: 'https://example/otlp',
       serviceName: 'pagent-api',
@@ -256,9 +254,7 @@ if (status.enabled) {
       exportIntervalMillis: 60_000,
     }),
     logRecordProcessors: [
-      new BatchLogRecordProcessor(
-        new OTLPLogExporter({ url: `${base}/v1/logs`, headers }),
-      ),
+      new BatchLogRecordProcessor(new OTLPLogExporter({ url: `${base}/v1/logs`, headers })),
     ],
     instrumentations: [
       getNodeAutoInstrumentations({
@@ -649,10 +645,7 @@ export type SubmitOutcome =
   | { kind: 'not_found' }
   | { kind: 'conflict' };
 
-export async function submitPage(
-  id: string,
-  action: unknown,
-): Promise<SubmitOutcome> {
+export async function submitPage(id: string, action: unknown): Promise<SubmitOutcome> {
   return withRetry(async () => {
     const c = client();
     const rows = await c<{ created_at: Date }[]>`
@@ -876,7 +869,7 @@ export const logger = pino({
 
 - [ ] **Step 2: Update `apps/api/.env.example`**
 
-Append below the existing OTEL_* block:
+Append below the existing OTEL\_\* block:
 
 ```
 # When OTEL_EXPORTER_OTLP_ENDPOINT is set, the API also pushes:
@@ -1174,9 +1167,21 @@ Build it by:
       "gridPos": { "h": 6, "w": 18, "x": 0, "y": 0 },
       "options": { "textMode": "value_and_name" },
       "targets": [
-        { "expr": "sum(increase(pagent_pages_created_total[1h]))", "legendFormat": "1h",  "refId": "A" },
-        { "expr": "sum(increase(pagent_pages_created_total[24h]))", "legendFormat": "24h", "refId": "B" },
-        { "expr": "sum(increase(pagent_pages_created_total[7d]))", "legendFormat": "7d",  "refId": "C" }
+        {
+          "expr": "sum(increase(pagent_pages_created_total[1h]))",
+          "legendFormat": "1h",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(pagent_pages_created_total[24h]))",
+          "legendFormat": "24h",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(pagent_pages_created_total[7d]))",
+          "legendFormat": "7d",
+          "refId": "C"
+        }
       ]
     },
     {
@@ -1187,8 +1192,16 @@ Build it by:
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
       "options": { "stacking": { "mode": "normal" } },
       "targets": [
-        { "expr": "sum(increase(pagent_pages_submitted_total[24h]))", "legendFormat": "submitted", "refId": "A" },
-        { "expr": "sum(increase(pagent_pages_abandoned_total[24h]))", "legendFormat": "abandoned", "refId": "B" }
+        {
+          "expr": "sum(increase(pagent_pages_submitted_total[24h]))",
+          "legendFormat": "submitted",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(pagent_pages_abandoned_total[24h]))",
+          "legendFormat": "abandoned",
+          "refId": "B"
+        }
       ]
     },
     {
@@ -1198,7 +1211,11 @@ Build it by:
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
       "targets": [
-        { "expr": "rate(pagent_pages_submitted_total[5m])", "legendFormat": "submissions/s", "refId": "A" }
+        {
+          "expr": "rate(pagent_pages_submitted_total[5m])",
+          "legendFormat": "submissions/s",
+          "refId": "A"
+        }
       ]
     },
     {
@@ -1268,17 +1285,17 @@ Build it by:
 
 - [ ] **Step 7: Create `infra/observability/README.md`**
 
-```markdown
+````markdown
 # Pagent Observability — Self-Hosted Grafana on Railway
 
 Single-service deployment of `grafana/otel-lgtm` with our dashboards baked in.
 
 ## Layout
 
-- `Dockerfile`               — image build; pinned grafana/otel-lgtm tag.
-- `provisioning/`            — Grafana auto-load configs (datasources, dashboard provider).
-- `dashboards/`              — version-controlled dashboard JSON.
-- `railway.json`             — Railway service config.
+- `Dockerfile` — image build; pinned grafana/otel-lgtm tag.
+- `provisioning/` — Grafana auto-load configs (datasources, dashboard provider).
+- `dashboards/` — version-controlled dashboard JSON.
+- `railway.json` — Railway service config.
 
 ## Local smoke test
 
@@ -1288,6 +1305,7 @@ docker run --rm -p 3000:3000 -p 4318:4318 \
   -e GF_SECURITY_ADMIN_PASSWORD=admin \
   pagent-observability
 ```
+````
 
 Open http://localhost:3000 (admin/admin), confirm both dashboards appear under
 the "Pagent" folder.
@@ -1305,7 +1323,8 @@ Hit a few endpoints and watch the dashboards populate.
 ## Deploying to Railway
 
 See `docs/observability.md`.
-```
+
+````
 
 - [ ] **Step 8: Local smoke test**
 
@@ -1322,7 +1341,7 @@ sleep 30
 curl -fsS http://localhost:3000/api/health
 curl -fsS -u admin:admin http://localhost:3000/api/search?folderIds=0 | jq '.[].title'
 docker stop pagent-obs
-```
+````
 
 Expected: the search returns "Pagent — Operations" and "Pagent — Product".
 
@@ -1359,6 +1378,7 @@ npm run dev
 ```
 
 Verify the boot line:
+
 ```
 [tracing] enabled — service=pagent-api signals=traces,metrics,logs endpoint=http://localhost:4318
 ```
@@ -1387,6 +1407,7 @@ Expected: `x-trace-id` header is set with a 32-hex value.
 - [ ] **Step 4: Verify dashboards populate**
 
 Open http://localhost:3000 (admin/admin):
+
 - "Pagent — Operations" → request rate panel shows `/health`, `/new`, plus the 404.
 - "Pagent — Product" → "Pages created" stat is non-zero.
 - Tempo explorer → paste the x-trace-id from step 3 → trace appears with linked logs.
@@ -1427,10 +1448,11 @@ Self-hosted Grafana stack on Railway. Observes the live pagent API.
 - **Logs** — structured pino logs, exported via OTLP, visible in Loki.
 
 ## Architecture
-
 ```
-pagent-api  ──OTLP/HTTP──▶  pagent-observability (Railway service)
-                            └─ grafana/otel-lgtm (Grafana :3000)
+
+pagent-api ──OTLP/HTTP──▶ pagent-observability (Railway service)
+└─ grafana/otel-lgtm (Grafana :3000)
+
 ```
 
 ## Deploying the observability service to Railway
@@ -1501,9 +1523,11 @@ Defaults inside `grafana/otel-lgtm` retain ~1 week. To extend, set on the
 observability service:
 
 ```
-TEMPO_RETENTION=336h  # 14d for traces
-LOKI_RETENTION=336h   # 14d for logs
-PROM_RETENTION=30d    # metrics
+
+TEMPO_RETENTION=336h # 14d for traces
+LOKI_RETENTION=336h # 14d for logs
+PROM_RETENTION=30d # metrics
+
 ```
 
 (The image consumes these via its bundled configs.)
@@ -1614,9 +1638,9 @@ This task requires the user's Railway credentials and access. Halt here and
 ask the user how they want to proceed:
 
 - (a) The user runs the Railway UI steps from `docs/observability.md`
-      themselves and confirms when done.
+  themselves and confirms when done.
 - (b) The user grants Railway CLI access (`railway login` token) and the
-      agent runs the deploy commands.
+  agent runs the deploy commands.
 
 Either way, do not proceed with deployment without explicit user direction.
 
@@ -1628,6 +1652,7 @@ After merge: ask the user which path they want, link them to the runbook
 - [ ] **Step 2: Verify post-deploy**
 
 After the service is up:
+
 - Hit the public Grafana URL → log in with admin / `GF_SECURITY_ADMIN_PASSWORD`.
 - Confirm both dashboards show under the "Pagent" folder.
 - On the API service, verify the boot log shows `[tracing] enabled`.

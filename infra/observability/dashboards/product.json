@@ -16,9 +16,21 @@
       "gridPos": { "h": 6, "w": 18, "x": 0, "y": 0 },
       "options": { "textMode": "value_and_name", "colorMode": "value" },
       "targets": [
-        { "expr": "sum(increase(pagent_pages_created_total[1h]))",  "legendFormat": "1h",  "refId": "A" },
-        { "expr": "sum(increase(pagent_pages_created_total[24h]))", "legendFormat": "24h", "refId": "B" },
-        { "expr": "sum(increase(pagent_pages_created_total[7d]))",  "legendFormat": "7d",  "refId": "C" }
+        {
+          "expr": "sum(increase(pagent_pages_created_total[1h]))",
+          "legendFormat": "1h",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(pagent_pages_created_total[24h]))",
+          "legendFormat": "24h",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(pagent_pages_created_total[7d]))",
+          "legendFormat": "7d",
+          "refId": "C"
+        }
       ]
     },
     {
@@ -29,8 +41,16 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
       "options": { "stacking": { "mode": "normal" } },
       "targets": [
-        { "expr": "sum(increase(pagent_pages_submitted_total[24h]))", "legendFormat": "submitted", "refId": "A" },
-        { "expr": "sum(increase(pagent_pages_abandoned_total[24h]))", "legendFormat": "abandoned", "refId": "B" }
+        {
+          "expr": "sum(increase(pagent_pages_submitted_total[24h]))",
+          "legendFormat": "submitted",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(pagent_pages_abandoned_total[24h]))",
+          "legendFormat": "abandoned",
+          "refId": "B"
+        }
       ]
     },
     {
@@ -40,7 +60,11 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
       "targets": [
-        { "expr": "rate(pagent_pages_submitted_total[5m])", "legendFormat": "submissions/s", "refId": "A" }
+        {
+          "expr": "rate(pagent_pages_submitted_total[5m])",
+          "legendFormat": "submissions/s",
+          "refId": "A"
+        }
       ]
     },
     {
