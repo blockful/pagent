@@ -175,6 +175,127 @@ renderer.
 
 Deploy Railway first to get the API URL. Then deploy Vercel with `VITE_API_URL` set to it. Then go back to Railway and set `PUBLIC_URL` + `ALLOWED_ORIGINS` to the Vercel URL.
 
+## Operations
+
+This section is for on-call engineers. It documents the observable surface of the
+system so you can answer "is it broken, what broke, how do I fix it?" without
+reading the code.
+
+### Health check
+
+```
+GET /health
+```
+
+This endpoint is not under `/v1` — it is an ops endpoint, not part of the API
+contract. Railway polls it automatically and restarts the service on 503.
+
+**Healthy response** (`200`):
+
+```json
+{ "ok": true, "db": "ok" }
+```
+
+**Failure response** (`503`) — Postgres is unreachable:
+
+```json
+{ "ok": false, "db": "error" }
+```
+
+There is no `pages` count in the response; the field was removed in an earlier
+refactor. The response shape is exactly what is shown above.
+
+Quick smoke from the terminal:
+
+```bash
+curl -sf https://pagent.up.railway.app/health
+```
+
+### Logs and traces
+
+**Logs:** The API uses [Pino](https://getpino.io). In production (`NODE_ENV=production`)
+every event is one JSON object per line. In dev the output is pretty-printed via
+`pino-pretty`. Each line carries at minimum `level`, `time`, and `msg`, plus
+per-event fields. Request log lines look like:
+
+```
+{"level":30,"time":1709120000000,"method":"POST","path":"/v1/new","status":201,"duration_ms":17,"msg":"request"}
+```
+
+Where to find them: **Railway dashboard → API service → Logs tab**.
+
+**Traces:** If `OTEL_EXPORTER_OTLP_ENDPOINT` is set, traces flow to Grafana Cloud
+(Tempo) over OTLP/HTTP. Auto-instrumentation covers HTTP, fetch, and Postgres.
+The Pino instrumentation injects `trace_id` and `span_id` into every log line,
+so pivoting from a log line to its trace in Grafana is a single click. Leave
+`OTEL_EXPORTER_OTLP_ENDPOINT` unset to disable OTel entirely — the SDK does not
+start and there is zero overhead.
+
+**No metrics endpoint:** there is no `/metrics` or Prometheus scrape target.
+Operations rely on log aggregation and traces. Build throughput/latency dashboards
+in Grafana from the trace and log streams.
+
+### Common failure modes
+
+| Symptom                                                   | Likely cause                                                            | Where to look                                    | First response                                                                                                                                    |
+| --------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health` → 503                                       | Postgres unreachable                                                    | Supabase status page; Railway DB env vars        | Check Supabase dashboard. If the DB is up but the env var was rotated, restore `DATABASE_URL` in Railway and redeploy.                            |
+| Spike of 429s on `POST /v1/new`                           | Per-IP rate limit hit (default 30 req / 60 s)                           | Railway logs — group by client IP                | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                             |
+| 413 on `POST /v1/new`                                     | Request body > 256 KB                                                   | Log field `error: payload_too_large`             | If a real use case, raise `MAX_BODY_BYTES` in `apps/api/app.ts` (code change + redeploy). Otherwise it's spam; ignore.                            |
+| `Deprecation: true` in response headers                   | A client is hitting the unversioned shim routes (`/new`, `/:id/result`) | Railway logs — filter on path not starting `/v1` | Identify the caller (probably an old MCP install) and ask them to upgrade. The shim stays for the v1 series; this is a warning, not an emergency. |
+| CORS errors in the browser console at `pagent.vercel.app` | `ALLOWED_ORIGINS` does not include the renderer's origin                | Browser DevTools → Network → failing preflight   | Add the missing origin to `ALLOWED_ORIGINS` in Railway env and restart the service.                                                               |
+| Boot failure with `ZodError` in Railway logs              | A required env var is missing                                           | Railway logs (the process exits before it binds) | Read the Zod validation error — it names the missing field. Usually `PUBLIC_URL` or `ALLOWED_ORIGINS`. Set it in Railway, then redeploy.          |
+
+### Rollback
+
+The MCP plugin marketplace tracks `main`. Rolling back means reverting the bad
+commit on `main`; Railway and Vercel auto-redeploy on push.
+
+```bash
+git checkout main && git pull
+git revert <bad-sha>          # creates a revert commit, safe for shared history
+git push
+```
+
+If the branch is not yet shared and a hard reset is acceptable:
+
+```bash
+git reset --hard <prev-good-sha>
+git push --force-with-lease
+```
+
+Watch CI go green, then verify:
+
+```bash
+curl -sf https://pagent.up.railway.app/health && echo ok
+```
+
+### Operational tunables
+
+These env vars can be changed in Railway (or locally in `apps/api/.env`) to tune
+behaviour without touching code. `apps/api/.env.example` is the source of truth.
+
+| Var                           | Default                   | Effect                                                                                                    |
+| ----------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `PORT`                        | `8787`                    | Port the server listens on. Railway overrides this automatically.                                         |
+| `PUBLIC_URL`                  | _(required in prod)_      | Base URL of the renderer, returned in `show_ui` responses. Redeploy required after change.                |
+| `PAGE_TTL_MS`                 | `1800000` (30 min)        | How long a page lives before expiring. Raising it keeps pages alive longer but grows the DB.              |
+| `ALLOWED_ORIGINS`             | _(required in prod)_      | Comma-separated origins the CORS middleware allows. Add an origin here and restart — no redeploy.         |
+| `RATE_LIMIT_MAX`              | `30`                      | Maximum requests per window per client IP on `POST /v1/new`. Raise for load tests; restart picks it up.   |
+| `RATE_LIMIT_WINDOW_MS`        | `60000` (60 s)            | The rolling window for the rate limit above.                                                              |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | _(unset = OTel disabled)_ | Grafana Cloud OTLP HTTP base URL. Set to enable traces; unset to disable. Restart required.               |
+| `LOG_LEVEL`                   | `info`                    | Pino log level: `fatal \| error \| warn \| info \| debug \| trace`. Lower = more noise. Restart required. |
+
+### What we don't have yet
+
+Gaps to keep expectations calibrated:
+
+- **No metrics endpoint.** Build latency/throughput dashboards from the trace and log streams in Grafana.
+- **No staging environment.** Every merge to `main` ships directly to the production Railway and Vercel services.
+- **No automated rollback.** The procedure above is manual. Wire a Grafana alert to trigger a revert workflow if you want automation.
+- **No alerting beyond Railway's healthcheck restart loop.** Add your own: Grafana alert on `/health` 503 rate, log error rate, or p95 latency when ready.
+- **No CHANGELOG.** Release notes live in GitHub Releases.
+
 ## API
 
 ```
