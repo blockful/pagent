@@ -246,6 +246,11 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       } else if (page.state === 'received') {
         this.awaiting = true;
         this.awaitingMessage = '✓ The agent has your input';
+        // Defensive reset: a previous tick may have set awaitingStalled=true after
+        // the 60s deadline. If the agent then picks up before the user navigates
+        // away, the banner should drop the stalled visual state alongside the
+        // message change.
+        this.awaitingStalled = false;
       }
     } catch (err) {
       console.error('GET page failed', err);
@@ -294,6 +299,11 @@ class AgentUIApp extends SignalWatcher(LitElement) {
           const page = (await res.json()) as PageResponse;
           if (page.state === 'received') {
             this.awaitingMessage = '✓ The agent has your input';
+            // Defensive reset: a previous tick may have set awaitingStalled=true after
+            // the 60s deadline. If the agent then picks up before the user navigates
+            // away, the banner should drop the stalled visual state alongside the
+            // message change.
+            this.awaitingStalled = false;
             return; // stop polling
           }
         }
