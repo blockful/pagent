@@ -241,6 +241,7 @@ const newPageHandler = async (c: Context) => {
     expiresAt: now + PAGE_TTL_MS,
   };
   await db.insertPage(page);
+  metrics.pagesCreated.add(1);
   return c.json({ id: page.id, url: `${PUBLIC_URL}/${page.id}`, expires_at: page.expiresAt }, 201);
 };
 
@@ -276,9 +277,9 @@ const submitResultHandler = async (c: Context) => {
   }
   const action = bodyResult.data;
   const outcome = await db.submitPage(idResult.data, action);
-  if (outcome === 'not_found')
+  if (outcome.kind === 'not_found')
     return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
-  if (outcome === 'conflict')
+  if (outcome.kind === 'conflict')
     return c.json(
       {
         error: 'conflict',
@@ -286,6 +287,8 @@ const submitResultHandler = async (c: Context) => {
       },
       409,
     );
+  metrics.pagesSubmitted.add(1);
+  metrics.pageSubmitLatency.record((Date.now() - outcome.createdAt.getTime()) / 1000);
   return c.json({ ok: true });
 };
 
