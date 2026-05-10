@@ -9,10 +9,12 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { apiReference } from '@scalar/hono-api-reference';
+import { trace } from '@opentelemetry/api';
 import * as db from './db.ts';
 import type { Page } from './db.ts';
 import { env, pageIdSchema, newPageBodySchema, resultBodySchema } from './schemas.ts';
 import { logger } from './logger.ts';
+import { metrics, statusClassFor } from './metrics.ts';
 import type { RequestIdVariables } from './request-id.ts';
 import { requestId, getLog, getRequestId } from './request-id.ts';
 
@@ -121,15 +123,44 @@ app.use(
   }),
 );
 
+// Request observability: bumps RED metrics, surfaces trace_id in a response
+// header, and emits a structured access log. One middleware so we measure
+// once and the surrounding stack is unambiguous.
 app.use('*', async (c, next) => {
   const start = Date.now();
   await next();
+  const durationMs = Date.now() - start;
+  const status = c.res.status;
+  // routePath is the matched pattern ("/:id") rather than the literal URL —
+  // keeps metric cardinality bounded. Unmatched routes fall back to a fixed
+  // label so 404 spam doesn't blow up the series count.
+  const route = c.req.routePath ?? '<unknown>';
+
+  // Surface trace_id so operators can paste it into Grafana's Tempo explorer.
+  const span = trace.getActiveSpan();
+  const traceId = span?.spanContext().traceId;
+  if (traceId && traceId !== '00000000000000000000000000000000') {
+    c.header('x-trace-id', traceId);
+  }
+
+  metrics.httpRequests.add(1, {
+    method: c.req.method,
+    route,
+    status_class: statusClassFor(status),
+    status_code: String(status),
+  });
+  metrics.httpRequestDuration.record(durationMs / 1000, {
+    method: c.req.method,
+    route,
+  });
+
   getLog(c).info(
     {
       method: c.req.method,
       path: c.req.path,
-      status: c.res.status,
-      duration_ms: Date.now() - start,
+      route,
+      status,
+      duration_ms: durationMs,
     },
     'request',
   );
