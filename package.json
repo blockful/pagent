@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "description": "Hosted UI rendering for terminal-bound AI agents — monorepo root",
+  "license": "MIT",
   "workspaces": [
     "apps/api",
     "apps/web",

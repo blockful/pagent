@@ -5,7 +5,7 @@ Hosted UI rendering for terminal-bound AI agents. The agent emits an A2UI surfac
 - **Live API:** https://pagent.up.railway.app
 - **Live renderer:** https://pagent.vercel.app
 
-See [PRD.md](./PRD.md) for the design and [HANDOFF.md](./HANDOFF.md) for build context.
+See [PRD.md](./PRD.md) for the design and [HANDOFF.md](./docs/HANDOFF.md) for build context.
 
 ## How it works
 
