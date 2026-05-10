@@ -139,7 +139,7 @@ To bypass in an emergency: `git push --no-verify` (don't make this a habit).
 1. Create a new Railway service from this repo.
 2. Set **Root Directory** to `apps/api` so Railway picks up the railway.json.
 3. Set environment variables (see `apps/api/.env.example`):
-   - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://pagent.vercel.app`). Used in `show_ui` responses.
+   - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://pagent.vercel.app`). Used in `show_ui` responses. **Required in production.** Boot fails loudly if missing.
    - `ALLOWED_ORIGINS` — comma-separated origins allowed to call the API (set to your Vercel URL). **Required in production.** API boot fails loudly if missing.
    - `PORT` — Railway sets this automatically; the server reads it.
    - `PAGE_TTL_MS` — optional; default 30 minutes.

@@ -13,11 +13,8 @@ import { logger } from './logger.ts';
 // --- Config ------------------------------------------------------------------
 
 export const PORT = env.PORT;
-// Prefer PUBLIC_URL; on Railway fall back to the known Vercel renderer rather
-// than the container's localhost (Railway env injection has been flaky for this var).
-export const PUBLIC_URL =
-  env.PUBLIC_URL ??
-  (env.RAILWAY_ENVIRONMENT ? 'https://pagent.vercel.app' : `http://localhost:${PORT}`);
+// In production envSchema ensures PUBLIC_URL is set; in dev fall back to localhost.
+export const PUBLIC_URL = env.PUBLIC_URL ?? `http://localhost:${PORT}`;
 export const PAGE_TTL_MS = env.PAGE_TTL_MS;
 export const ALLOWED_ORIGINS = env.ALLOWED_ORIGINS;
 

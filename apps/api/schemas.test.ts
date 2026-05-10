@@ -184,6 +184,7 @@ describe('envSchema', () => {
       DATABASE_URL: 'x',
       NODE_ENV: 'production',
       ALLOWED_ORIGINS: 'https://pagent.vercel.app',
+      PUBLIC_URL: 'https://pagent.vercel.app',
     });
     expect(r.success).toBe(true);
   });
@@ -195,6 +196,33 @@ describe('envSchema', () => {
 
   it('accepts test without ALLOWED_ORIGINS', () => {
     const r = envSchema.safeParse({ DATABASE_URL: 'x', NODE_ENV: 'test' });
+    expect(r.success).toBe(true);
+  });
+
+  it('requires PUBLIC_URL when NODE_ENV=production', () => {
+    const r = envSchema.safeParse({
+      DATABASE_URL: 'x',
+      NODE_ENV: 'production',
+      ALLOWED_ORIGINS: 'https://a.com',
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.some((i) => i.path.includes('PUBLIC_URL'))).toBe(true);
+    }
+  });
+
+  it('accepts production with valid PUBLIC_URL', () => {
+    const r = envSchema.safeParse({
+      DATABASE_URL: 'x',
+      NODE_ENV: 'production',
+      ALLOWED_ORIGINS: 'https://a.com',
+      PUBLIC_URL: 'https://pagent.vercel.app',
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('development without PUBLIC_URL still parses', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'x', NODE_ENV: 'development' });
     expect(r.success).toBe(true);
   });
 });
