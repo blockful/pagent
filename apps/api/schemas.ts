@@ -24,7 +24,7 @@ export const resultBodySchema = z
 
 // --- Environment -------------------------------------------------------------
 
-const envSchema = z.object({
+export const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   PORT: z.coerce.number().optional().default(8787),
   PUBLIC_URL: z.string().url().optional(),
