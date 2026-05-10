@@ -1,6 +1,12 @@
 # Supabase Persistence — Design (V1 storage)
 
-Status: approved 2026-05-09. Implementation pending.
+> **SUPERSEDED 2026-05-09.** This spec was written against the
+> session/event-log architecture that the PRD has since replaced with the
+> single-shot page model. See
+> [`2026-05-09-page-model-supabase-design.md`](./2026-05-09-page-model-supabase-design.md)
+> for the current design. This file is kept for history.
+
+Status: superseded.
 
 ## Goal
 

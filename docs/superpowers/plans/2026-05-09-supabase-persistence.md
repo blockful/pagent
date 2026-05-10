@@ -1,5 +1,10 @@
 # Supabase Persistence Implementation Plan
 
+> **SUPERSEDED 2026-05-09.** This plan implemented the session/event-log
+> architecture; the PRD has since pivoted to the single-shot page model.
+> See [`2026-05-09-page-model-rewrite.md`](./2026-05-09-page-model-rewrite.md)
+> for the current plan. Kept for history.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make `agent-ui-session` survive server restarts by persisting sessions, surfaces, and the event log to Supabase Postgres while preserving the existing REST contract and SSE/long-poll fan-out.
