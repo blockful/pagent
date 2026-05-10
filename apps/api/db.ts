@@ -105,6 +105,10 @@ export async function getActivePage(id: string): Promise<Page | null> {
 /**
  * Atomic open→submitted transition. Returns 'ok', 'conflict', or 'not_found'.
  *
+ * 'not_found' covers both "no such page id" and "page expired" — the caller
+ * doesn't need to distinguish, and the disambiguation SELECT explicitly
+ * excludes expired rows so a stale-but-not-yet-swept row reads correctly.
+ *
  * NOT wrapped in withRetry: if attempt 1 commits but its response is lost on
  * the network, attempt 2 finds state='submitted' and (incorrectly) reports
  * 'conflict' — caller would conclude someone else submitted. Better to
@@ -124,8 +128,12 @@ export async function submitPage(
     returning id
   `;
   if (rows.length > 0) return 'ok';
-  // Disambiguate: does the page exist at all (conflict) or not (not_found)?
-  const exists = await c<{ id: string }[]>`select id from pages where id = ${id}`;
+  // Disambiguate: does the page exist and is it still valid (conflict) or not (not_found)?
+  // Filter on expires_at > now() so an expired-but-not-yet-swept row is
+  // correctly classified as 'not_found' rather than 'conflict'.
+  const exists = await c<{ id: string }[]>`
+    select id from pages where id = ${id} and expires_at > now()
+  `;
   return exists.length > 0 ? 'conflict' : 'not_found';
 }
 

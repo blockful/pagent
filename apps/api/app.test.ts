@@ -190,6 +190,19 @@ describe('POST /:id/result', () => {
     expect(res.status).toBe(404);
   });
 
+  it('returns 404 (not 409) when submitPage reports not_found for an expired page', async () => {
+    // Regression: before the fix, the disambiguation SELECT in submitPage
+    // matched expired rows, so submitPage returned 'conflict' and the handler
+    // returned 409 "already submitted" for a page that was merely expired.
+    // The fixed SELECT adds `expires_at > now()`, making expired rows return
+    // 'not_found' → 404, which is the correct user-facing response.
+    (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce('not_found');
+    const res = await app.fetch(req('POST', `/${UNKNOWN_ID}/result`, validAction));
+    expect(res.status).toBe(404);
+    const body = await json(res);
+    expect(body.error).not.toBe('conflict');
+  });
+
   it('returns 200 and calls db.submitPage when page is open', async () => {
     const page = fakePage();
     (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce('ok');
