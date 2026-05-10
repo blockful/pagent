@@ -15,11 +15,12 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./db.ts', () => ({
   init: vi.fn(() => Promise.resolve()),
   shutdown: vi.fn(() => Promise.resolve()),
-  loadActivePages: vi.fn(() => Promise.resolve()),
   insertPage: vi.fn(() => Promise.resolve()),
-  markSubmitted: vi.fn(() => Promise.resolve()),
-  markReceived: vi.fn(() => Promise.resolve()),
+  getActivePage: vi.fn(() => Promise.resolve(null)),
+  submitPage: vi.fn(() => Promise.resolve('not_found')),
+  fetchAndAdvanceResult: vi.fn(() => Promise.resolve(null)),
   deletePage: vi.fn(() => Promise.resolve()),
+  deleteExpiredPages: vi.fn(() => Promise.resolve(0)),
   ping: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -32,12 +33,10 @@ beforeAll(() => {
 
 // Dynamic import so the module is loaded AFTER the env is set.
 let app: Awaited<typeof import('./app.ts')>['app'];
-let pages: Awaited<typeof import('./app.ts')>['pages'];
 
 beforeAll(async () => {
   const mod = await import('./app.ts');
   app = mod.app;
-  pages = mod.pages;
 });
 
 const BASE = 'http://localhost';
@@ -56,12 +55,8 @@ async function json(res: Response): Promise<Record<string, unknown>> {
   return res.json() as Promise<Record<string, unknown>>;
 }
 
-// Reset in-memory page store and mock call counts before each test.
-// NOTE: we do NOT reset the rate-limiter store between tests in the same
-// describe — each describe creates its own IP bucket, so per-describe
-// isolation comes from using distinct x-forwarded-for values.
+// Reset mock call counts before each test.
 beforeEach(() => {
-  pages.clear();
   vi.clearAllMocks();
 });
 

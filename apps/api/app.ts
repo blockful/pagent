@@ -10,7 +10,7 @@ import type { Page } from './db.ts';
 import { env, pageIdSchema, newPageBodySchema, resultBodySchema } from './schemas.ts';
 import { logger } from './logger.ts';
 
-// --- Storage -----------------------------------------------------------------
+// --- Config ------------------------------------------------------------------
 
 export const PORT = env.PORT;
 // Prefer PUBLIC_URL; on Railway fall back to the known Vercel renderer rather
@@ -22,8 +22,6 @@ export const PAGE_TTL_MS = env.PAGE_TTL_MS;
 export const ALLOWED_ORIGINS = env.ALLOWED_ORIGINS;
 
 export const MAX_BODY_BYTES = 256 * 1024; // 256 KB
-
-export const pages = new Map<string, Page>();
 
 export const newId = () => randomBytes(16).toString('hex');
 
@@ -50,33 +48,6 @@ const newPageLimiter = rateLimiter({
     return c.json({ error: 'rate_limited', retry_after_seconds: retryAfter }, 429);
   },
 });
-
-export const isExpired = (p: Page) => Date.now() >= p.expiresAt;
-
-export const getLivePage = (id: string): Page | null => {
-  const p = pages.get(id);
-  if (!p) return null;
-  if (isExpired(p)) {
-    pages.delete(id);
-    db.deletePage(id).catch((err) =>
-      logger.error({ err, page_id: id }, 'lazy ttl db delete failed'),
-    );
-    return null;
-  }
-  return p;
-};
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, p] of pages) {
-    if (now >= p.expiresAt) {
-      pages.delete(id);
-      db.deletePage(id).catch((err) =>
-        logger.error({ err, page_id: id }, 'ttl sweep db delete failed'),
-      );
-    }
-  }
-}, 60_000).unref();
 
 // --- App ---------------------------------------------------------------------
 
@@ -124,7 +95,7 @@ app.use('*', async (c, next) => {
 app.get('/health', async (c) => {
   try {
     await db.ping();
-    return c.json({ ok: true, db: 'ok', pages: pages.size });
+    return c.json({ ok: true, db: 'ok' });
   } catch (err) {
     logger.error({ err }, 'health check db ping failed');
     return c.json({ ok: false, db: 'error' }, 503);
@@ -147,14 +118,13 @@ app.post('/new', newPageLimiter, async (c) => {
     expiresAt: now + PAGE_TTL_MS,
   };
   await db.insertPage(page);
-  pages.set(page.id, page);
   return c.json({ id: page.id, url: `${PUBLIC_URL}/${page.id}`, expires_at: page.expiresAt }, 201);
 });
 
-app.get('/:id', (c) => {
+app.get('/:id', async (c) => {
   const idResult = pageIdSchema.safeParse(c.req.param('id'));
   if (!idResult.success) return c.json({ error: 'not_found' }, 404);
-  const p = getLivePage(idResult.data);
+  const p = await db.getActivePage(idResult.data);
   if (!p) return c.json({ error: 'not_found' }, 404);
   return c.json({
     spec: p.spec,
@@ -167,30 +137,22 @@ app.get('/:id', (c) => {
 app.post('/:id/result', async (c) => {
   const idResult = pageIdSchema.safeParse(c.req.param('id'));
   if (!idResult.success) return c.json({ error: 'not_found' }, 404);
-  const p = getLivePage(idResult.data);
-  if (!p) return c.json({ error: 'not_found' }, 404);
-  if (p.state !== 'open') return c.json({ error: 'conflict', state: p.state }, 409);
   const raw = await c.req.json().catch(() => null);
   const bodyResult = resultBodySchema.safeParse(raw);
   if (!bodyResult.success) {
     return c.json({ error: 'bad_request', issues: bodyResult.error.issues }, 400);
   }
   const action = bodyResult.data;
-  await db.markSubmitted(p.id, action);
-  p.state = 'submitted';
-  p.result = action;
+  const outcome = await db.submitPage(idResult.data, action);
+  if (outcome === 'not_found') return c.json({ error: 'not_found' }, 404);
+  if (outcome === 'conflict') return c.json({ error: 'conflict' }, 409);
   return c.json({ ok: true });
 });
 
 app.get('/:id/result', async (c) => {
   const idResult = pageIdSchema.safeParse(c.req.param('id'));
   if (!idResult.success) return c.json({ error: 'not_found' }, 404);
-  const p = getLivePage(idResult.data);
-  if (!p) return c.json({ error: 'not_found' }, 404);
-  const stateAtRead = p.state;
-  if (p.state === 'submitted') {
-    await db.markReceived(p.id);
-    p.state = 'received';
-  }
-  return c.json({ state: stateAtRead, result: p.result });
+  const r = await db.fetchAndAdvanceResult(idResult.data);
+  if (!r) return c.json({ error: 'not_found' }, 404);
+  return c.json({ state: r.stateAtRead, result: r.result });
 });

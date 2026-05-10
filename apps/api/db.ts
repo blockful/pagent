@@ -58,23 +58,62 @@ type PageRow = {
   expires_at: Date;
 };
 
-export async function loadActivePages(into: Map<string, Page>): Promise<void> {
+export async function getActivePage(id: string): Promise<Page | null> {
   const c = client();
   const rows = await c<PageRow[]>`
     select id, spec, state, result, created_at, expires_at
     from pages
-    where expires_at > now()
+    where id = ${id} and expires_at > now()
   `;
-  for (const r of rows) {
-    into.set(r.id, {
-      id: r.id,
-      spec: r.spec,
-      state: r.state,
-      result: r.result,
-      createdAt: r.created_at.getTime(),
-      expiresAt: r.expires_at.getTime(),
-    });
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    id: r.id,
+    spec: r.spec,
+    state: r.state,
+    result: r.result,
+    createdAt: r.created_at.getTime(),
+    expiresAt: r.expires_at.getTime(),
+  };
+}
+
+export async function submitPage(
+  id: string,
+  action: unknown,
+): Promise<'ok' | 'conflict' | 'not_found'> {
+  const c = client();
+  const rows = await c<{ id: string }[]>`
+    update pages
+    set state = 'submitted',
+        result = ${c.json(action as never)},
+        submitted_at = now()
+    where id = ${id} and state = 'open' and expires_at > now()
+    returning id
+  `;
+  if (rows.length > 0) return 'ok';
+  // Disambiguate: does the page exist at all (conflict) or not (not_found)?
+  const exists = await c<{ id: string }[]>`select id from pages where id = ${id}`;
+  return exists.length > 0 ? 'conflict' : 'not_found';
+}
+
+export async function fetchAndAdvanceResult(
+  id: string,
+): Promise<{ stateAtRead: PageState; result: unknown } | null> {
+  const c = client();
+  const rows = await c<{ state: PageState; result: unknown }[]>`
+    select state, result from pages where id = ${id} and expires_at > now()
+  `;
+  if (rows.length === 0) return null;
+  const { state, result } = rows[0];
+  const stateAtRead = state;
+  if (state === 'submitted') {
+    await c`
+      update pages
+      set state = 'received', received_at = now()
+      where id = ${id} and state = 'submitted'
+    `;
   }
+  return { stateAtRead, result };
 }
 
 export async function insertPage(p: Page): Promise<void> {
@@ -90,28 +129,13 @@ export async function insertPage(p: Page): Promise<void> {
   `;
 }
 
-export async function markSubmitted(id: string, result: unknown): Promise<void> {
-  const c = client();
-  await c`
-    update pages
-    set state = 'submitted',
-        result = ${c.json(result as never)},
-        submitted_at = now()
-    where id = ${id} and state = 'open'
-  `;
-}
-
-export async function markReceived(id: string): Promise<void> {
-  const c = client();
-  await c`
-    update pages
-    set state = 'received',
-        received_at = now()
-    where id = ${id} and state = 'submitted'
-  `;
-}
-
 export async function deletePage(id: string): Promise<void> {
   const c = client();
   await c`delete from pages where id = ${id}`;
+}
+
+export async function deleteExpiredPages(): Promise<number> {
+  const c = client();
+  const result = await c`delete from pages where expires_at <= now()`;
+  return result.count;
 }
