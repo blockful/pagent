@@ -108,6 +108,15 @@ claude --plugin-dir /absolute/path/to/pagent
 PAGENT_URL=http://localhost:8787 claude   # then talk to local API
 ```
 
+### Quality gate
+
+A Husky `pre-push` hook runs `typecheck → lint → format:check → test`
+on every `git push`. To run it manually before pushing:
+
+    .husky/pre-push
+
+To bypass in an emergency: `git push --no-verify` (don't make this a habit).
+
 ## Deploy
 
 ### `apps/api/` → Railway
