@@ -450,6 +450,35 @@ describe('error handler', () => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /openapi.yaml
+// ---------------------------------------------------------------------------
+
+describe('GET /openapi.yaml', () => {
+  it('returns the YAML with application/yaml content-type', async () => {
+    const res = await app.fetch(new Request('http://test/openapi.yaml'));
+    expect(res.status).toBe(200);
+    const ct = res.headers.get('content-type') ?? '';
+    expect(ct).toContain('application/yaml');
+    const body = await res.text();
+    expect(body.trimStart()).toMatch(/^openapi:/);
+  });
+
+  it('sets X-Request-ID header', async () => {
+    const res = await app.fetch(new Request('http://test/openapi.yaml'));
+    expect(res.headers.get('x-request-id')).toMatch(/^[a-f0-9]{32}$/);
+  });
+
+  it('body contains all expected paths', async () => {
+    const res = await app.fetch(new Request('http://test/openapi.yaml'));
+    const body = await res.text();
+    expect(body).toContain('/v1/new');
+    expect(body).toContain('/v1/{id}');
+    expect(body).toContain('/v1/{id}/result');
+    expect(body).toContain('/health');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Deprecation shim
 // ---------------------------------------------------------------------------
 

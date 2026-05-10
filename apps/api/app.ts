@@ -5,12 +5,28 @@ import { secureHeaders } from 'hono/secure-headers';
 import type { Context, Next } from 'hono';
 import { rateLimiter } from 'hono-rate-limiter';
 import { randomBytes } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import * as db from './db.ts';
 import type { Page } from './db.ts';
 import { env, pageIdSchema, newPageBodySchema, resultBodySchema } from './schemas.ts';
 import { logger } from './logger.ts';
 import type { RequestIdVariables } from './request-id.ts';
 import { requestId, getLog, getRequestId } from './request-id.ts';
+
+// --- OpenAPI spec (loaded once at boot, served from memory) ------------------
+
+const openapiPath = resolve(import.meta.dirname, '../../docs/openapi.yaml');
+let openapiYaml: string | null = null;
+const loadOpenApi = async () => {
+  try {
+    openapiYaml = await readFile(openapiPath, 'utf8');
+  } catch (err) {
+    logger.error({ err, openapiPath }, 'failed to load openapi.yaml at boot');
+    openapiYaml = null;
+  }
+};
+await loadOpenApi();
 
 // --- Config ------------------------------------------------------------------
 
@@ -112,6 +128,15 @@ app.get('/health', async (c) => {
     logger.error({ err }, 'health check db ping failed');
     return c.json({ ok: false, db: 'error' }, 503);
   }
+});
+
+// --- OpenAPI document --------------------------------------------------------
+
+app.get('/openapi.yaml', (c) => {
+  if (!openapiYaml) {
+    return c.json({ error: 'openapi_unavailable' }, 503);
+  }
+  return c.body(openapiYaml, 200, { 'Content-Type': 'application/yaml; charset=utf-8' });
 });
 
 // --- Route handlers (shared between /v1 and compat shim) --------------------

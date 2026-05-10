@@ -180,6 +180,8 @@ This section is for on-call engineers. It documents the observable surface of th
 system so you can answer "is it broken, what broke, how do I fix it?" without
 reading the code.
 
+- **Machine-readable API contract:** `GET /openapi.yaml` (OpenAPI 3.1). Also at `docs/openapi.yaml` in the repo for offline browsing, Postman imports, and Python client generation.
+
 ### Health check
 
 ```
@@ -307,6 +309,9 @@ GET    /v1/:id                                     -> { spec, state, result, exp
 POST   /v1/:id/result           body: <action>     -> { ok }              (browser submits)
 GET    /v1/:id/result                              -> { state, result }   (agent reads, marks "received" on first read)
 ```
+
+A machine-readable OpenAPI 3.1 contract is served at `GET /openapi.yaml`.
+The same file is committed at `docs/openapi.yaml` for offline browsing.
 
 The unversioned paths (`/new`, `/:id`, `/:id/result`) remain wired to the same
 handlers for the lifetime of the v1 series, but every response carries a
