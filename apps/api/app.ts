@@ -51,6 +51,7 @@ const newPageLimiter = rateLimiter({
         error: 'rate_limited',
         retry_after_seconds: retryAfter,
         message: `Too many requests; retry after ${retryAfter} seconds`,
+        request_id: getRequestId(c),
       },
       429,
     );

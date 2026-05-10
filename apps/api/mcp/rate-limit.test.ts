@@ -19,8 +19,19 @@ describe('RateLimiter', () => {
     for (let i = 0; i < 3; i++) limiter.check('a', NOW);
     const result = limiter.check('a', NOW);
     expect(result.allowed).toBe(false);
-    expect(result.retryAfterSeconds).toBeGreaterThan(0);
-    expect(result.retryAfterSeconds).toBeLessThanOrEqual(60);
+    expect(result.secondsUntilReset).toBeGreaterThan(0);
+    expect(result.secondsUntilReset).toBeLessThanOrEqual(60);
+  });
+
+  it('exposes secondsUntilReset on allowed responses too (for RateLimit header)', () => {
+    const result = limiter.check('a', NOW);
+    expect(result.allowed).toBe(true);
+    expect(result.secondsUntilReset).toBe(60);
+  });
+
+  it('windowSeconds() returns the configured window in whole seconds', () => {
+    expect(limiter.windowSeconds()).toBe(60);
+    expect(new RateLimiter(3, 30_000).windowSeconds()).toBe(30);
   });
 
   it('keys per identifier — exhausting one bucket does not affect another', () => {

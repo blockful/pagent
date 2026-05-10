@@ -31,9 +31,32 @@ import { RateLimiter } from './rate-limit.ts';
 // --- Test fixture -----------------------------------------------------------
 
 let server: Server;
-let baseUrl: string;
 let mcpUrl: URL;
 const rateLimiter = new RateLimiter(1000, 60_000); // generous; rate-limit cases override per-test
+
+/**
+ * Boot a Node http server bound to a random local port. Returns once the
+ * server is listening. `closeAllConnections()` is called in teardown to
+ * tear down keep-alive sockets so close() returns promptly under CI.
+ */
+async function startServer(handler: ReturnType<typeof makeMcpHttpHandler>): Promise<{
+  server: Server;
+  url: URL;
+  close: () => Promise<void>;
+}> {
+  const s = createServer(handler);
+  await new Promise<void>((resolve) => s.listen(0, '127.0.0.1', () => resolve()));
+  const port = (s.address() as AddressInfo).port;
+  return {
+    server: s,
+    url: new URL(`http://127.0.0.1:${port}/mcp`),
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        s.closeAllConnections();
+        s.close((err) => (err ? reject(err) : resolve()));
+      }),
+  };
+}
 
 beforeAll(async () => {
   const handler = makeMcpHttpHandler({
@@ -41,16 +64,17 @@ beforeAll(async () => {
     pageTtlMs: 60_000,
     rateLimiter,
   });
-  server = createServer(handler);
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
-  const port = (server.address() as AddressInfo).port;
-  baseUrl = `http://127.0.0.1:${port}`;
-  mcpUrl = new URL(`${baseUrl}/mcp`);
+  const started = await startServer(handler);
+  server = started.server;
+  mcpUrl = started.url;
 });
 
 afterAll(
   () =>
-    new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+    new Promise<void>((resolve, reject) => {
+      server.closeAllConnections();
+      server.close((err) => (err ? reject(err) : resolve()));
+    }),
 );
 
 beforeEach(() => {
@@ -217,6 +241,50 @@ describe('HTTP layer', () => {
     expect(body.message).toContain('application/json');
     expect(typeof body.request_id).toBe('string');
   });
+
+  it('regenerates X-Request-Id when the inbound value violates the regex', async () => {
+    // Spaces aren't in [A-Za-z0-9_-]{1,128}, so the value should be rejected
+    // and a fresh 32-char hex id generated in its place.
+    const res = await postMcp({ 'X-Request-Id': 'has spaces and !!! chars' });
+    const echoed = res.headers.get('X-Request-Id');
+    expect(echoed).not.toBe('has spaces and !!! chars');
+    expect(echoed).toMatch(/^[a-f0-9]{32}$/);
+    await res.body?.cancel();
+  });
+
+  it('rejects POSTs that exceed the configured body cap with a 400', async () => {
+    // Inject a tiny cap so we don't have to send 256 KB to trigger it.
+    const tightHandler = makeMcpHttpHandler({
+      publicUrl: 'http://test.local',
+      pageTtlMs: 60_000,
+      maxBodyBytes: 200,
+      rateLimiter: new RateLimiter(1000, 60_000),
+    });
+    const { url, close } = await startServer(tightHandler);
+    try {
+      const oversize = 'x'.repeat(500);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: MCP_ACCEPT },
+        body: `{"jsonrpc":"2.0","id":1,"method":"junk","params":"${oversize}"}`,
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe('bad_request');
+      expect(body.message).toContain('200-byte limit');
+      expect(typeof body.request_id).toBe('string');
+    } finally {
+      await close();
+    }
+  });
+
+  it('emits draft-7 RateLimit + RateLimit-Policy on every POST (not just 429)', async () => {
+    const res = await postMcp();
+    const rateLimitHeader = res.headers.get('RateLimit');
+    expect(rateLimitHeader).toMatch(/^limit=\d+, remaining=\d+, reset=\d+$/);
+    expect(res.headers.get('RateLimit-Policy')).toMatch(/^\d+;w=\d+$/);
+    await res.body?.cancel();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -224,92 +292,67 @@ describe('HTTP layer', () => {
 // ---------------------------------------------------------------------------
 
 describe('rate limiting', () => {
-  it('returns 429 with retry_after once the per-IP cap is exhausted', async () => {
-    // Tight limiter, isolated to this describe block.
-    const tight = new RateLimiter(2, 60_000);
-    const tightHandler = makeMcpHttpHandler({
+  async function startTightServer(limit: number) {
+    const handler = makeMcpHttpHandler({
       publicUrl: 'http://test.local',
       pageTtlMs: 60_000,
-      rateLimiter: tight,
+      rateLimiter: new RateLimiter(limit, 60_000),
     });
-    const tightServer = createServer(tightHandler);
-    await new Promise<void>((resolve) => tightServer.listen(0, '127.0.0.1', () => resolve()));
-    const tightPort = (tightServer.address() as AddressInfo).port;
-    const tightUrl = new URL(`http://127.0.0.1:${tightPort}/mcp`);
+    return startServer(handler);
+  }
 
+  function postFromIp(url: URL, ip: string): Promise<Response> {
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: MCP_ACCEPT,
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': ip,
+      },
+      body: INITIALIZE_BODY,
+    });
+  }
+
+  it('returns 429 with retry_after_seconds once the per-IP cap is exhausted', async () => {
+    const { url, close } = await startTightServer(2);
     try {
-      const ip = '1.2.3.4';
-      const post = () =>
-        fetch(tightUrl, {
-          method: 'POST',
-          headers: {
-            Accept: MCP_ACCEPT,
-            'Content-Type': 'application/json',
-            'X-Forwarded-For': ip,
-          },
-          body: INITIALIZE_BODY,
-        });
-
-      const r1 = await post();
-      const r2 = await post();
+      const r1 = await postFromIp(url, '1.2.3.4');
+      const r2 = await postFromIp(url, '1.2.3.4');
       expect(r1.status).toBeLessThan(400);
       expect(r2.status).toBeLessThan(400);
       await r1.body?.cancel();
       await r2.body?.cancel();
 
-      const r3 = await post();
+      const r3 = await postFromIp(url, '1.2.3.4');
       expect(r3.status).toBe(429);
       const body = await r3.json();
       expect(body.error).toBe('rate_limited');
       expect(typeof body.retry_after_seconds).toBe('number');
       expect(body.retry_after_seconds).toBeGreaterThan(0);
+      expect(typeof body.request_id).toBe('string');
       expect(r3.headers.get('Retry-After')).toBe(String(body.retry_after_seconds));
-      expect(r3.headers.get('RateLimit-Limit')).toBe('2');
+      // Combined draft-7 header — same shape hono-rate-limiter emits on REST.
+      expect(r3.headers.get('RateLimit')).toMatch(/limit=2, remaining=0, reset=\d+/);
     } finally {
-      await new Promise<void>((resolve, reject) =>
-        tightServer.close((err) => (err ? reject(err) : resolve())),
-      );
+      await close();
     }
   });
 
   it('keys per IP — exhausting one bucket does not affect another', async () => {
-    const tight = new RateLimiter(1, 60_000);
-    const tightHandler = makeMcpHttpHandler({
-      publicUrl: 'http://test.local',
-      pageTtlMs: 60_000,
-      rateLimiter: tight,
-    });
-    const tightServer = createServer(tightHandler);
-    await new Promise<void>((resolve) => tightServer.listen(0, '127.0.0.1', () => resolve()));
-    const tightPort = (tightServer.address() as AddressInfo).port;
-    const tightUrl = new URL(`http://127.0.0.1:${tightPort}/mcp`);
-
+    const { url, close } = await startTightServer(1);
     try {
-      const post = (ip: string) =>
-        fetch(tightUrl, {
-          method: 'POST',
-          headers: {
-            Accept: MCP_ACCEPT,
-            'Content-Type': 'application/json',
-            'X-Forwarded-For': ip,
-          },
-          body: INITIALIZE_BODY,
-        });
-
-      const r1 = await post('1.1.1.1');
+      const r1 = await postFromIp(url, '1.1.1.1');
       expect(r1.status).toBeLessThan(400);
       await r1.body?.cancel();
 
-      const r2 = await post('1.1.1.1');
+      const r2 = await postFromIp(url, '1.1.1.1');
       expect(r2.status).toBe(429);
 
-      const r3 = await post('2.2.2.2');
+      const r3 = await postFromIp(url, '2.2.2.2');
       expect(r3.status).toBeLessThan(400);
       await r3.body?.cancel();
     } finally {
-      await new Promise<void>((resolve, reject) =>
-        tightServer.close((err) => (err ? reject(err) : resolve())),
-      );
+      await close();
     }
   });
 });

@@ -85,6 +85,9 @@ describe('rate-limits at the configured cap and returns 429', () => {
     // message field is present and references the retry delay
     expect(typeof body.message).toBe('string');
     expect(body.message as string).toContain('60');
+    // request_id is included so REST and MCP 429 bodies have the same shape.
+    expect(typeof body.request_id).toBe('string');
+    expect((body.request_id as string).length).toBeGreaterThan(0);
 
     // A different IP should still succeed (201).
     const other = await app.fetch(postNew(ip2));
