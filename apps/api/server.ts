@@ -4,25 +4,18 @@ import { cors } from 'hono/cors';
 import { randomBytes } from 'node:crypto';
 import * as db from './db.ts';
 import type { Page } from './db.ts';
+import { env, pageIdSchema, newPageBodySchema, resultBodySchema } from './schemas.ts';
 
 // --- Storage -----------------------------------------------------------------
 
-const PORT = Number(process.env.PORT ?? 8787);
+const PORT = env.PORT;
 // Prefer PUBLIC_URL; on Railway fall back to the known Vercel renderer rather
 // than the container's localhost (Railway env injection has been flaky for this var).
 const PUBLIC_URL =
-  process.env.PUBLIC_URL ??
-  (process.env.RAILWAY_ENVIRONMENT ? 'https://pagent.vercel.app' : `http://localhost:${PORT}`);
-const PAGE_TTL_MS = Number(process.env.PAGE_TTL_MS ?? 30 * 60 * 1000);
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
-  ?.split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) {
-  console.error('DATABASE_URL is not set. Copy .env.example to .env and fill it in.');
-  process.exit(1);
-}
+  env.PUBLIC_URL ??
+  (env.RAILWAY_ENVIRONMENT ? 'https://pagent.vercel.app' : `http://localhost:${PORT}`);
+const PAGE_TTL_MS = env.PAGE_TTL_MS;
+const ALLOWED_ORIGINS = env.ALLOWED_ORIGINS;
 
 const pages = new Map<string, Page>();
 
@@ -59,14 +52,15 @@ app.use('*', cors({ origin: ALLOWED_ORIGINS ?? '*' }));
 app.get('/health', (c) => c.json({ ok: true, pages: pages.size }));
 
 app.post('/new', async (c) => {
-  const body = await c.req.json().catch(() => null) as { spec?: unknown } | null;
-  if (!body || !('spec' in body) || body.spec === undefined) {
-    return c.json({ error: 'bad_request', detail: 'expected { spec }' }, 400);
+  const raw = await c.req.json().catch(() => null);
+  const result = newPageBodySchema.safeParse(raw);
+  if (!result.success) {
+    return c.json({ error: 'bad_request', issues: result.error.issues }, 400);
   }
   const now = Date.now();
   const page: Page = {
     id: newId(),
-    spec: body.spec,
+    spec: result.data.spec,
     state: 'open',
     result: null,
     createdAt: now,
@@ -78,7 +72,9 @@ app.post('/new', async (c) => {
 });
 
 app.get('/:id', (c) => {
-  const p = getLivePage(c.req.param('id'));
+  const idResult = pageIdSchema.safeParse(c.req.param('id'));
+  if (!idResult.success) return c.json({ error: 'not_found' }, 404);
+  const p = getLivePage(idResult.data);
   if (!p) return c.json({ error: 'not_found' }, 404);
   return c.json({
     spec: p.spec,
@@ -89,11 +85,17 @@ app.get('/:id', (c) => {
 });
 
 app.post('/:id/result', async (c) => {
-  const p = getLivePage(c.req.param('id'));
+  const idResult = pageIdSchema.safeParse(c.req.param('id'));
+  if (!idResult.success) return c.json({ error: 'not_found' }, 404);
+  const p = getLivePage(idResult.data);
   if (!p) return c.json({ error: 'not_found' }, 404);
   if (p.state !== 'open') return c.json({ error: 'conflict', state: p.state }, 409);
-  const action = await c.req.json().catch(() => null);
-  if (action === null) return c.json({ error: 'bad_request' }, 400);
+  const raw = await c.req.json().catch(() => null);
+  const bodyResult = resultBodySchema.safeParse(raw);
+  if (!bodyResult.success) {
+    return c.json({ error: 'bad_request', issues: bodyResult.error.issues }, 400);
+  }
+  const action = bodyResult.data;
   await db.markSubmitted(p.id, action);
   p.state = 'submitted';
   p.result = action;
@@ -101,7 +103,9 @@ app.post('/:id/result', async (c) => {
 });
 
 app.get('/:id/result', async (c) => {
-  const p = getLivePage(c.req.param('id'));
+  const idResult = pageIdSchema.safeParse(c.req.param('id'));
+  if (!idResult.success) return c.json({ error: 'not_found' }, 404);
+  const p = getLivePage(idResult.data);
   if (!p) return c.json({ error: 'not_found' }, 404);
   const stateAtRead = p.state;
   if (p.state === 'submitted') {
@@ -113,7 +117,7 @@ app.get('/:id/result', async (c) => {
 
 // --- Boot --------------------------------------------------------------------
 
-await db.init(DATABASE_URL);
+await db.init(env.DATABASE_URL);
 await db.loadActivePages(pages);
 console.log(`rehydrated ${pages.size} page(s) from db`);
 
