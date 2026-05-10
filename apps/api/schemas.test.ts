@@ -158,4 +158,43 @@ describe('envSchema', () => {
     const r = envSchema.safeParse({ DATABASE_URL: 'postgresql://x', RATE_LIMIT_MAX: '-1' });
     expect(r.success).toBe(false);
   });
+
+  it('requires ALLOWED_ORIGINS when NODE_ENV=production', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'x', NODE_ENV: 'production' });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.some((i) => i.path.includes('ALLOWED_ORIGINS'))).toBe(true);
+    }
+  });
+
+  it('requires non-empty ALLOWED_ORIGINS in production', () => {
+    const r = envSchema.safeParse({
+      DATABASE_URL: 'x',
+      NODE_ENV: 'production',
+      ALLOWED_ORIGINS: '',
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.some((i) => i.path.includes('ALLOWED_ORIGINS'))).toBe(true);
+    }
+  });
+
+  it('accepts production with valid ALLOWED_ORIGINS', () => {
+    const r = envSchema.safeParse({
+      DATABASE_URL: 'x',
+      NODE_ENV: 'production',
+      ALLOWED_ORIGINS: 'https://pagent.vercel.app',
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('accepts development without ALLOWED_ORIGINS', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'x', NODE_ENV: 'development' });
+    expect(r.success).toBe(true);
+  });
+
+  it('accepts test without ALLOWED_ORIGINS', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'x', NODE_ENV: 'test' });
+    expect(r.success).toBe(true);
+  });
 });
