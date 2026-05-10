@@ -1,5 +1,28 @@
 import postgres from 'postgres';
 
+export type RetryOptions = {
+  attempts?: number;
+  baseDelayMs?: number;
+};
+
+/** Retry a transient async operation with exponential backoff + ±25% jitter. */
+export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}): Promise<T> {
+  const attempts = opts.attempts ?? 3;
+  const baseDelay = opts.baseDelayMs ?? 100;
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (i === attempts - 1) break;
+      const delay = baseDelay * 2 ** i * (0.75 + Math.random() * 0.5);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
 export type PageState = 'open' | 'submitted' | 'received';
 
 export type Page = {
@@ -117,25 +140,24 @@ export async function fetchAndAdvanceResult(
 }
 
 export async function insertPage(p: Page): Promise<void> {
-  const c = client();
-  await c`
-    insert into pages (id, spec, state, expires_at)
-    values (
-      ${p.id},
-      ${c.json(p.spec as never)},
-      'open',
-      to_timestamp(${p.expiresAt} / 1000.0)
-    )
-  `;
+  await withRetry(async () => {
+    const c = client();
+    await c`insert into pages (id, spec, state, expires_at)
+            values (${p.id}, ${c.json(p.spec as never)}, 'open', to_timestamp(${p.expiresAt} / 1000.0))`;
+  });
 }
 
 export async function deletePage(id: string): Promise<void> {
-  const c = client();
-  await c`delete from pages where id = ${id}`;
+  await withRetry(async () => {
+    const c = client();
+    await c`delete from pages where id = ${id}`;
+  });
 }
 
 export async function deleteExpiredPages(): Promise<number> {
-  const c = client();
-  const result = await c`delete from pages where expires_at <= now()`;
-  return result.count;
+  return withRetry(async () => {
+    const c = client();
+    const result = await c`delete from pages where expires_at <= now()`;
+    return result.count;
+  });
 }
