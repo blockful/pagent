@@ -119,3 +119,42 @@ describe('falls back to "anonymous" bucket when x-forwarded-for is absent', () =
     expect(body.message as string).toContain('60');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Last-hop trust model (anti-spoofing)
+// ---------------------------------------------------------------------------
+
+describe('rate-limits on the last X-Forwarded-For hop, not the first', () => {
+  it('buckets requests by the last XFF hop; changing the first hop does not reset the counter', async () => {
+    // Make RATE_LIMIT_MAX requests with a multi-hop XFF where the last hop
+    // is 'real-client'. These should all succeed.
+    for (let i = 0; i < 3; i++) {
+      const res = await app.fetch(postNew(`evil-spoof-1, evil-spoof-2, real-client`));
+      expect(res.status, `request ${i + 1} with real-client last hop should be 201`).toBe(201);
+    }
+
+    // One more request with a different first hop but the SAME last hop must
+    // be 429, proving the bucket is keyed on the last hop.
+    const spoofed = await app.fetch(postNew(`different-spoof, evil-spoof-2, real-client`));
+    expect(spoofed.status).toBe(429);
+    const body = await json(spoofed);
+    expect(body.error).toBe('rate_limited');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Empty / whitespace X-Forwarded-For falls back to anonymous bucket
+// ---------------------------------------------------------------------------
+
+describe('falls back to anonymous bucket when X-Forwarded-For is empty', () => {
+  it('treats an empty XFF header value as anonymous', async () => {
+    // The anonymous bucket was already exhausted by the previous describe
+    // block ("no x-forwarded-for"). An empty string, after
+    // .split(',').map(trim).filter(Boolean), yields [] and falls back to
+    // 'anonymous' — so the very first request here should also be 429.
+    const res = await app.fetch(postNew(''));
+    expect(res.status).toBe(429);
+    const body = await json(res);
+    expect(body.error).toBe('rate_limited');
+  });
+});

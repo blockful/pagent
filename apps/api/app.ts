@@ -41,11 +41,23 @@ export const MAX_BODY_BYTES = 256 * 1024; // 256 KB
 export const newId = () => randomBytes(16).toString('hex');
 
 // Extract the rate-limit key from the request. Behind Railway / Vercel the
-// real client IP arrives in x-forwarded-for (first hop). In local dev and
-// tests no proxy is present, so we collapse everything into a single bucket.
+// real client IP arrives in x-forwarded-for. In local dev and tests no proxy
+// is present, so we collapse everything into a single bucket.
 const clientKey = (c: Context): string => {
   const fwd = c.req.header('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0].trim();
+  if (fwd) {
+    // Trust the LAST hop. Reverse proxies (Railway, Vercel, Cloudflare)
+    // append the real client IP to the right of any incoming XFF chain;
+    // the leftmost entries are whatever the client sent and so are
+    // attacker-controlled. Using the last hop assumes exactly one trusted
+    // proxy in front of the API. If you ever stack proxies, raise the
+    // index by hand.
+    const hops = fwd
+      .split(',')
+      .map((h) => h.trim())
+      .filter(Boolean);
+    if (hops.length > 0) return hops[hops.length - 1]!;
+  }
   // Fallback for local dev / tests where no proxy is present. We deliberately
   // collapse all unknown clients into a single bucket — anonymous traffic is
   // rate-limited as one logical client.
