@@ -25,21 +25,62 @@ exposed publicly with admin auth.
 
 ## Deploying the observability service to Railway
 
-One-time setup in the Railway UI:
+Two paths — pick one.
 
-1. **Project → New service → Deploy from GitHub repo**, pick this repo.
-2. **Service settings → Source → Root Directory** → `infra/observability`.
-3. **Service settings → Build → Builder** → Dockerfile (auto-detected via
-   `railway.json`).
-4. **Variables:**
+### A. Railway CLI (reproducible)
+
+From the repo root, with `railway login` already done and the right project
+linked:
+
+```bash
+# 1. Create the empty service
+railway add --service pagent-observability
+
+# 2. Set the admin password (generate a strong one)
+PASS=$(node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))")
+railway variable set "GF_SECURITY_ADMIN_PASSWORD=$PASS" \
+  --service pagent-observability --skip-deploys
+
+# 3. Attach a 1 GB volume at /data (link the service first)
+railway service link pagent-observability
+railway volume add --mount-path /data
+
+# 4. Deploy the Dockerfile (path-as-root makes infra/observability the
+#    service's source root, so railway.json's "Dockerfile" path resolves)
+railway up ./infra/observability --path-as-root \
+  --service pagent-observability --ci
+
+# 5. Expose port 3000 publicly (Grafana UI). 4318 stays private.
+railway domain --service pagent-observability --port 3000
+```
+
+### B. Railway UI
+
+1. **Project → New service → Empty service.**
+2. **Settings → Source → Connect GitHub repo**, root directory
+   `infra/observability`.
+3. **Variables:**
    - `GF_SECURITY_ADMIN_PASSWORD` — strong random value (Railway's
      "Generate" works).
-5. **Volumes:** attach a 1 GB volume mounted at `/data`.
-6. **Networking:** expose port `3000` publicly. Port `4318` stays private.
-7. **Deploy.**
+4. **Volumes:** attach a 1 GB volume mounted at `/data`.
+5. **Networking:** expose port `3000` publicly. Ports `4317`/`4318` stay
+   private.
+6. **Deploy.**
 
 After deploy, copy the service's **internal** address
 (`pagent-observability.railway.internal`) and the **public** Grafana URL.
+
+> **Notes on Railway-specific behavior:**
+>
+> - **No `VOLUME` directive in the Dockerfile.** Railway rejects it with
+>   "docker VOLUME at Line N is not supported, use Railway Volumes."
+>   Persistence is configured via the Railway Volume API (step 3 above).
+> - **No `healthcheckPath`.** Grafana's `/api/health` returns 200 once the
+>   server is ready, but pairing it with Railway's healthcheck made cold
+>   starts flap because LGTM's subprocess boot order can leave the
+>   reverse-proxy in front of Grafana refusing connections briefly. With
+>   no healthcheck, Railway falls back to TCP-on-the-public-port, which is
+>   sufficient and stable for this stack.
 
 ## Wiring the API service
 
