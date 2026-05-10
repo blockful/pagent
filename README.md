@@ -188,8 +188,8 @@ reading the code.
 GET /health
 ```
 
-This endpoint is not under `/v1` — it is an ops endpoint, not part of the API
-contract. Railway polls it automatically and restarts the service on 503.
+This is an ops endpoint, not part of the API contract. Railway polls it
+automatically and restarts the service on 503.
 
 **Healthy response** (`200`):
 
@@ -220,7 +220,7 @@ every event is one JSON object per line. In dev the output is pretty-printed via
 per-event fields. Request log lines look like:
 
 ```
-{"level":30,"time":1709120000000,"req_id":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6","method":"POST","path":"/v1/new","status":201,"duration_ms":17,"msg":"request"}
+{"level":30,"time":1709120000000,"req_id":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6","method":"POST","path":"/new","status":201,"duration_ms":17,"msg":"request"}
 ```
 
 Every response carries `X-Request-ID` (32-char hex). Quote it in bug
@@ -242,14 +242,13 @@ in Grafana from the trace and log streams.
 
 ### Common failure modes
 
-| Symptom                                                   | Likely cause                                                            | Where to look                                    | First response                                                                                                                                    |
-| --------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /health` → 503                                       | Postgres unreachable                                                    | Supabase status page; Railway DB env vars        | Check Supabase dashboard. If the DB is up but the env var was rotated, restore `DATABASE_URL` in Railway and redeploy.                            |
-| Spike of 429s on `POST /v1/new`                           | Per-IP rate limit hit (default 30 req / 60 s)                           | Railway logs — group by client IP                | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                             |
-| 413 on `POST /v1/new`                                     | Request body > 256 KB                                                   | Log field `error: payload_too_large`             | If a real use case, raise `MAX_BODY_BYTES` in `apps/api/app.ts` (code change + redeploy). Otherwise it's spam; ignore.                            |
-| `Deprecation: true` in response headers                   | A client is hitting the unversioned shim routes (`/new`, `/:id/result`) | Railway logs — filter on path not starting `/v1` | Identify the caller (probably an old MCP install) and ask them to upgrade. The shim stays for the v1 series; this is a warning, not an emergency. |
-| CORS errors in the browser console at `pagent.vercel.app` | `ALLOWED_ORIGINS` does not include the renderer's origin                | Browser DevTools → Network → failing preflight   | Add the missing origin to `ALLOWED_ORIGINS` in Railway env and restart the service.                                                               |
-| Boot failure with `ZodError` in Railway logs              | A required env var is missing                                           | Railway logs (the process exits before it binds) | Read the Zod validation error — it names the missing field. Usually `PUBLIC_URL` or `ALLOWED_ORIGINS`. Set it in Railway, then redeploy.          |
+| Symptom                                                   | Likely cause                                             | Where to look                                    | First response                                                                                                                           |
+| --------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health` → 503                                       | Postgres unreachable                                     | Supabase status page; Railway DB env vars        | Check Supabase dashboard. If the DB is up but the env var was rotated, restore `DATABASE_URL` in Railway and redeploy.                   |
+| Spike of 429s on `POST /new`                              | Per-IP rate limit hit (default 30 req / 60 s)            | Railway logs — group by client IP                | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                    |
+| 413 on `POST /new`                                        | Request body > 256 KB                                    | Log field `error: payload_too_large`             | If a real use case, raise `MAX_BODY_BYTES` in `apps/api/app.ts` (code change + redeploy). Otherwise it's spam; ignore.                   |
+| CORS errors in the browser console at `pagent.vercel.app` | `ALLOWED_ORIGINS` does not include the renderer's origin | Browser DevTools → Network → failing preflight   | Add the missing origin to `ALLOWED_ORIGINS` in Railway env and restart the service.                                                      |
+| Boot failure with `ZodError` in Railway logs              | A required env var is missing                            | Railway logs (the process exits before it binds) | Read the Zod validation error — it names the missing field. Usually `PUBLIC_URL` or `ALLOWED_ORIGINS`. Set it in Railway, then redeploy. |
 
 ### Rollback
 
@@ -286,7 +285,7 @@ behaviour without touching code. `apps/api/.env.example` is the source of truth.
 | `PUBLIC_URL`                  | _(required in prod)_      | Base URL of the renderer, returned in `show_ui` responses. Redeploy required after change.                |
 | `PAGE_TTL_MS`                 | `1800000` (30 min)        | How long a page lives before expiring. Raising it keeps pages alive longer but grows the DB.              |
 | `ALLOWED_ORIGINS`             | _(required in prod)_      | Comma-separated origins the CORS middleware allows. Add an origin here and restart — no redeploy.         |
-| `RATE_LIMIT_MAX`              | `30`                      | Maximum requests per window per client IP on `POST /v1/new`. Raise for load tests; restart picks it up.   |
+| `RATE_LIMIT_MAX`              | `30`                      | Maximum requests per window per client IP on `POST /new`. Raise for load tests; restart picks it up.      |
 | `RATE_LIMIT_WINDOW_MS`        | `60000` (60 s)            | The rolling window for the rate limit above.                                                              |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(unset = OTel disabled)_ | Grafana Cloud OTLP HTTP base URL. Set to enable traces; unset to disable. Restart required.               |
 | `LOG_LEVEL`                   | `info`                    | Pino log level: `fatal \| error \| warn \| info \| debug \| trace`. Lower = more noise. Restart required. |
@@ -304,10 +303,10 @@ Gaps to keep expectations calibrated:
 ## API
 
 ```
-POST   /v1/new                  body: { spec }     -> { id, url, expires_at }
-GET    /v1/:id                                     -> { spec, state, result, expires_at }
-POST   /v1/:id/result           body: <action>     -> { ok }              (browser submits)
-GET    /v1/:id/result                              -> { state, result }   (agent reads, marks "received" on first read)
+POST   /new                  body: { spec }     -> { id, url, expires_at }
+GET    /:id                                     -> { spec, state, result, expires_at }
+POST   /:id/result           body: <action>     -> { ok }              (browser submits)
+GET    /:id/result                              -> { state, result }   (agent reads, marks "received" on first read)
 ```
 
 The API publishes its OpenAPI 3.1 spec at the conventional locations:
@@ -317,10 +316,6 @@ The API publishes its OpenAPI 3.1 spec at the conventional locations:
 - `GET /docs` — interactive Scalar API Reference
 
 The hand-authored source lives at `docs/openapi.yaml` and is loaded once at boot.
-
-The unversioned paths (`/new`, `/:id`, `/:id/result`) remain wired to the same
-handlers for the lifetime of the v1 series, but every response carries a
-`Deprecation: true` header. New integrations MUST use `/v1/...`.
 
 The `spec` body is opaque to the service. V0 assumes A2UI v0.9 — there is no `format` tag on the wire.
 
@@ -340,13 +335,13 @@ Or with curl, end-to-end:
 
 ```bash
 # 1. Create a page with a spec.
-curl -s -X POST http://localhost:8787/v1/new \
+curl -s -X POST http://localhost:8787/new \
   -H 'content-type: application/json' \
   -d '{"spec":[{"createSurface":{"surfaceId":"main","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json"}},{"updateComponents":{"surfaceId":"main","components":[{"id":"root","component":"Column","children":["title","field","submit"]},{"id":"title","component":"Text","text":"Color?"},{"id":"field","component":"TextField","label":"Color","value":{"path":"/color"}},{"id":"submit-label","component":"Text","text":"Send"},{"id":"submit","component":"Button","child":"submit-label","variant":"primary","action":{"event":{"name":"submitted","context":{"color":{"path":"/color"}}}}}]}}]}'
 # -> { "id": "<pageId>", "url": "http://localhost:8788/<pageId>", "expires_at": ... }
 
 # 2. Open the URL in a browser and click Send. Then poll:
-curl -s http://localhost:8787/v1/<pageId>/result
+curl -s http://localhost:8787/<pageId>/result
 # -> { "state": "open",      "result": null }       (before submit)
 # -> { "state": "submitted", "result": { ... } }    (first read after submit; flips to received)
 # -> { "state": "received",  "result": { ... } }    (subsequent reads)

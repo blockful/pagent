@@ -22,7 +22,7 @@ describe('buildCsp', () => {
   });
 
   it('includes API origin for connect-src when VITE_API_URL is set', () => {
-    const csp = buildCsp('https://pagent.up.railway.app/v1');
+    const csp = buildCsp('https://pagent.up.railway.app');
     expect(csp).toContain("connect-src 'self' https://pagent.up.railway.app");
   });
 
@@ -40,7 +40,7 @@ describe('buildCsp', () => {
   });
 
   it('contains all required directives regardless of VITE_API_URL value', () => {
-    for (const apiUrl of [undefined, 'https://pagent.up.railway.app/v1', 'not a url']) {
+    for (const apiUrl of [undefined, 'https://pagent.up.railway.app', 'not a url']) {
       const csp = buildCsp(apiUrl);
       for (const directive of ALL_DIRECTIVES) {
         expect(csp, `missing ${directive} for apiUrl=${apiUrl}`).toContain(directive);

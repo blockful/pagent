@@ -67,7 +67,7 @@ and the README's deploy sections. Notable security-relevant settings:
 
 - `ALLOWED_ORIGINS` is required in production (CORS fail-closed).
 - `PUBLIC_URL` is required in production (no hardcoded fallback).
-- `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` cap `POST /v1/new` per IP.
+- `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` cap `POST /new` per IP.
 - The renderer ships strict CSP, HSTS, X-Frame-Options DENY in
   `apps/web/vercel.json`.
 - The API ships parallel headers via `hono/secure-headers`.

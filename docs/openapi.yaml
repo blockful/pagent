@@ -16,18 +16,11 @@ info:
     A page walks a 3-state machine: `open → submitted → received`.
 
     - **open** — created, waiting for a browser submission.
-    - **submitted** — the browser has called `POST /v1/{id}/result`. The agent
+    - **submitted** — the browser has called `POST /{id}/result`. The agent
       has not yet read the result.
-    - **received** — the agent called `GET /v1/{id}/result` at least once after
+    - **received** — the agent called `GET /{id}/result` at least once after
       submission. The state flip is idempotent; subsequent reads keep returning
       `received`.
-
-    ## Versioning
-
-    All stable routes live under `/v1`. The bare unversioned routes (`/new`,
-    `/{id}`, `/{id}/result`) are a compatibility shim — they share the same
-    handlers but every response carries `Deprecation: true` and
-    `Link: </v1>; rel="successor-version"`. New integrations MUST use `/v1/…`.
   contact:
     name: Pagent maintainers
     url: https://github.com/blockful/pagent
@@ -176,7 +169,7 @@ paths:
               schema:
                 type: string
 
-  /v1/new:
+  /new:
     post:
       operationId: createPage
       tags: [Pages]
@@ -189,7 +182,7 @@ paths:
         it back to the renderer. No validation is performed on its contents.
 
         **What to do next:** print the returned `url` in the terminal (or chat)
-        so the user can open it in a browser. Then poll `GET /v1/{id}/result`
+        so the user can open it in a browser. Then poll `GET /{id}/result`
         until `state` is no longer `open`.
 
         Rate-limited to 30 requests per minute per source IP.
@@ -274,7 +267,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error500'
 
-  /v1/{id}:
+  /{id}:
     parameters:
       - $ref: '#/components/parameters/PageId'
     get:
@@ -290,7 +283,7 @@ paths:
         - If `state` is `open`, the user has not yet submitted. Show them the
           URL or wait.
         - If `state` is `submitted`, the result is ready — read it via
-          `GET /v1/{id}/result`.
+          `GET /{id}/result`.
         - If `state` is `received`, you have already consumed the result.
         - If `expires_at` is in the past, the page has been deleted and you
           will get 404.
@@ -317,7 +310,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error404'
         '500':
-          description: Unexpected server error. See 500 on `POST /v1/new` for guidance.
+          description: Unexpected server error. See 500 on `POST /new` for guidance.
           headers:
             X-Request-ID:
               $ref: '#/components/headers/XRequestId'
@@ -326,7 +319,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error500'
 
-  /v1/{id}/result:
+  /{id}/result:
     parameters:
       - $ref: '#/components/parameters/PageId'
     post:
@@ -336,13 +329,13 @@ paths:
       description: |
         Called by the renderer (browser) when the user submits a form. The
         body is an A2UI action object that the agent reads back via
-        `GET /v1/{id}/result`.
+        `GET /{id}/result`.
 
         Requires the page to be in state `open`. Calling this twice on the
         same page returns 409.
 
         **Note:** this endpoint is typically called by the Pagent renderer,
-        not directly by the agent. Agents should use `GET /v1/{id}/result`
+        not directly by the agent. Agents should use `GET /{id}/result`
         to read back the submitted action.
       requestBody:
         required: true
@@ -402,7 +395,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error409'
         '500':
-          description: Unexpected server error. See 500 on `POST /v1/new` for guidance.
+          description: Unexpected server error. See 500 on `POST /new` for guidance.
           headers:
             X-Request-ID:
               $ref: '#/components/headers/XRequestId'
@@ -451,7 +444,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error404'
         '500':
-          description: Unexpected server error. See 500 on `POST /v1/new` for guidance.
+          description: Unexpected server error. See 500 on `POST /new` for guidance.
           headers:
             X-Request-ID:
               $ref: '#/components/headers/XRequestId'
@@ -459,164 +452,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error500'
-
-  # ---------------------------------------------------------------------------
-  # Unversioned compat shim — deprecated
-  # ---------------------------------------------------------------------------
-
-  /new:
-    post:
-      operationId: createPageLegacy
-      tags: [Deprecated]
-      deprecated: true
-      summary: Create a new page (unversioned shim — use /v1/new instead)
-      description: |
-        **Deprecated.** This route is a compatibility shim that routes to the
-        same handler as `POST /v1/new`. Every response carries:
-
-        - `Deprecation: true`
-        - `Link: </v1>; rel="successor-version"`
-
-        Migrate to `POST /v1/new`. This shim will be removed in a future
-        major version.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/NewPageRequest'
-      responses:
-        '201':
-          description: Page created.
-          headers:
-            X-Request-ID:
-              $ref: '#/components/headers/XRequestId'
-            Deprecation:
-              $ref: '#/components/headers/Deprecation'
-            Link:
-              description: Points to the successor versioned path.
-              schema:
-                type: string
-                example: '</v1>; rel="successor-version"'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NewPageResponse'
-        '400':
-          $ref: '#/components/responses/LegacyBadRequest'
-        '413':
-          $ref: '#/components/responses/LegacyPayloadTooLarge'
-        '429':
-          $ref: '#/components/responses/LegacyRateLimited'
-        '500':
-          $ref: '#/components/responses/LegacyInternalError'
-
-  /{id}:
-    parameters:
-      - $ref: '#/components/parameters/PageId'
-    get:
-      operationId: getPageLegacy
-      tags: [Deprecated]
-      deprecated: true
-      summary: Get page spec and state (unversioned shim — use /v1/{id} instead)
-      description: |
-        **Deprecated.** Compatibility shim for `GET /v1/{id}`. Every response
-        carries `Deprecation: true` and `Link: </v1>; rel="successor-version"`.
-        Migrate to `GET /v1/{id}`.
-      responses:
-        '200':
-          description: Page found.
-          headers:
-            X-Request-ID:
-              $ref: '#/components/headers/XRequestId'
-            Deprecation:
-              $ref: '#/components/headers/Deprecation'
-            Link:
-              description: Points to the successor versioned path.
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PageResponse'
-        '404':
-          $ref: '#/components/responses/LegacyNotFound'
-        '500':
-          $ref: '#/components/responses/LegacyInternalError'
-
-  /{id}/result:
-    parameters:
-      - $ref: '#/components/parameters/PageId'
-    post:
-      operationId: submitResultLegacy
-      tags: [Deprecated]
-      deprecated: true
-      summary: Submit a result (unversioned shim — use /v1/{id}/result instead)
-      description: |
-        **Deprecated.** Compatibility shim for `POST /v1/{id}/result`. Every
-        response carries `Deprecation: true` and
-        `Link: </v1>; rel="successor-version"`. Migrate to
-        `POST /v1/{id}/result`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ResultRequest'
-      responses:
-        '200':
-          description: Result recorded.
-          headers:
-            X-Request-ID:
-              $ref: '#/components/headers/XRequestId'
-            Deprecation:
-              $ref: '#/components/headers/Deprecation'
-            Link:
-              description: Points to the successor versioned path.
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SubmitOk'
-        '400':
-          $ref: '#/components/responses/LegacyBadRequest'
-        '404':
-          $ref: '#/components/responses/LegacyNotFound'
-        '409':
-          $ref: '#/components/responses/LegacyConflict'
-        '500':
-          $ref: '#/components/responses/LegacyInternalError'
-    get:
-      operationId: getResultLegacy
-      tags: [Deprecated]
-      deprecated: true
-      summary: Poll for a result (unversioned shim — use /v1/{id}/result instead)
-      description: |
-        **Deprecated.** Compatibility shim for `GET /v1/{id}/result`. Every
-        response carries `Deprecation: true` and
-        `Link: </v1>; rel="successor-version"`. Migrate to
-        `GET /v1/{id}/result`.
-      responses:
-        '200':
-          description: State and result returned.
-          headers:
-            X-Request-ID:
-              $ref: '#/components/headers/XRequestId'
-            Deprecation:
-              $ref: '#/components/headers/Deprecation'
-            Link:
-              description: Points to the successor versioned path.
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ResultResponse'
-        '404':
-          $ref: '#/components/responses/LegacyNotFound'
-        '500':
-          $ref: '#/components/responses/LegacyInternalError'
 
 components:
   parameters:
@@ -642,84 +477,6 @@ components:
       schema:
         type: integer
         minimum: 1
-    Deprecation:
-      description: >
-        Present (value `"true"`) on unversioned compat-shim responses. Signals
-        that the caller should migrate to the `/v1/…` equivalent.
-      schema:
-        type: string
-        enum: ['true']
-
-  responses:
-    LegacyBadRequest:
-      description: Malformed request body. Fix and retry.
-      headers:
-        X-Request-ID:
-          $ref: '#/components/headers/XRequestId'
-        Deprecation:
-          $ref: '#/components/headers/Deprecation'
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error400'
-    LegacyNotFound:
-      description: Page not found or expired.
-      headers:
-        X-Request-ID:
-          $ref: '#/components/headers/XRequestId'
-        Deprecation:
-          $ref: '#/components/headers/Deprecation'
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error404'
-    LegacyConflict:
-      description: Page already submitted.
-      headers:
-        X-Request-ID:
-          $ref: '#/components/headers/XRequestId'
-        Deprecation:
-          $ref: '#/components/headers/Deprecation'
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error409'
-    LegacyPayloadTooLarge:
-      description: Body exceeds 256 KB. Reduce spec size and retry.
-      headers:
-        X-Request-ID:
-          $ref: '#/components/headers/XRequestId'
-        Deprecation:
-          $ref: '#/components/headers/Deprecation'
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error413'
-    LegacyRateLimited:
-      description: >
-        Rate limit exceeded. Wait `retry_after_seconds` seconds, then retry.
-      headers:
-        X-Request-ID:
-          $ref: '#/components/headers/XRequestId'
-        Deprecation:
-          $ref: '#/components/headers/Deprecation'
-        Retry-After:
-          $ref: '#/components/headers/RetryAfter'
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error429'
-    LegacyInternalError:
-      description: Unexpected server error.
-      headers:
-        X-Request-ID:
-          $ref: '#/components/headers/XRequestId'
-        Deprecation:
-          $ref: '#/components/headers/Deprecation'
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error500'
 
   schemas:
     PageId:
@@ -735,7 +492,7 @@ components:
         Lifecycle state of a page:
         - `open` — awaiting user submission.
         - `submitted` — user submitted; agent has not yet read the result.
-        - `received` — agent has consumed the result via `GET /v1/{id}/result`.
+        - `received` — agent has consumed the result via `GET /{id}/result`.
 
     Spec:
       description: >

@@ -69,28 +69,26 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /v1/new
+// POST /new
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/new', () => {
+describe('POST /new', () => {
   it('returns 400 on non-JSON body', async () => {
-    const res = await app.fetch(
-      new Request(`${BASE}/v1/new`, { method: 'POST', body: 'not json' }),
-    );
+    const res = await app.fetch(new Request(`${BASE}/new`, { method: 'POST', body: 'not json' }));
     expect(res.status).toBe(400);
     const body = await json(res);
     expect(body.error).toBe('bad_request');
   });
 
   it('returns 400 on {} (no spec key)', async () => {
-    const res = await app.fetch(req('POST', '/v1/new', {}));
+    const res = await app.fetch(req('POST', '/new', {}));
     expect(res.status).toBe(400);
     const body = await json(res);
     expect(body.error).toBe('bad_request');
   });
 
   it('returns 201 with id, url, expires_at on valid body', async () => {
-    const res = await app.fetch(req('POST', '/v1/new', { spec: { anything: 1 } }));
+    const res = await app.fetch(req('POST', '/new', { spec: { anything: 1 } }));
     expect(res.status).toBe(201);
     const body = await json(res);
     expect(body.id).toMatch(/^[a-f0-9]{32}$/);
@@ -99,7 +97,7 @@ describe('POST /v1/new', () => {
   });
 
   it('calls db.insertPage once with state open', async () => {
-    await app.fetch(req('POST', '/v1/new', { spec: { anything: 1 } }));
+    await app.fetch(req('POST', '/new', { spec: { anything: 1 } }));
     expect(db.insertPage).toHaveBeenCalledOnce();
     const [calledPage] = vi.mocked(db.insertPage).mock.calls[0];
     expect(calledPage.state).toBe('open');
@@ -108,7 +106,7 @@ describe('POST /v1/new', () => {
   it('rejects bodies over 256 KB with 413', async () => {
     const body = JSON.stringify({ spec: 'x'.repeat(300_000) });
     const res = await app.fetch(
-      new Request(`${BASE}/v1/new`, {
+      new Request(`${BASE}/new`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body,
@@ -126,7 +124,7 @@ describe('POST /v1/new', () => {
   it('accepts a body just under 256 KB', async () => {
     const body = JSON.stringify({ spec: 'x'.repeat(250_000) });
     const res = await app.fetch(
-      new Request(`${BASE}/v1/new`, {
+      new Request(`${BASE}/new`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body,
@@ -138,7 +136,7 @@ describe('POST /v1/new', () => {
   it('413 body.message references the byte limit', async () => {
     const body = JSON.stringify({ spec: 'x'.repeat(300_000) });
     const res = await app.fetch(
-      new Request(`${BASE}/v1/new`, {
+      new Request(`${BASE}/new`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body,
@@ -152,25 +150,25 @@ describe('POST /v1/new', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /v1/:id
+// GET /:id
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/:id', () => {
+describe('GET /:id', () => {
   it('returns 404 for unknown valid-format id', async () => {
     // getActivePage already returns null by default
-    const res = await app.fetch(req('GET', `/v1/${UNKNOWN_ID}`));
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
     expect(res.status).toBe(404);
   });
 
   it('returns 404 for a malformed id', async () => {
-    const res = await app.fetch(req('GET', `/v1/${BAD_ID}`));
+    const res = await app.fetch(req('GET', `/${BAD_ID}`));
     expect(res.status).toBe(404);
   });
 
   it('returns 200 with spec and state open for an active page', async () => {
     const page = fakePage({ spec: { foo: 'bar' }, state: 'open' });
     (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(page);
-    const res = await app.fetch(req('GET', `/v1/${page.id}`));
+    const res = await app.fetch(req('GET', `/${page.id}`));
     expect(res.status).toBe(200);
     const body = await json(res);
     expect(body.spec).toEqual({ foo: 'bar' });
@@ -180,22 +178,22 @@ describe('GET /v1/:id', () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /v1/:id/result
+// POST /:id/result
 // ---------------------------------------------------------------------------
 
 const validAction = { name: 'clicked', surfaceId: 'main' };
 
-describe('POST /v1/:id/result', () => {
+describe('POST /:id/result', () => {
   it('returns 404 for unknown id', async () => {
     // submitPage returns 'not_found' by default
-    const res = await app.fetch(req('POST', `/v1/${UNKNOWN_ID}/result`, validAction));
+    const res = await app.fetch(req('POST', `/${UNKNOWN_ID}/result`, validAction));
     expect(res.status).toBe(404);
   });
 
   it('returns 200 and calls db.submitPage when page is open', async () => {
     const page = fakePage();
     (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce('ok');
-    const res = await app.fetch(req('POST', `/v1/${page.id}/result`, validAction));
+    const res = await app.fetch(req('POST', `/${page.id}/result`, validAction));
     expect(res.status).toBe(200);
     const body = await json(res);
     expect(body.ok).toBe(true);
@@ -205,7 +203,7 @@ describe('POST /v1/:id/result', () => {
   it('returns 409 on conflict (already submitted)', async () => {
     const page = fakePage({ state: 'submitted' });
     (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce('conflict');
-    const res = await app.fetch(req('POST', `/v1/${page.id}/result`, validAction));
+    const res = await app.fetch(req('POST', `/${page.id}/result`, validAction));
     expect(res.status).toBe(409);
     const body = await json(res);
     expect(body.error).toBe('conflict');
@@ -216,16 +214,14 @@ describe('POST /v1/:id/result', () => {
   it('409 conflict body.message mentions creating a new page', async () => {
     const page = fakePage({ state: 'submitted' });
     (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce('conflict');
-    const res = await app.fetch(req('POST', `/v1/${page.id}/result`, validAction));
+    const res = await app.fetch(req('POST', `/${page.id}/result`, validAction));
     const body = await json(res);
     expect(body.message as string).toContain('new page');
   });
 
   it('returns 400 for result body with name: "" (empty name)', async () => {
     // Validation happens before db call, so no need to stub submitPage
-    const res = await app.fetch(
-      req('POST', `/v1/${UNKNOWN_ID}/result`, { name: '', surfaceId: 'x' }),
-    );
+    const res = await app.fetch(req('POST', `/${UNKNOWN_ID}/result`, { name: '', surfaceId: 'x' }));
     expect(res.status).toBe(400);
     const body = await json(res);
     expect(body.error).toBe('bad_request');
@@ -233,28 +229,28 @@ describe('POST /v1/:id/result', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /v1/:id/result
+// GET /:id/result
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/:id/result', () => {
+describe('GET /:id/result', () => {
   it('returns 200 with state open and null result before submit', async () => {
     (db.fetchAndAdvanceResult as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       stateAtRead: 'open',
       result: null,
     });
-    const res = await app.fetch(req('GET', `/v1/${UNKNOWN_ID}/result`));
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}/result`));
     expect(res.status).toBe(200);
     const body = await json(res);
     expect(body.state).toBe('open');
     expect(body.result).toBeNull();
   });
 
-  it('returns submitted result after POST /v1/:id/result', async () => {
+  it('returns submitted result after POST /:id/result', async () => {
     (db.fetchAndAdvanceResult as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       stateAtRead: 'submitted',
       result: validAction,
     });
-    const res = await app.fetch(req('GET', `/v1/${UNKNOWN_ID}/result`));
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}/result`));
     expect(res.status).toBe(200);
     const body = await json(res);
     // stateAtRead captures 'submitted' before flipping to 'received'
@@ -268,15 +264,15 @@ describe('GET /v1/:id/result', () => {
       stateAtRead: 'received',
       result: validAction,
     });
-    const res = await app.fetch(req('GET', `/v1/${UNKNOWN_ID}/result`));
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}/result`));
     expect(res.status).toBe(200);
     const body = await json(res);
     expect(body.state).toBe('received');
   });
 
-  it('returns 404 for unknown id on GET /v1/:id/result', async () => {
+  it('returns 404 for unknown id on GET /:id/result', async () => {
     // fetchAndAdvanceResult returns null by default
-    const res = await app.fetch(req('GET', `/v1/${UNKNOWN_ID}/result`));
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}/result`));
     expect(res.status).toBe(404);
   });
 });
@@ -340,7 +336,7 @@ describe('security headers', () => {
   });
 
   it('sets headers on error responses too', async () => {
-    const res = await app.fetch(new Request('http://test/v1/new', { method: 'POST' }));
+    const res = await app.fetch(new Request('http://test/new', { method: 'POST' }));
     expect(res.status).toBe(400);
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
   });
@@ -393,7 +389,7 @@ describe('request-id middleware', () => {
 
   it('sets X-Request-ID on every endpoint including 404 paths', async () => {
     const resHealth = await app.fetch(new Request('http://test/health'));
-    const resNew = await app.fetch(req('POST', '/v1/new', { spec: {} }));
+    const resNew = await app.fetch(req('POST', '/new', { spec: {} }));
     const resNotFound = await app.fetch(new Request('http://test/no-such-path'));
     expect(resHealth.headers.get('x-request-id')).toMatch(/^[a-f0-9]{32}$/);
     expect(resNew.headers.get('x-request-id')).toMatch(/^[a-f0-9]{32}$/);
@@ -403,7 +399,7 @@ describe('request-id middleware', () => {
   it('sets X-Request-ID even when bodyLimit fires (413)', async () => {
     const body = JSON.stringify({ spec: 'x'.repeat(300_000) });
     const res = await app.fetch(
-      new Request(`${BASE}/v1/new`, {
+      new Request(`${BASE}/new`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body,
@@ -423,7 +419,7 @@ describe('error handler', () => {
     (db.getActivePage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error('connection terminated'),
     );
-    const res = await app.fetch(new Request(`http://test/v1/${UNKNOWN_ID}`));
+    const res = await app.fetch(new Request(`http://test/${UNKNOWN_ID}`));
     expect(res.status).toBe(500);
     const body = await json(res);
     expect(body.error).toBe('internal_error');
@@ -434,7 +430,7 @@ describe('error handler', () => {
   it('500 body includes the request_id from X-Request-ID header', async () => {
     (db.getActivePage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
     const res = await app.fetch(
-      new Request(`http://test/v1/${UNKNOWN_ID}`, {
+      new Request(`http://test/${UNKNOWN_ID}`, {
         headers: { 'X-Request-ID': 'smoketest-abc' },
       }),
     );
@@ -448,7 +444,7 @@ describe('error handler', () => {
     (db.getActivePage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error('SECRET sql: SELECT * FROM users WHERE password = ...'),
     );
-    const res = await app.fetch(new Request(`http://test/v1/${UNKNOWN_ID}`));
+    const res = await app.fetch(new Request(`http://test/${UNKNOWN_ID}`));
     expect(res.status).toBe(500);
     const body = await json(res);
     const serialised = JSON.stringify(body);
@@ -457,18 +453,18 @@ describe('error handler', () => {
     expect(serialised).not.toContain('sql');
   });
 
-  it('insertPage throw on POST /v1/new returns 500', async () => {
+  it('insertPage throw on POST /new returns 500', async () => {
     (db.insertPage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db write failed'));
-    const res = await app.fetch(req('POST', '/v1/new', { spec: { anything: 1 } }));
+    const res = await app.fetch(req('POST', '/new', { spec: { anything: 1 } }));
     expect(res.status).toBe(500);
     const body = await json(res);
     expect(body.error).toBe('internal_error');
     expect(typeof body.request_id).toBe('string');
   });
 
-  it('submitPage throw on POST /v1/:id/result returns 500', async () => {
+  it('submitPage throw on POST /:id/result returns 500', async () => {
     (db.submitPage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db write failed'));
-    const res = await app.fetch(req('POST', `/v1/${UNKNOWN_ID}/result`, validAction));
+    const res = await app.fetch(req('POST', `/${UNKNOWN_ID}/result`, validAction));
     expect(res.status).toBe(500);
     const body = await json(res);
     expect(body.error).toBe('internal_error');
@@ -504,9 +500,9 @@ describe('OpenAPI surface', () => {
   it('GET /openapi.json includes all expected paths', async () => {
     const res = await app.fetch(new Request('http://test/openapi.json'));
     const body = await res.json();
-    expect(body.paths).toHaveProperty('/v1/new');
-    expect(body.paths).toHaveProperty('/v1/{id}');
-    expect(body.paths).toHaveProperty('/v1/{id}/result');
+    expect(body.paths).toHaveProperty('/new');
+    expect(body.paths).toHaveProperty('/{id}');
+    expect(body.paths).toHaveProperty('/{id}/result');
     expect(body.paths).toHaveProperty('/health');
   });
 
@@ -529,17 +525,13 @@ describe('OpenAPI surface', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Deprecation shim
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Error message field
 // ---------------------------------------------------------------------------
 
 describe('error message field', () => {
   it('500 body includes non-empty message field', async () => {
     (db.getActivePage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
-    const res = await app.fetch(new Request(`http://test/v1/${UNKNOWN_ID}`));
+    const res = await app.fetch(new Request(`http://test/${UNKNOWN_ID}`));
     expect(res.status).toBe(500);
     const body = await json(res);
     expect(typeof body.message).toBe('string');
@@ -547,7 +539,7 @@ describe('error message field', () => {
   });
 
   it('400 bad_request body includes non-empty message field', async () => {
-    const res = await app.fetch(req('POST', '/v1/new', {}));
+    const res = await app.fetch(req('POST', '/new', {}));
     expect(res.status).toBe(400);
     const body = await json(res);
     expect(typeof body.message).toBe('string');
@@ -555,7 +547,7 @@ describe('error message field', () => {
   });
 
   it('404 body includes non-empty message field', async () => {
-    const res = await app.fetch(req('GET', `/v1/${UNKNOWN_ID}`));
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
     expect(res.status).toBe(404);
     const body = await json(res);
     expect(typeof body.message).toBe('string');
@@ -571,34 +563,5 @@ describe('error message field', () => {
     // Here we skip the exhaustion test and mark it as a shape contract only.
     // (The actual 429 message assertion is in rate-limit.test.ts.)
     expect(true).toBe(true); // placeholder — see rate-limit.test.ts
-  });
-});
-
-describe('deprecation shim', () => {
-  it('unversioned POST /new still works and emits Deprecation header', async () => {
-    const res = await app.fetch(req('POST', '/new', { spec: { anything: 1 } }));
-    expect(res.status).toBe(201);
-    expect(db.insertPage).toHaveBeenCalledOnce();
-    expect(res.headers.get('Deprecation')).toBe('true');
-    const link = res.headers.get('Link') ?? '';
-    expect(link).toContain('rel="successor-version"');
-  });
-
-  it('unversioned GET /:id still works and emits Deprecation header', async () => {
-    const page = fakePage({ spec: { foo: 'bar' }, state: 'open' });
-    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(page);
-    const res = await app.fetch(req('GET', `/${page.id}`));
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Deprecation')).toBe('true');
-    const link = res.headers.get('Link') ?? '';
-    expect(link).toContain('rel="successor-version"');
-  });
-
-  it('/v1/... paths do NOT emit Deprecation header', async () => {
-    const page = fakePage({ spec: { foo: 'bar' }, state: 'open' });
-    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(page);
-    const res = await app.fetch(req('GET', `/v1/${page.id}`));
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Deprecation')).toBeNull();
   });
 });

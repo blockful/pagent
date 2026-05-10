@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
-import type { Context, Next } from 'hono';
+import type { Context } from 'hono';
 import { rateLimiter } from 'hono-rate-limiter';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -173,7 +173,7 @@ app.get(
   }),
 );
 
-// --- Route handlers (shared between /v1 and compat shim) --------------------
+// --- Route handlers ----------------------------------------------------------
 
 const newPageHandler = async (c: Context) => {
   const raw = await c.req.json().catch(() => null);
@@ -255,24 +255,9 @@ const getResultHandler = async (c: Context) => {
   return c.json({ state: r.stateAtRead, result: r.result });
 };
 
-// --- Canonical /v1 routes ----------------------------------------------------
+// --- Routes ------------------------------------------------------------------
 
-app.post('/v1/new', newPageLimiter, newPageHandler);
-app.get('/v1/:id', getPageHandler);
-app.post('/v1/:id/result', submitResultHandler);
-app.get('/v1/:id/result', getResultHandler);
-
-// --- Deprecation shim: unversioned paths stay wired to the same handlers -----
-// Every response carries Deprecation: true + a Link header pointing at /v1
-// so operators can spot stale callers in logs. No redirect — handler reuse.
-
-const deprecationShim = async (c: Context, next: Next) => {
-  await next();
-  c.header('Deprecation', 'true');
-  c.header('Link', '</v1>; rel="successor-version"');
-};
-
-app.post('/new', deprecationShim, newPageLimiter, newPageHandler);
-app.get('/:id', deprecationShim, getPageHandler);
-app.post('/:id/result', deprecationShim, submitResultHandler);
-app.get('/:id/result', deprecationShim, getResultHandler);
+app.post('/new', newPageLimiter, newPageHandler);
+app.get('/:id', getPageHandler);
+app.post('/:id/result', submitResultHandler);
+app.get('/:id/result', getResultHandler);

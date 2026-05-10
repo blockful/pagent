@@ -30,13 +30,16 @@ export default defineConfig({
     port: CLIENT_PORT,
     strictPort: true,
     proxy: {
-      '/v1/new': { target: API_TARGET, changeOrigin: true },
+      '/new': { target: API_TARGET, changeOrigin: true },
       '/health': { target: API_TARGET, changeOrigin: true },
-      // /v1/:id/result — always API.
-      [`^/v1/${PAGE_ID}/result(?:\\?.*)?$`]: { target: API_TARGET, changeOrigin: true },
-      // /v1/:id — content-negotiated. Browser navigation (Accept: text/html) gets
+      '/openapi.json': { target: API_TARGET, changeOrigin: true },
+      '/openapi.yaml': { target: API_TARGET, changeOrigin: true },
+      '/docs': { target: API_TARGET, changeOrigin: true },
+      // /:id/result — always API.
+      [`^/${PAGE_ID}/result(?:\\?.*)?$`]: { target: API_TARGET, changeOrigin: true },
+      // /:id — content-negotiated. Browser navigation (Accept: text/html) gets
       // the SPA; fetch() from the renderer (Accept: */*) is proxied to the API.
-      [`^/v1/${PAGE_ID}(?:\\?.*)?$`]: {
+      [`^/${PAGE_ID}(?:\\?.*)?$`]: {
         target: API_TARGET,
         changeOrigin: true,
         bypass(req) {

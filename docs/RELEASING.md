@@ -10,7 +10,7 @@ Pagent uses **semver** (`MAJOR.MINOR.PATCH`):
 
 | Bump  | When                                                                                          |
 | ----- | --------------------------------------------------------------------------------------------- |
-| MAJOR | A breaking API change — e.g. we stop accepting `/v1` routes and cut `/v2`.                    |
+| MAJOR | A breaking API change — e.g. removing or renaming an endpoint.                                |
 | MINOR | Backward-compatible additions: new MCP tools, new optional API fields, new optional env-vars. |
 | PATCH | Bugfixes, dependency updates, doc-only changes.                                               |
 

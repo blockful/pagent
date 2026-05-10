@@ -44,7 +44,7 @@ const BASE = 'http://localhost';
 function postNew(xForwardedFor?: string): Request {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (xForwardedFor !== undefined) headers['x-forwarded-for'] = xForwardedFor;
-  return new Request(`${BASE}/v1/new`, {
+  return new Request(`${BASE}/new`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ spec: { test: true } }),

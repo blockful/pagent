@@ -174,7 +174,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       this.submitError = null;
       this.awaitingMessage = 'Sent — waiting for the agent…';
       try {
-        const res = await fetch(`${API_BASE}/v1/${pageId}/result`, {
+        const res = await fetch(`${API_BASE}/${pageId}/result`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -221,7 +221,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
 
   private async loadPage() {
     try {
-      const res = await fetch(`${API_BASE}/v1/${pageId}`, {
+      const res = await fetch(`${API_BASE}/${pageId}`, {
         headers: { accept: 'application/json' },
       });
       if (res.status === 404) {
@@ -287,7 +287,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
         return;
       }
       try {
-        const res = await fetch(`${API_BASE}/v1/${pageId}`, {
+        const res = await fetch(`${API_BASE}/${pageId}`, {
           headers: { accept: 'application/json' },
         });
         if (res.ok) {

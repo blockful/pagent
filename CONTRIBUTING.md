@@ -64,17 +64,17 @@ root because the plugin loader expects it next to `.claude-plugin/`.
 
 [Conventional Commits](https://www.conventionalcommits.org/) — `type(scope): subject`.
 
-| Type             | When to use                                 | Example                                                     |
-| ---------------- | ------------------------------------------- | ----------------------------------------------------------- |
-| `feat(api):`     | New public-facing API behavior              | `feat(api): version endpoints at /v1 with deprecation shim` |
-| `fix(api):`      | Bug fix on the API                          | `fix(api): graceful shutdown awaits in-flight requests`     |
-| `feat(web):`     | Renderer feature                            | `feat(web): add CSP + security headers via vercel.json`     |
-| `refactor(...):` | Internal change with no behavioral diff     | `refactor(web): drop 'as any' on the spec handoff`          |
-| `test(api):`     | New or modified tests                       | `test(api): handler tests for /v1/new rate limiting`        |
-| `chore:`         | Dev tooling, dependency bumps, repo hygiene | `chore: add Husky pre-push hook`                            |
-| `ci:`            | CI config changes                           | `ci: add GitHub Actions workflow mirroring pre-push gate`   |
-| `docs:`          | README, CONTRIBUTING, SECURITY, etc.        | `docs: add release procedure (docs/RELEASING.md)`           |
-| `perf(...):`     | Performance improvements                    | `perf(web): exponential backoff on post-submit poll loop`   |
+| Type             | When to use                                 | Example                                                   |
+| ---------------- | ------------------------------------------- | --------------------------------------------------------- |
+| `feat(api):`     | New public-facing API behavior              | `feat(api): add rate limiting to POST /new`               |
+| `fix(api):`      | Bug fix on the API                          | `fix(api): graceful shutdown awaits in-flight requests`   |
+| `feat(web):`     | Renderer feature                            | `feat(web): add CSP + security headers via vercel.json`   |
+| `refactor(...):` | Internal change with no behavioral diff     | `refactor(web): drop 'as any' on the spec handoff`        |
+| `test(api):`     | New or modified tests                       | `test(api): handler tests for POST /new rate limiting`    |
+| `chore:`         | Dev tooling, dependency bumps, repo hygiene | `chore: add Husky pre-push hook`                          |
+| `ci:`            | CI config changes                           | `ci: add GitHub Actions workflow mirroring pre-push gate` |
+| `docs:`          | README, CONTRIBUTING, SECURITY, etc.        | `docs: add release procedure (docs/RELEASING.md)`         |
+| `perf(...):`     | Performance improvements                    | `perf(web): exponential backoff on post-submit poll loop` |
 
 Rules:
 

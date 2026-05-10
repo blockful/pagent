@@ -14,7 +14,7 @@ export function buildCsp(apiUrl: string | undefined): string {
       connectSrc = `'self' ${new URL(apiUrl).origin}`;
     } catch {
       // VITE_API_URL is malformed — fall back to 'self' only.
-      // The dev server doesn't need this (Vite proxies /v1/* same-origin).
+      // The dev server doesn't need this (Vite proxies API routes same-origin).
     }
   }
   return [
