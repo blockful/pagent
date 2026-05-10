@@ -139,4 +139,9 @@ describe('envSchema', () => {
     expect(r.success).toBe(true);
     if (r.success) expect(r.data.ALLOWED_ORIGINS).toBeUndefined();
   });
+
+  it('rejects LOG_LEVEL="banana" (not a valid level)', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'postgresql://x', LOG_LEVEL: 'banana' });
+    expect(r.success).toBe(false);
+  });
 });

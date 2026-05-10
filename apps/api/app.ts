@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import * as db from './db.ts';
 import type { Page } from './db.ts';
 import { env, pageIdSchema, newPageBodySchema, resultBodySchema } from './schemas.ts';
+import { logger } from './logger.ts';
 
 // --- Storage -----------------------------------------------------------------
 
@@ -27,7 +28,9 @@ export const getLivePage = (id: string): Page | null => {
   if (!p) return null;
   if (isExpired(p)) {
     pages.delete(id);
-    db.deletePage(id).catch((err) => console.error('lazy ttl db delete failed', id, err));
+    db.deletePage(id).catch((err) =>
+      logger.error({ err, page_id: id }, 'lazy ttl db delete failed'),
+    );
     return null;
   }
   return p;
@@ -38,7 +41,9 @@ setInterval(() => {
   for (const [id, p] of pages) {
     if (now >= p.expiresAt) {
       pages.delete(id);
-      db.deletePage(id).catch((err) => console.error('ttl sweep db delete failed', id, err));
+      db.deletePage(id).catch((err) =>
+        logger.error({ err, page_id: id }, 'ttl sweep db delete failed'),
+      );
     }
   }
 }, 60_000).unref();
@@ -47,6 +52,20 @@ setInterval(() => {
 
 export const app = new Hono();
 app.use('*', cors({ origin: ALLOWED_ORIGINS ?? '*' }));
+
+app.use('*', async (c, next) => {
+  const start = Date.now();
+  await next();
+  logger.info(
+    {
+      method: c.req.method,
+      path: c.req.path,
+      status: c.res.status,
+      duration_ms: Date.now() - start,
+    },
+    'request',
+  );
+});
 
 app.get('/health', (c) => c.json({ ok: true, pages: pages.size }));
 

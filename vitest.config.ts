@@ -8,6 +8,7 @@ export default defineConfig({
     env: {
       DATABASE_URL: 'postgresql://test:test@localhost/test',
       PORT: '0',
+      LOG_LEVEL: 'silent',
     },
     coverage: {
       provider: 'v8',

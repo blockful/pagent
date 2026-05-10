@@ -41,6 +41,11 @@ export const envSchema = z.object({
         : undefined,
     ),
   RAILWAY_ENVIRONMENT: z.string().optional(),
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
+  OTEL_EXPORTER_OTLP_HEADERS: z.string().optional(),
+  OTEL_SERVICE_NAME: z.string().optional(),
+  NODE_ENV: z.enum(['development', 'production', 'test']).optional(),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
