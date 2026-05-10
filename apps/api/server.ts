@@ -5,6 +5,7 @@ import * as db from './db.ts';
 import { env } from './schemas.ts';
 import { app, PORT, PUBLIC_URL } from './app.ts';
 import { logger } from './logger.ts';
+import { metrics } from './metrics.ts';
 import { shutdownTracing } from './tracing.ts';
 
 // --- Boot --------------------------------------------------------------------
@@ -13,10 +14,12 @@ await db.init(env.DATABASE_URL);
 
 // Periodically reclaim expired DB rows. Correctness is enforced by
 // WHERE expires_at > now() on every read — this sweep is only for space.
+// Counts pages whose TTL fired while still 'open' as abandoned.
 const sweepTimer = setInterval(async () => {
   try {
-    const deleted = await db.deleteExpiredPages();
-    if (deleted > 0) logger.debug({ deleted }, 'ttl sweep removed expired pages');
+    const { total, abandoned } = await db.deleteExpiredPages();
+    if (abandoned > 0) metrics.pagesAbandoned.add(abandoned);
+    if (total > 0) logger.debug({ total, abandoned }, 'ttl sweep removed expired pages');
   } catch (err) {
     logger.error({ err }, 'ttl sweep failed');
   }

@@ -183,10 +183,19 @@ export async function deletePage(id: string): Promise<void> {
   });
 }
 
-export async function deleteExpiredPages(): Promise<number> {
+/**
+ * Deletes expired rows and reports how many were "abandoned" — i.e. still in
+ * state='open' when TTL killed them. Pages that already reached
+ * 'submitted' or 'received' before expiry don't count as abandoned; they're
+ * just garbage collection.
+ */
+export async function deleteExpiredPages(): Promise<{ total: number; abandoned: number }> {
   return withRetry(async () => {
     const c = client();
-    const result = await c`delete from pages where expires_at <= now()`;
-    return result.count;
+    const rows = await c<{ state: PageState }[]>`
+      delete from pages where expires_at <= now() returning state
+    `;
+    const abandoned = rows.filter((r) => r.state === 'open').length;
+    return { total: rows.length, abandoned };
   });
 }

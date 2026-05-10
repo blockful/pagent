@@ -14,7 +14,7 @@ vi.mock('./db.ts', () => ({
   submitPage: vi.fn(() => Promise.resolve({ kind: 'not_found' })),
   fetchAndAdvanceResult: vi.fn(() => Promise.resolve(null)),
   deletePage: vi.fn(() => Promise.resolve()),
-  deleteExpiredPages: vi.fn(() => Promise.resolve(0)),
+  deleteExpiredPages: vi.fn(() => Promise.resolve({ total: 0, abandoned: 0 })),
   ping: vi.fn().mockResolvedValue(undefined),
 }));
 
