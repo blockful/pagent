@@ -58,10 +58,18 @@ apps/
     ├── server.bundle.js              # esbuild output, shipped to plugin users
     ├── smoke.mjs
     └── .env.example
+infra/
+└── observability/                   # self-hosted Grafana stack on Railway
+    ├── Dockerfile                    # grafana/otel-lgtm + provisioning
+    ├── dashboards/                   # Operations + Product dashboards (JSON)
+    └── provisioning/                 # Grafana datasources + dashboard provider
 skills/pagent/SKILL.md                # drop-in skill teaching the polling pattern
 .claude-plugin/plugin.json            # Claude Code plugin manifest
 .mcp.json                             # plugin's MCP server registration
 ```
+
+**Observability** — see [docs/observability.md](./docs/observability.md) for
+the self-hosted Grafana stack (metrics, traces, logs) on Railway.
 
 The repo doubles as a Claude Code plugin and a self-hosted marketplace: `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `skills/`, and `.mcp.json` at the repo root make it installable from GitHub with two slash commands. The skill stays at the root because Claude Code's plugin loader looks for `skills/` next to `.claude-plugin/`, even though the skill conceptually belongs to `apps/mcp/`.
 

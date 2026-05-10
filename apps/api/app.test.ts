@@ -11,10 +11,10 @@ vi.mock('./db.ts', () => ({
   shutdown: vi.fn(() => Promise.resolve()),
   insertPage: vi.fn(() => Promise.resolve()),
   getActivePage: vi.fn(() => Promise.resolve(null)),
-  submitPage: vi.fn(() => Promise.resolve('not_found')),
+  submitPage: vi.fn(() => Promise.resolve({ kind: 'not_found' })),
   fetchAndAdvanceResult: vi.fn(() => Promise.resolve(null)),
   deletePage: vi.fn(() => Promise.resolve()),
-  deleteExpiredPages: vi.fn(() => Promise.resolve(0)),
+  deleteExpiredPages: vi.fn(() => Promise.resolve({ total: 0, abandoned: 0 })),
   ping: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -64,7 +64,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default: db reads return nothing (404 paths).
   (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-  (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValue('not_found');
+  (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValue({ kind: 'not_found' });
   (db.fetchAndAdvanceResult as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 });
 
@@ -196,7 +196,7 @@ describe('POST /:id/result', () => {
     // returned 409 "already submitted" for a page that was merely expired.
     // The fixed SELECT adds `expires_at > now()`, making expired rows return
     // 'not_found' → 404, which is the correct user-facing response.
-    (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce('not_found');
+    (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ kind: 'not_found' });
     const res = await app.fetch(req('POST', `/${UNKNOWN_ID}/result`, validAction));
     expect(res.status).toBe(404);
     const body = await json(res);
@@ -205,7 +205,10 @@ describe('POST /:id/result', () => {
 
   it('returns 200 and calls db.submitPage when page is open', async () => {
     const page = fakePage();
-    (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce('ok');
+    (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      kind: 'ok',
+      createdAt: new Date(),
+    });
     const res = await app.fetch(req('POST', `/${page.id}/result`, validAction));
     expect(res.status).toBe(200);
     const body = await json(res);
@@ -215,7 +218,7 @@ describe('POST /:id/result', () => {
 
   it('returns 409 on conflict (already submitted)', async () => {
     const page = fakePage({ state: 'submitted' });
-    (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce('conflict');
+    (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ kind: 'conflict' });
     const res = await app.fetch(req('POST', `/${page.id}/result`, validAction));
     expect(res.status).toBe(409);
     const body = await json(res);
@@ -226,7 +229,7 @@ describe('POST /:id/result', () => {
 
   it('409 conflict body.message mentions creating a new page', async () => {
     const page = fakePage({ state: 'submitted' });
-    (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce('conflict');
+    (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ kind: 'conflict' });
     const res = await app.fetch(req('POST', `/${page.id}/result`, validAction));
     const body = await json(res);
     expect(body.message as string).toContain('new page');

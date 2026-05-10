@@ -6,6 +6,10 @@
 // module loads before pino is instrumented by PinoInstrumentation.
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
+import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
+import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { PinoInstrumentation } from '@opentelemetry/instrumentation-pino';
 import { env } from './schemas.ts';
@@ -16,14 +20,22 @@ const status = describeTracing(env);
 let sdk: NodeSDK | undefined;
 
 if (status.enabled) {
+  const base = status.endpoint.replace(/\/$/, '');
+  const headers = parseOtlpHeaders(env.OTEL_EXPORTER_OTLP_HEADERS);
+
   sdk = new NodeSDK({
     serviceName: status.serviceName,
-    traceExporter: new OTLPTraceExporter({
-      // The exporter appends /v1/traces. Grafana Cloud's gateway accepts the
-      // base /otlp path; users set OTEL_EXPORTER_OTLP_ENDPOINT to that base.
-      url: `${status.endpoint.replace(/\/$/, '')}/v1/traces`,
-      headers: parseOtlpHeaders(env.OTEL_EXPORTER_OTLP_HEADERS),
+    // Grafana Cloud's OTLP gateway and grafana/otel-lgtm both accept the
+    // base /otlp path; users set OTEL_EXPORTER_OTLP_ENDPOINT to that base
+    // and the exporters append /v1/<signal>.
+    traceExporter: new OTLPTraceExporter({ url: `${base}/v1/traces`, headers }),
+    metricReader: new PeriodicExportingMetricReader({
+      exporter: new OTLPMetricExporter({ url: `${base}/v1/metrics`, headers }),
+      exportIntervalMillis: 60_000,
     }),
+    logRecordProcessors: [
+      new BatchLogRecordProcessor(new OTLPLogExporter({ url: `${base}/v1/logs`, headers })),
+    ],
     instrumentations: [
       getNodeAutoInstrumentations({
         // Disable instrumentations we don't need to keep the trace stream lean.

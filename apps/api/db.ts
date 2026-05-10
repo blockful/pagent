@@ -102,8 +102,14 @@ export async function getActivePage(id: string): Promise<Page | null> {
   });
 }
 
+export type SubmitOutcome =
+  | { kind: 'ok'; createdAt: Date }
+  | { kind: 'conflict' }
+  | { kind: 'not_found' };
+
 /**
- * Atomic open→submitted transition. Returns 'ok', 'conflict', or 'not_found'.
+ * Atomic open→submitted transition. Returns the row's `created_at` on success
+ * so the caller can record submit-latency without a follow-up query.
  *
  * 'not_found' covers both "no such page id" and "page expired" — the caller
  * doesn't need to distinguish, and the disambiguation SELECT explicitly
@@ -114,27 +120,24 @@ export async function getActivePage(id: string): Promise<Page | null> {
  * 'conflict' — caller would conclude someone else submitted. Better to
  * surface the network error to the caller, who can decide.
  */
-export async function submitPage(
-  id: string,
-  action: unknown,
-): Promise<'ok' | 'conflict' | 'not_found'> {
+export async function submitPage(id: string, action: unknown): Promise<SubmitOutcome> {
   const c = client();
-  const rows = await c<{ id: string }[]>`
+  const rows = await c<{ created_at: Date }[]>`
     update pages
     set state = 'submitted',
         result = ${c.json(action as Parameters<typeof c.json>[0])},
         submitted_at = now()
     where id = ${id} and state = 'open' and expires_at > now()
-    returning id
+    returning created_at
   `;
-  if (rows.length > 0) return 'ok';
+  if (rows.length > 0) return { kind: 'ok', createdAt: rows[0]!.created_at };
   // Disambiguate: does the page exist and is it still valid (conflict) or not (not_found)?
   // Filter on expires_at > now() so an expired-but-not-yet-swept row is
   // correctly classified as 'not_found' rather than 'conflict'.
   const exists = await c<{ id: string }[]>`
     select id from pages where id = ${id} and expires_at > now()
   `;
-  return exists.length > 0 ? 'conflict' : 'not_found';
+  return exists.length > 0 ? { kind: 'conflict' } : { kind: 'not_found' };
 }
 
 /**
@@ -180,10 +183,19 @@ export async function deletePage(id: string): Promise<void> {
   });
 }
 
-export async function deleteExpiredPages(): Promise<number> {
+/**
+ * Deletes expired rows and reports how many were "abandoned" — i.e. still in
+ * state='open' when TTL killed them. Pages that already reached
+ * 'submitted' or 'received' before expiry don't count as abandoned; they're
+ * just garbage collection.
+ */
+export async function deleteExpiredPages(): Promise<{ total: number; abandoned: number }> {
   return withRetry(async () => {
     const c = client();
-    const result = await c`delete from pages where expires_at <= now()`;
-    return result.count;
+    const rows = await c<{ state: PageState }[]>`
+      delete from pages where expires_at <= now() returning state
+    `;
+    const abandoned = rows.filter((r) => r.state === 'open').length;
+    return { total: rows.length, abandoned };
   });
 }

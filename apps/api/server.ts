@@ -6,6 +6,7 @@ import { env } from './schemas.ts';
 import { app, PORT, PUBLIC_URL, PAGE_TTL_MS } from './app.ts';
 import { makeMcpHttpHandler } from './mcp/http.ts';
 import { logger } from './logger.ts';
+import { metrics } from './metrics.ts';
 import { shutdownTracing } from './tracing.ts';
 
 // --- Boot --------------------------------------------------------------------
@@ -14,10 +15,12 @@ await db.init(env.DATABASE_URL);
 
 // Periodically reclaim expired DB rows. Correctness is enforced by
 // WHERE expires_at > now() on every read — this sweep is only for space.
+// Counts pages whose TTL fired while still 'open' as abandoned.
 const sweepTimer = setInterval(async () => {
   try {
-    const deleted = await db.deleteExpiredPages();
-    if (deleted > 0) logger.debug({ deleted }, 'ttl sweep removed expired pages');
+    const { total, abandoned } = await db.deleteExpiredPages();
+    if (abandoned > 0) metrics.pagesAbandoned.add(abandoned);
+    if (total > 0) logger.debug({ total, abandoned }, 'ttl sweep removed expired pages');
   } catch (err) {
     logger.error({ err }, 'ttl sweep failed');
   }
@@ -83,6 +86,9 @@ const shutdown = async (signal: string) => {
 
   await db.shutdown();
   logger.info('shutdown complete');
+  // Flush pino's worker-thread transports (incl. pino-opentelemetry-transport)
+  // before exiting, or buffered log records get dropped on SIGTERM.
+  await new Promise<void>((resolve) => logger.flush(() => resolve()));
   process.exit(0);
 };
 process.on('SIGINT', () => shutdown('SIGINT'));

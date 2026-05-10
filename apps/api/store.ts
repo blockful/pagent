@@ -9,6 +9,7 @@
 import { randomBytes } from 'node:crypto';
 import * as db from './db.ts';
 import type { Page } from './db.ts';
+import { metrics } from './metrics.ts';
 import type { ShowUiResult, CheckResultOutcome } from './mcp/tools.ts';
 
 export type CreatePageConfig = {
@@ -29,6 +30,7 @@ export async function createPage(spec: unknown, cfg: CreatePageConfig): Promise<
     expiresAt: now + cfg.pageTtlMs,
   };
   await db.insertPage(page);
+  metrics.pagesCreated.add(1);
   return {
     id: page.id,
     url: `${cfg.publicUrl}/${page.id}`,

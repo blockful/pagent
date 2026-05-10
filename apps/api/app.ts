@@ -8,11 +8,13 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { apiReference } from '@scalar/hono-api-reference';
+import { trace } from '@opentelemetry/api';
 import * as db from './db.ts';
 import * as store from './store.ts';
 import { clientKey } from './client-key.ts';
 import { env, pageIdSchema, newPageBodySchema, resultBodySchema } from './schemas.ts';
 import { logger } from './logger.ts';
+import { metrics, statusClassFor } from './metrics.ts';
 import type { RequestIdVariables } from './request-id.ts';
 import { requestId, getLog, getRequestId } from './request-id.ts';
 
@@ -96,18 +98,51 @@ app.use(
   }),
 );
 
+// Request observability: bumps RED metrics, surfaces trace_id in a response
+// header, and emits a structured access log. The try/finally is load-bearing:
+// without it, exceptions that escape `next()` (and get caught by app.onError
+// downstream) would skip the metric/log emission — meaning 500s wouldn't
+// register in the error-rate panel.
 app.use('*', async (c, next) => {
   const start = Date.now();
-  await next();
-  getLog(c).info(
-    {
+  try {
+    await next();
+  } finally {
+    const durationMs = Date.now() - start;
+    const status = c.res.status;
+    // routePath is the matched pattern ("/:id") rather than the literal URL —
+    // keeps metric cardinality bounded.
+    const route = c.req.routePath ?? '<unknown>';
+
+    // Surface trace_id so operators can paste it into Grafana's Tempo explorer.
+    const span = trace.getActiveSpan();
+    const traceId = span?.spanContext().traceId;
+    if (traceId && traceId !== '00000000000000000000000000000000') {
+      c.header('x-trace-id', traceId);
+    }
+
+    metrics.httpRequests.add(1, {
       method: c.req.method,
-      path: c.req.path,
-      status: c.res.status,
-      duration_ms: Date.now() - start,
-    },
-    'request',
-  );
+      route,
+      status_class: statusClassFor(status),
+      status_code: String(status),
+    });
+    metrics.httpRequestDuration.record(durationMs / 1000, {
+      method: c.req.method,
+      route,
+    });
+
+    getLog(c).info(
+      {
+        method: c.req.method,
+        path: c.req.path,
+        route,
+        status,
+        duration_ms: durationMs,
+      },
+      'request',
+    );
+  }
 });
 
 // --- Global error handler ----------------------------------------------------
@@ -214,9 +249,9 @@ const submitResultHandler = async (c: Context) => {
   }
   const action = bodyResult.data;
   const outcome = await db.submitPage(idResult.data, action);
-  if (outcome === 'not_found')
+  if (outcome.kind === 'not_found')
     return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
-  if (outcome === 'conflict')
+  if (outcome.kind === 'conflict')
     return c.json(
       {
         error: 'conflict',
@@ -224,6 +259,8 @@ const submitResultHandler = async (c: Context) => {
       },
       409,
     );
+  metrics.pagesSubmitted.add(1);
+  metrics.pageSubmitLatency.record((Date.now() - outcome.createdAt.getTime()) / 1000);
   return c.json({ ok: true });
 };
 
