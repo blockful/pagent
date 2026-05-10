@@ -7,6 +7,35 @@ Hosted UI rendering for terminal-bound AI agents. The agent emits an A2UI surfac
 
 See [PRD.md](./PRD.md) for the design and [HANDOFF.md](./HANDOFF.md) for build context.
 
+## How it works
+
+A non-technical view of what happens when your agent decides it needs a form:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as You
+    participant A as Your AI agent
+    participant S as agent-ui-session
+    participant B as Browser
+
+    Note over A: A bundled skill teaches the agent <br/>when a real form beats faking one in chat.
+    U->>A: "Ask me my favorite color via a UI"
+    A->>A: design the form
+    A->>S: show_ui(spec)
+    S-->>A: short URL
+    A-->>U: prints URL in your terminal
+    U->>B: open URL
+    B-->>U: render the form
+    U->>B: fill out, submit
+    B->>S: send the answer
+    A->>S: check_result()
+    S-->>A: your answer
+    A-->>U: continues the conversation
+```
+
+In plain English: the agent reads its skill, decides a real form is the right way to ask, hands a form description to the service, and prints a short URL in your terminal. You open it in the browser, fill it out, submit. The agent reads your answer back and the conversation keeps going. The agent never sees you typing — only the final result.
+
 ## Layout
 
 npm-workspaces monorepo. Three apps + the plugin scaffolding.
@@ -34,18 +63,30 @@ The repo doubles as a Claude Code plugin and a self-hosted marketplace: `.claude
 
 ## Install as a Claude Code plugin
 
-Inside any Claude Code session:
+**Prerequisites:** Claude Code, Node 22+.
+
+**1. Install** — paste these two commands into any Claude Code session:
 
 ```
 /plugin marketplace add blockful/agent-ui-session
 /plugin install agent-ui-session@agent-ui-session
 ```
 
-That's it. The MCP server (`show_ui` + `check_result`) and the skill are now available, and they talk to the hosted service at `https://pagent.up.railway.app` by default. Try:
+**2. Verify** — confirm the MCP server is connected:
+
+```
+/mcp
+```
+
+You should see `agent-ui-session` listed with `show_ui` and `check_result` tools. The plugin also ships a skill (`agent-ui-session`) that teaches the polling pattern.
+
+**3. Use it** — try this prompt:
 
 > "Use the agent-ui-session skill to ask me my favorite color via a UI form."
 
-To point the MCP server at a different service instance (e.g. a self-hosted deployment), set `AGENT_UI_SESSION_URL` before launching Claude.
+The agent calls `show_ui`, prints a URL (hosted at `https://pagent.vercel.app`), you submit, and the conversation continues.
+
+**Point at a different service?** Set `AGENT_UI_SESSION_URL` before launching Claude. By default the MCP talks to `https://pagent.up.railway.app`.
 
 ## Quick start (development)
 

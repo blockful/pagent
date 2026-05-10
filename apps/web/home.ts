@@ -1,6 +1,40 @@
 import { LitElement, html, css } from 'lit';
 
 class HomePage extends LitElement {
+  static properties = {
+    copied: { state: true },
+  };
+
+  declare copied: boolean;
+
+  private _copyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor() {
+    super();
+    this.copied = false;
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._copyTimer) clearTimeout(this._copyTimer);
+  }
+
+  private async _onCopy() {
+    const cmds =
+      '/plugin marketplace add blockful/agent-ui-session\n' +
+      '/plugin install agent-ui-session@agent-ui-session';
+    try {
+      await navigator.clipboard.writeText(cmds);
+    } catch {
+      // clipboard may be unavailable (insecure context); still flash UX
+    }
+    this.copied = true;
+    if (this._copyTimer) clearTimeout(this._copyTimer);
+    this._copyTimer = setTimeout(() => {
+      this.copied = false;
+    }, 1800);
+  }
+
   static styles = css`
     :host {
       display: block;
@@ -140,25 +174,121 @@ class HomePage extends LitElement {
 
     .lede strong { color: var(--ink); font-weight: 500; }
 
-    .terminal {
+    .install {
       margin-top: 44px;
-      max-width: 560px;
-      font-family: 'JetBrains Mono', ui-monospace, monospace;
-      font-size: 13.5px;
+      max-width: 640px;
       background: #15140f;
       color: #ebe2d2;
-      border-radius: 10px;
-      padding: 18px 20px;
+      border-radius: 12px;
+      border: 1px solid rgba(200, 71, 47, 0.28);
       box-shadow:
         0 1px 0 rgba(255,255,255,0.06) inset,
-        0 30px 60px -30px rgba(21, 20, 15, 0.4),
+        0 0 0 6px rgba(200, 71, 47, 0.05),
+        0 30px 60px -30px rgba(21, 20, 15, 0.45),
         0 12px 30px -12px rgba(21, 20, 15, 0.25);
-      line-height: 1.7;
+      overflow: hidden;
+      animation: rise 1.05s cubic-bezier(.2,.7,.2,1) both;
+      animation-delay: .12s;
+    }
+
+    .install-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 11px 14px 11px 18px;
+      background: rgba(255,255,255,0.025);
+      border-bottom: 1px solid rgba(235, 226, 210, 0.08);
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #b4ac9b;
+    }
+
+    .install-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: #ebe2d2;
+    }
+    .install-label::before {
+      content: '';
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 3px rgba(200, 71, 47, 0.22);
+    }
+
+    .copy-btn {
+      font: inherit;
+      letter-spacing: 0.14em;
+      background: transparent;
+      color: #ebe2d2;
+      border: 1px solid rgba(235, 226, 210, 0.2);
+      padding: 5px 11px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .copy-btn:hover {
+      background: rgba(235, 226, 210, 0.06);
+      border-color: rgba(235, 226, 210, 0.34);
+    }
+    .copy-btn.is-copied {
+      color: #b6dca5;
+      border-color: rgba(155, 199, 138, 0.45);
+      background: rgba(155, 199, 138, 0.08);
+    }
+
+    .install-body {
+      margin: 0;
+      padding: 18px 20px;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 14px;
+      line-height: 1.85;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .install-body .prompt { color: var(--accent); user-select: none; margin-right: 12px; }
+
+    .install-foot {
+      padding: 11px 20px 14px;
+      border-top: 1px solid rgba(235, 226, 210, 0.08);
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 12px;
+      color: #8c8478;
+      letter-spacing: 0.02em;
+    }
+    .install-foot code {
+      background: rgba(235, 226, 210, 0.08);
+      color: #ebe2d2;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 11.5px;
+    }
+
+    .terminal {
+      margin-top: 18px;
+      max-width: 640px;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 13px;
+      background: rgba(21, 20, 15, 0.88);
+      color: #ebe2d2;
+      border-radius: 10px;
+      padding: 14px 20px;
+      box-shadow:
+        0 1px 0 rgba(255,255,255,0.04) inset,
+        0 18px 30px -20px rgba(21, 20, 15, 0.35);
+      line-height: 1.75;
     }
 
     .terminal .prompt { color: var(--accent); user-select: none; margin-right: 10px; }
     .terminal .dim    { color: #8c8478; }
+    .terminal .cmd    { color: #ebe2d2; user-select: text; }
+    .terminal .ok     { color: #9bc78a; }
     .terminal .url    { color: #f6c89f; text-decoration: underline; text-decoration-color: rgba(246, 200, 159, 0.4); }
+    .terminal .rule   { height: 1px; background: rgba(235, 226, 210, 0.08); margin: 10px -22px; }
     .caret {
       display: inline-block;
       width: 8px; height: 1em;
@@ -235,6 +365,15 @@ class HomePage extends LitElement {
       margin: 0;
     }
 
+    .step-link {
+      color: var(--ink);
+      text-decoration: none;
+      border-bottom: 1px solid var(--accent);
+      padding-bottom: 1px;
+      transition: color .15s ease;
+    }
+    .step-link:hover { color: var(--accent); }
+
     .step code {
       font-family: 'JetBrains Mono', ui-monospace, monospace;
       font-size: 12.5px;
@@ -292,10 +431,25 @@ class HomePage extends LitElement {
               <strong>One handoff. Single-shot. No host app required.</strong>
             </p>
 
+            <div class="install" id="install" aria-labelledby="install-label">
+              <div class="install-head">
+                <span class="install-label" id="install-label">Install · Claude Code</span>
+                <button
+                  type="button"
+                  class="copy-btn ${this.copied ? 'is-copied' : ''}"
+                  @click=${this._onCopy}
+                  aria-label="Copy install commands to clipboard"
+                  aria-live="polite"
+                >${this.copied ? 'Copied ✓' : 'Copy'}</button>
+              </div>
+              <pre class="install-body"><code><span class="prompt">›</span>/plugin marketplace add blockful/agent-ui-session
+<span class="prompt">›</span>/plugin install agent-ui-session@agent-ui-session</code></pre>
+              <div class="install-foot">Verify with <code>/mcp</code> — you'll see <code>show_ui</code> &amp; <code>check_result</code>.</div>
+            </div>
+
             <div class="terminal" aria-hidden="true">
-              <div><span class="prompt">$</span><span class="dim">agent ›</span> show_ui(spec)</div>
-              <div><span class="prompt">↳</span><span class="url">https://pagent.vercel.app/4f2a…b13c</span></div>
-              <div><span class="prompt">$</span><span class="dim">agent ›</span> check_result(page_id)<span class="caret"></span></div>
+              <div><span class="prompt">›</span><span class="dim">"ask me my favorite color via a UI"</span></div>
+              <div><span class="prompt">↳</span><span class="url">https://pagent.vercel.app/4f2a…b13c</span><span class="caret"></span></div>
             </div>
           </header>
 
@@ -304,18 +458,18 @@ class HomePage extends LitElement {
           <section class="steps">
             <article class="step">
               <div class="step-num">i.</div>
-              <h3>Install the plugin</h3>
-              <p>In any Claude Code session, run <code>/plugin marketplace add blockful/agent-ui-session</code> then <code>/plugin install agent-ui-session@agent-ui-session</code>. The MCP tools and the skill are now available — pointed at the hosted service by default.</p>
+              <h3>Install in Claude Code</h3>
+              <p>Run the two commands in the <a href="#install" class="step-link">install panel above</a>. The plugin ships an MCP server (<code>show_ui</code>, <code>check_result</code>) and a skill that teaches the agent when to reach for a form.</p>
             </article>
             <article class="step">
               <div class="step-num">ii.</div>
-              <h3>Agent calls show_ui</h3>
-              <p>When structured input is needed, the agent calls <code>show_ui(spec)</code> and prints the returned URL to your terminal.</p>
+              <h3>Ask your agent</h3>
+              <p>Try: <code>"Use the agent-ui-session skill to ask me my favorite color via a UI form."</code> The skill teaches the agent the polling pattern; the MCP gives it the tools.</p>
             </article>
             <article class="step">
               <div class="step-num">iii.</div>
-              <h3>Click. Fill. Submit.</h3>
-              <p>You complete the form in the browser. The agent's <code>check_result(page_id)</code> returns the action and the conversation continues.</p>
+              <h3>Open. Submit. Continue.</h3>
+              <p>The agent prints a URL. You open it, fill the form, submit. <code>check_result</code> hands the answer back and the conversation keeps going.</p>
             </article>
           </section>
 
