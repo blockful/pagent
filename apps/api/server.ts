@@ -70,6 +70,9 @@ const shutdown = async (signal: string) => {
 
   await db.shutdown();
   logger.info('shutdown complete');
+  // Flush pino's worker-thread transports (incl. pino-opentelemetry-transport)
+  // before exiting, or buffered log records get dropped on SIGTERM.
+  await new Promise<void>((resolve) => logger.flush(() => resolve()));
   process.exit(0);
 };
 process.on('SIGINT', () => shutdown('SIGINT'));

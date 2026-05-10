@@ -8,5 +8,9 @@ FROM grafana/otel-lgtm:0.27.1
 COPY provisioning/ /etc/grafana/provisioning/
 COPY dashboards/   /var/lib/grafana/dashboards/
 
+# All persistent state lives under /data — Grafana, Tempo, Loki, Prometheus.
+# Mount a Railway volume here or every redeploy wipes dashboards/data.
+VOLUME /data
+
 # 3000 = Grafana UI, 4317 = OTLP gRPC, 4318 = OTLP HTTP.
 EXPOSE 3000 4317 4318

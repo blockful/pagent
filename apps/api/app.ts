@@ -124,46 +124,50 @@ app.use(
 );
 
 // Request observability: bumps RED metrics, surfaces trace_id in a response
-// header, and emits a structured access log. One middleware so we measure
-// once and the surrounding stack is unambiguous.
+// header, and emits a structured access log. The try/finally is load-bearing:
+// without it, exceptions that escape `next()` (and get caught by app.onError
+// downstream) would skip the metric/log emission — meaning 500s wouldn't
+// register in the error-rate panel.
 app.use('*', async (c, next) => {
   const start = Date.now();
-  await next();
-  const durationMs = Date.now() - start;
-  const status = c.res.status;
-  // routePath is the matched pattern ("/:id") rather than the literal URL —
-  // keeps metric cardinality bounded. Unmatched routes fall back to a fixed
-  // label so 404 spam doesn't blow up the series count.
-  const route = c.req.routePath ?? '<unknown>';
+  try {
+    await next();
+  } finally {
+    const durationMs = Date.now() - start;
+    const status = c.res.status;
+    // routePath is the matched pattern ("/:id") rather than the literal URL —
+    // keeps metric cardinality bounded.
+    const route = c.req.routePath ?? '<unknown>';
 
-  // Surface trace_id so operators can paste it into Grafana's Tempo explorer.
-  const span = trace.getActiveSpan();
-  const traceId = span?.spanContext().traceId;
-  if (traceId && traceId !== '00000000000000000000000000000000') {
-    c.header('x-trace-id', traceId);
-  }
+    // Surface trace_id so operators can paste it into Grafana's Tempo explorer.
+    const span = trace.getActiveSpan();
+    const traceId = span?.spanContext().traceId;
+    if (traceId && traceId !== '00000000000000000000000000000000') {
+      c.header('x-trace-id', traceId);
+    }
 
-  metrics.httpRequests.add(1, {
-    method: c.req.method,
-    route,
-    status_class: statusClassFor(status),
-    status_code: String(status),
-  });
-  metrics.httpRequestDuration.record(durationMs / 1000, {
-    method: c.req.method,
-    route,
-  });
-
-  getLog(c).info(
-    {
+    metrics.httpRequests.add(1, {
       method: c.req.method,
-      path: c.req.path,
       route,
-      status,
-      duration_ms: durationMs,
-    },
-    'request',
-  );
+      status_class: statusClassFor(status),
+      status_code: String(status),
+    });
+    metrics.httpRequestDuration.record(durationMs / 1000, {
+      method: c.req.method,
+      route,
+    });
+
+    getLog(c).info(
+      {
+        method: c.req.method,
+        path: c.req.path,
+        route,
+        status,
+        duration_ms: durationMs,
+      },
+      'request',
+    );
+  }
 });
 
 // --- Global error handler ----------------------------------------------------

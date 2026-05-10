@@ -119,6 +119,14 @@ PROM_RETENTION=30d    # for metrics
 
 (The image consumes these via its bundled configs.)
 
+## Behavior under collector outage
+
+OTLP exporters and the pino transport retry silently with exponential
+backoff. The API does **not** block on telemetry — request handling stays
+hot even when the observability service is down. In-memory buffers cap at
+a few MB per signal; sustained outages cause the oldest data to be
+dropped, but nothing leaks back to the user.
+
 ## Troubleshooting
 
 - **Boot log says `[tracing] disabled`.**
