@@ -6,7 +6,7 @@
   "description": "REST + state-machine service for pagent",
   "main": "server.ts",
   "scripts": {
-    "dev": "node --watch --experimental-strip-types server.ts",
+    "dev": "node --watch --env-file=.env --experimental-strip-types server.ts",
     "start": "node --experimental-strip-types server.ts"
   },
   "dependencies": {

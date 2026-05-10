@@ -15,7 +15,9 @@ let sql: ReturnType<typeof postgres> | null = null;
 
 export async function init(connectionString: string): Promise<void> {
   if (sql) return;
-  sql = postgres(connectionString, { ssl: 'require', prepare: false });
+  const sslMode = new URL(connectionString).searchParams.get('sslmode');
+  const ssl = sslMode === 'disable' ? false : 'require';
+  sql = postgres(connectionString, { ssl, prepare: false });
   await sql`
     create table if not exists pages (
       id           text primary key,
