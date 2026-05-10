@@ -294,8 +294,8 @@ class HomePage extends LitElement {
 
             <div class="terminal" aria-hidden="true">
               <div><span class="prompt">$</span><span class="dim">agent ›</span> show_ui(spec)</div>
-              <div><span class="prompt">↳</span><span class="url">https://agent-ui.app/4f2a…b13c</span></div>
-              <div><span class="prompt">$</span><span class="dim">agent ›</span> wait_for_result<span class="caret"></span></div>
+              <div><span class="prompt">↳</span><span class="url">https://pagent.vercel.app/4f2a…b13c</span></div>
+              <div><span class="prompt">$</span><span class="dim">agent ›</span> check_result(page_id)<span class="caret"></span></div>
             </div>
           </header>
 
@@ -304,8 +304,8 @@ class HomePage extends LitElement {
           <section class="steps">
             <article class="step">
               <div class="step-num">i.</div>
-              <h3>Wire the MCP server</h3>
-              <p>Add one config line pointing at the hosted endpoint. Drop the bundled <code>SKILL.md</code> into your project so the agent knows when to reach for a form.</p>
+              <h3>Install the plugin</h3>
+              <p>In any Claude Code session, run <code>/plugin marketplace add blockful/agent-ui-session</code> then <code>/plugin install agent-ui-session@agent-ui-session</code>. The MCP tools and the skill are now available — pointed at the hosted service by default.</p>
             </article>
             <article class="step">
               <div class="step-num">ii.</div>
@@ -315,7 +315,7 @@ class HomePage extends LitElement {
             <article class="step">
               <div class="step-num">iii.</div>
               <h3>Click. Fill. Submit.</h3>
-              <p>You complete the form in the browser. The agent's <code>wait_for_result</code> returns the action and the conversation continues.</p>
+              <p>You complete the form in the browser. The agent's <code>check_result(page_id)</code> returns the action and the conversation continues.</p>
             </article>
           </section>
 

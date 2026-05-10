@@ -8,7 +8,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-const SERVICE_URL = (process.env.AGENT_UI_SESSION_URL ?? 'http://localhost:8787').replace(/\/$/, '');
+const SERVICE_URL = (process.env.AGENT_UI_SESSION_URL ?? 'https://pagent.up.railway.app').replace(/\/$/, '');
 
 const server = new McpServer({
   name: 'agent-ui-session',

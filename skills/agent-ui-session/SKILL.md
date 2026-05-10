@@ -49,4 +49,4 @@ That first read flips the page to `received`; the renderer picks that up and tel
 
 ## Setup expectation
 
-These tools require an `agent-ui-session` REST service to be reachable (default `http://localhost:8787`; override with the `AGENT_UI_SESSION_URL` env var). If `show_ui` errors with a connection refused, the service isn't running — start it with `npm run dev` from the project repo, or point at a deployed instance.
+These tools talk to the hosted `agent-ui-session` REST service at `https://pagent.up.railway.app` by default. Set the `AGENT_UI_SESSION_URL` env var to point at a self-hosted instance (e.g. `http://localhost:8787` if you're running the repo locally).
