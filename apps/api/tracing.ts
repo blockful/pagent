@@ -8,9 +8,10 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { PinoInstrumentation } from '@opentelemetry/instrumentation-pino';
+import { env } from './schemas.ts';
 import { describeTracing, tracingBootLog } from './tracing-status.ts';
 
-const status = describeTracing();
+const status = describeTracing(env);
 
 let sdk: NodeSDK | undefined;
 

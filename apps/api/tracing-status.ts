@@ -6,7 +6,12 @@ export type TracingStatus =
   | { enabled: true; endpoint: string; serviceName: string }
   | { enabled: false; reason: string };
 
-export function describeTracing(env: NodeJS.ProcessEnv = process.env): TracingStatus {
+type TracingEnv = {
+  OTEL_EXPORTER_OTLP_ENDPOINT?: string;
+  OTEL_SERVICE_NAME?: string;
+};
+
+export function describeTracing(env: TracingEnv): TracingStatus {
   const endpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT;
   if (!endpoint) {
     return {
