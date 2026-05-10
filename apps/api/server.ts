@@ -2,19 +2,8 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { randomBytes } from 'node:crypto';
-
-// --- Types -------------------------------------------------------------------
-
-type PageState = 'open' | 'submitted' | 'received';
-
-type Page = {
-  id: string;
-  spec: unknown;
-  state: PageState;
-  result: unknown;
-  createdAt: number;
-  expiresAt: number;
-};
+import * as db from './db.ts';
+import type { Page } from './db.ts';
 
 // --- Storage -----------------------------------------------------------------
 
@@ -25,6 +14,11 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ?.split(',')
   .map((s) => s.trim())
   .filter(Boolean);
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  console.error('DATABASE_URL is not set. Copy .env.example to .env and fill it in.');
+  process.exit(1);
+}
 
 const pages = new Map<string, Page>();
 
@@ -37,24 +31,25 @@ const getLivePage = (id: string): Page | null => {
   if (!p) return null;
   if (isExpired(p)) {
     pages.delete(id);
+    db.deletePage(id).catch((err) => console.error('lazy ttl db delete failed', id, err));
     return null;
   }
   return p;
 };
 
-// Periodic TTL sweep
 setInterval(() => {
   const now = Date.now();
   for (const [id, p] of pages) {
-    if (now >= p.expiresAt) pages.delete(id);
+    if (now >= p.expiresAt) {
+      pages.delete(id);
+      db.deletePage(id).catch((err) => console.error('ttl sweep db delete failed', id, err));
+    }
   }
 }, 60_000).unref();
 
 // --- App ---------------------------------------------------------------------
 
 const app = new Hono();
-// If ALLOWED_ORIGINS is set, restrict to that comma-separated list.
-// If unset (e.g. local dev), allow all origins.
 app.use('*', cors({ origin: ALLOWED_ORIGINS ?? '*' }));
 
 app.get('/health', (c) => c.json({ ok: true, pages: pages.size }));
@@ -73,6 +68,7 @@ app.post('/new', async (c) => {
     createdAt: now,
     expiresAt: now + PAGE_TTL_MS,
   };
+  await db.insertPage(page);
   pages.set(page.id, page);
   return c.json({ id: page.id, url: `${PUBLIC_URL}/${page.id}`, expires_at: page.expiresAt }, 201);
 });
@@ -94,22 +90,38 @@ app.post('/:id/result', async (c) => {
   if (p.state !== 'open') return c.json({ error: 'conflict', state: p.state }, 409);
   const action = await c.req.json().catch(() => null);
   if (action === null) return c.json({ error: 'bad_request' }, 400);
+  await db.markSubmitted(p.id, action);
   p.state = 'submitted';
   p.result = action;
   return c.json({ ok: true });
 });
 
-app.get('/:id/result', (c) => {
+app.get('/:id/result', async (c) => {
   const p = getLivePage(c.req.param('id'));
   if (!p) return c.json({ error: 'not_found' }, 404);
   const stateAtRead = p.state;
-  // Side effect: first read while submitted transitions to received.
-  if (p.state === 'submitted') p.state = 'received';
+  if (p.state === 'submitted') {
+    await db.markReceived(p.id);
+    p.state = 'received';
+  }
   return c.json({ state: stateAtRead, result: p.result });
 });
 
 // --- Boot --------------------------------------------------------------------
 
-serve({ fetch: app.fetch, port: PORT }, (info) => {
+await db.init(DATABASE_URL);
+await db.loadActivePages(pages);
+console.log(`rehydrated ${pages.size} page(s) from db`);
+
+const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(`agent-ui-session listening on ${PUBLIC_URL} (port ${info.port})`);
 });
+
+const shutdown = async (signal: string) => {
+  console.log(`${signal} received, shutting down`);
+  server.close();
+  await db.shutdown();
+  process.exit(0);
+};
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
