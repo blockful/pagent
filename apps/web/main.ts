@@ -5,6 +5,10 @@ import * as v0_9 from '@a2ui/web_core/v0_9';
 import { basicCatalog } from '@a2ui/lit/v0_9';
 import '@a2ui/lit/v0_9'; // registers <a2ui-surface>
 import './home'; // registers <home-page>
+import { assertCatalogsAllowed } from './spec-guard.js';
+
+/** Hard-coded allowlist of catalog URLs the renderer is permitted to use. */
+const ALLOWED_CATALOG_IDS = [basicCatalog.id] as const;
 
 type PageState = 'open' | 'submitted' | 'received';
 type PageResponse = {
@@ -232,6 +236,10 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       this.processor.model.deleteSurface(id);
     }
     try {
+      // Defense-in-depth: reject specs that reference catalogs outside the allowlist
+      // before handing off to the processor. The processor already throws on unknown
+      // catalogIds (outcome A), but this gate fails loudly with a user-visible message.
+      assertCatalogsAllowed(spec, ALLOWED_CATALOG_IDS);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- spec is opaque (PRD §spec); processMessages accepts any[]
       this.processor.processMessages(spec as any);
       this.error = null;
