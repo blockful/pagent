@@ -5,11 +5,11 @@ description: Show interactive UI to the user without owning a renderer. Use when
 
 # Showing UI to your user
 
-You don't have a screen, but your user does. Call `show_ui(spec)` with an A2UI v0.9 surface and the tool returns `{ session_id, url }`. **Print the URL** so the user can open it. Then call `wait_for_event(session_id)` to receive their input — it long-polls for up to 25 s and resolves to either `{ event: { type: "user_action", action: { name, surfaceId, sourceComponentId, context, timestamp } } }` or `{ event: null }` (idle timeout — call again to keep waiting). You can replace the surface mid-conversation by calling `show_ui` again, so multi-turn flows are natural: render → wait → read → re-render. If `wait_for_event` errors with "Session not found", the session expired (default TTL 30 min) — start a new one with `show_ui`.
+You don't have a screen, but your user does. Call `show_ui(spec)` with an A2UI v0.9 surface and the tool returns `{ page_id, url }`. **Print the URL** so the user can open it. Then call `check_result(page_id)` — it returns immediately with `{ state, result }`. If `state === "open"`, the user hasn't responded yet: wait a few seconds (or do other useful work) and call `check_result` again. When `state === "submitted"`, `result` carries the user's input as an A2UI client-action: `{ name, surfaceId, sourceComponentId, context, timestamp }`. The renderer detects that you've fetched the result (state flips to `"received"` on your first read) and shows "the agent has your input" feedback to the user. Each page is **single-shot**: one spec, one result. For a follow-up question, call `show_ui` again with a fresh spec — there is no surface-replace mechanism.
 
-The `spec` is an array of A2UI v0.9 messages: one `createSurface`, then `updateComponents` with a tree whose root component MUST have id `"root"`. The basic catalog (`https://a2ui.org/specification/v0_9/basic_catalog.json`) gives you `Column`, `Row`, `Card`, `Text`, `TextField`, `Button`, `Checkbox`, `Image`, `Divider`, `List`, `Tabs`, `Slider`, etc. Buttons fire actions via `action: { event: { name: "your_event", context: { ... } } }` — that `name` is what arrives in `wait_for_event`'s response. Bind input fields with `value: { path: "/some/key" }` and reference those paths in the button's context (e.g. `{ "name": { "path": "/some/key" } }`) so user input flows back to you. Keep specs small — one screen, one purpose. Once you've handled the input, render a confirmation surface or close the loop in plain text.
+The `spec` is an array of A2UI v0.9 messages: one `createSurface`, then `updateComponents` with a tree whose root component MUST have id `"root"`. The basic catalog (`https://a2ui.org/specification/v0_9/basic_catalog.json`) gives you `Column`, `Row`, `Card`, `Text`, `TextField`, `Button`, `Checkbox`, `Image`, `Divider`, `List`, `Tabs`, `Slider`, etc. Buttons fire actions via `action: { event: { name: "your_event", context: { ... } } }` — that `name` is what arrives in the `result.name` field. Bind input fields with `value: { path: "/some/key" }` and reference those paths in the button's context (e.g. `{ "name": { "path": "/some/key" } }`) so user input flows back to you. Keep specs small — one screen, one purpose. If `check_result` returns 404 / "Page not found", the page expired (default TTL 30 min) — start a new one with `show_ui`.
 
-## Minimal example
+## Worked example: "What's your name?"
 
 ```json
 [
@@ -25,17 +25,27 @@ The `spec` is an array of A2UI v0.9 messages: one `createSurface`, then `updateC
 ]
 ```
 
-After the user types `Alex` and clicks Submit, `wait_for_event` returns:
+Call pattern:
+
+1. `show_ui(spec)` → `{ page_id: "abc...", url: "http://localhost:8788/abc..." }`. Print the URL.
+2. `check_result("abc...")` → `{ "state": "open", "result": null }`. User hasn't clicked yet.
+3. Wait a few seconds, do other work, then call again.
+4. `check_result("abc...")` → after the user types `Alex` and clicks Submit:
 
 ```json
 {
-  "event": {
-    "type": "user_action",
-    "action": { "name": "submitted", "surfaceId": "main", "sourceComponentId": "submit",
-                "context": { "name": "Alex" }, "timestamp": "..." }
+  "state": "submitted",
+  "result": {
+    "name": "submitted",
+    "surfaceId": "main",
+    "sourceComponentId": "submit",
+    "context": { "name": "Alex" },
+    "timestamp": "..."
   }
 }
 ```
+
+That first read flips the page to `received`; the renderer picks that up and tells the user the agent has their input.
 
 ## Setup expectation
 

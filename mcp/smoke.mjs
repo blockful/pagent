@@ -1,4 +1,4 @@
-// Smoke test: boot the MCP server, run show_ui then wait_for_event, print results.
+// Smoke test: boot the MCP server, run show_ui then poll check_result, print results.
 // Run from repo root:  node mcp/smoke.mjs
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -44,6 +44,8 @@ function notify(method, params) {
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n');
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 const SAMPLE = [
   {
     createSurface: {
@@ -81,18 +83,32 @@ try {
   console.log('--- calling show_ui');
   const show = await call('tools/call', {
     name: 'show_ui',
-    arguments: { spec: SAMPLE, format: 'a2ui-v0.9' },
+    arguments: { spec: SAMPLE },
   });
   console.log(JSON.stringify(show, null, 2));
-  const sid = show.structuredContent.session_id;
+  const pageId = show.structuredContent.page_id;
 
   console.log(`\nOpen this URL in a browser and click the button:\n  ${show.structuredContent.url}`);
-  console.log('\n--- calling wait_for_event (60s)');
-  const event = await call('tools/call', {
-    name: 'wait_for_event',
-    arguments: { session_id: sid, timeout_s: 60 },
-  });
-  console.log(JSON.stringify(event, null, 2));
+  console.log('\n--- polling check_result (up to 30 attempts, 1s apart)');
+
+  let done = false;
+  for (let attempt = 1; attempt <= 30; attempt++) {
+    const result = await call('tools/call', {
+      name: 'check_result',
+      arguments: { page_id: pageId },
+    });
+    const state = result.structuredContent?.state;
+    console.log(`attempt ${attempt}: state=${state}`);
+    if (state === 'submitted' || state === 'received') {
+      console.log(JSON.stringify(result, null, 2));
+      done = true;
+      break;
+    }
+    await sleep(1000);
+  }
+  if (!done) {
+    console.log('Gave up waiting');
+  }
 } catch (err) {
   console.error('smoke failed:', err);
   process.exitCode = 1;

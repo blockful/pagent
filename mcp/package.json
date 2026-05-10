@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "MCP server exposing show_ui + wait_for_event tools for agent-ui-session",
+  "description": "MCP server exposing show_ui + check_result tools for agent-ui-session",
   "bin": {
     "agent-ui-session-mcp": "server.ts"
   },

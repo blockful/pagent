@@ -1,7 +1,7 @@
 {
   "name": "agent-ui-session",
   "version": "0.0.1",
-  "description": "Hosted UI rendering for terminal-bound agents. Bundles a stdio MCP server (show_ui + wait_for_event) and a skill teaching the call pattern.",
+  "description": "Hosted UI rendering for terminal-bound agents. Bundles a stdio MCP server (show_ui + check_result) and a skill teaching the polling pattern.",
   "author": "Alexandro T. Netto",
   "homepage": "https://github.com/netto/agent-ui-session",
   "license": "MIT"

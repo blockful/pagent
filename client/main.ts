@@ -5,19 +5,25 @@ import * as v0_9 from '@a2ui/web_core/v0_9';
 import { basicCatalog } from '@a2ui/lit/v0_9';
 import '@a2ui/lit/v0_9'; // registers <a2ui-surface>
 
-type ServerEvent =
-  | { id: number; type: 'surface_updated'; format: string; spec: unknown; ts: number }
-  | { id: number; type: 'user_action'; action: unknown; ts: number }
-  | { id: number; type: 'session_closed'; ts: number };
+type PageState = 'open' | 'submitted' | 'received';
+type PageResponse = {
+  spec: unknown;
+  state: PageState;
+  result: unknown | null;
+  expires_at: number | string;
+};
 
-const sessionId = location.pathname.replace(/^\/+/, '').split('/')[0];
+const pageId = location.pathname.replace(/^\/+/, '').split('/')[0];
+
+const POLL_INTERVAL_MS = 2000;
+const POLL_TIMEOUT_MS = 60_000;
 
 class AgentUIApp extends SignalWatcher(LitElement) {
   static properties = {
     status: { state: true },
     error: { state: true },
-    surfaceTick: { state: true },
     awaiting: { state: true },
+    awaitingMessage: { state: true },
   };
 
   static styles = css`
@@ -51,26 +57,27 @@ class AgentUIApp extends SignalWatcher(LitElement) {
 
   declare status: 'connecting' | 'live' | 'closed' | 'error';
   declare error: string | null;
-  declare surfaceTick: number;
   declare awaiting: boolean;
+  declare awaitingMessage: string;
 
   constructor() {
     super();
     this.status = 'connecting';
     this.error = null;
-    this.surfaceTick = 0;
     this.awaiting = false;
+    this.awaitingMessage = 'Sent — waiting for the agent…';
   }
 
   private processor = new v0_9.MessageProcessor(
     [basicCatalog],
     async (action: v0_9.A2uiClientAction) => {
       if (this.awaiting) return; // already submitted — drop duplicate
-      // Optimistically lock the surface — the agent should respond with a new
-      // surface, but until then prevent duplicate submissions.
+      // Optimistic lock — the page is single-shot, so prevent further submits
+      // and surface the "waiting for the agent" banner immediately.
       this.awaiting = true;
+      this.awaitingMessage = 'Sent — waiting for the agent…';
       try {
-        const res = await fetch(`/sessions/${sessionId}/actions`, {
+        const res = await fetch(`/${pageId}/result`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -82,65 +89,119 @@ class AgentUIApp extends SignalWatcher(LitElement) {
           }),
         });
         if (!res.ok) {
+          console.warn('result POST failed', res.status);
           this.awaiting = false;
-          console.warn('action POST failed', res.status);
+          return;
         }
+        this.startPollingForReceived();
       } catch (err) {
+        console.error('result POST error', err);
         this.awaiting = false;
-        console.error('action POST error', err);
       }
     },
   );
 
-  private es: EventSource | null = null;
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  private pollDeadline = 0;
 
   connectedCallback() {
     super.connectedCallback();
-    if (!sessionId) {
+    if (!pageId) {
       this.status = 'error';
-      this.error = 'No session id in URL.';
+      this.error = 'No page id in URL.';
       return;
     }
-    this.connect();
+    void this.loadPage();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    this.es?.close();
+    this.stopPolling();
   }
 
-  private connect() {
-    const url = `/sessions/${sessionId}/events?since=0`;
-    const es = new EventSource(url);
-    this.es = es;
-    es.onopen = () => { this.status = 'live'; };
-    es.onmessage = (e) => this.handleEvent(JSON.parse(e.data) as ServerEvent);
-    es.onerror = () => {
-      if (this.status !== 'closed') this.status = 'error';
-    };
-  }
+  private async loadPage() {
+    try {
+      const res = await fetch(`/${pageId}`, {
+        headers: { accept: 'application/json' },
+      });
+      if (res.status === 404) {
+        this.status = 'error';
+        this.error = 'Page not found or expired.';
+        return;
+      }
+      if (!res.ok) {
+        this.status = 'error';
+        this.error = `Failed to load page (${res.status}).`;
+        return;
+      }
+      const page = (await res.json()) as PageResponse;
+      this.applySpec(page.spec);
+      this.status = 'live';
 
-  private handleEvent(ev: ServerEvent) {
-    if (ev.type === 'surface_updated') {
-      for (const id of Array.from(this.processor.model.surfacesMap.keys())) {
-        this.processor.model.deleteSurface(id);
+      // If the user reloaded after submitting, restore the locked state.
+      if (page.state === 'submitted') {
+        this.awaiting = true;
+        this.awaitingMessage = 'Sent — waiting for the agent…';
+        this.startPollingForReceived();
+      } else if (page.state === 'received') {
+        this.awaiting = true;
+        this.awaitingMessage = '✓ The agent has your input';
       }
-      try {
-        this.processor.processMessages(ev.spec as any);
-        this.error = null;
-      } catch (err) {
-        console.error('processMessages failed', err, ev);
-        this.error = String(err);
-      }
-      this.surfaceTick++;
-      // Agent has replied with a new surface — release the lock.
-      this.awaiting = false;
-    } else if (ev.type === 'session_closed') {
-      this.status = 'closed';
-      this.awaiting = false;
-      this.es?.close();
+    } catch (err) {
+      console.error('GET page failed', err);
+      this.status = 'error';
+      this.error = 'Failed to load page.';
     }
-    // user_action is our own echo — ignore.
+  }
+
+  private applySpec(spec: unknown) {
+    for (const id of Array.from(this.processor.model.surfacesMap.keys())) {
+      this.processor.model.deleteSurface(id);
+    }
+    try {
+      this.processor.processMessages(spec as any);
+      this.error = null;
+    } catch (err) {
+      console.error('processMessages failed', err, spec);
+      this.error = String(err);
+    }
+  }
+
+  private startPollingForReceived() {
+    this.stopPolling();
+    this.pollDeadline = Date.now() + POLL_TIMEOUT_MS;
+    const tick = async () => {
+      this.pollTimer = null;
+      if (!this.isConnected) return;
+      if (Date.now() >= this.pollDeadline) return;
+      try {
+        const res = await fetch(`/${pageId}`, {
+          headers: { accept: 'application/json' },
+        });
+        if (res.ok) {
+          const page = (await res.json()) as PageResponse;
+          if (page.state === 'received') {
+            this.awaitingMessage = '✓ The agent has your input';
+            return; // stop polling
+          }
+        }
+        // otherwise keep polling (including 404, since the page may have been
+        // evicted; we just stop on timeout/disconnect rather than spam errors).
+      } catch (err) {
+        console.warn('poll GET failed', err);
+      }
+      if (!this.isConnected) return;
+      if (Date.now() >= this.pollDeadline) return;
+      this.pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+    };
+    this.pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+  }
+
+  private stopPolling() {
+    if (this.pollTimer != null) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = null;
+    }
   }
 
   render() {
@@ -152,14 +213,13 @@ class AgentUIApp extends SignalWatcher(LitElement) {
     }
     const surfaces = Array.from(this.processor.model.surfacesMap.entries());
     if (surfaces.length === 0) {
-      return html`<div class="pending"><div class="spinner"></div><div class="status">Waiting for the agent…</div></div>`;
+      return html`<div class="pending"><div class="spinner"></div><div class="status">Loading…</div></div>`;
     }
-    void this.surfaceTick;
     return html`<section id="surfaces" class="surface-wrap ${this.awaiting ? 'is-awaiting' : ''}">
       ${this.awaiting
         ? html`<div class="awaiting-banner" role="status" aria-live="polite">
             <div class="small-spinner"></div>
-            <span>Sent — waiting for the agent…</span>
+            <span>${this.awaitingMessage}</span>
           </div>`
         : nothing}
       <div class="a2ui-host" aria-disabled=${this.awaiting ? 'true' : 'false'}>

@@ -3,6 +3,10 @@ import { resolve } from 'node:path';
 
 const API_PORT = process.env.API_PORT ?? '8787';
 const CLIENT_PORT = Number(process.env.CLIENT_PORT ?? 8788);
+const API_TARGET = `http://localhost:${API_PORT}`;
+
+// 128-bit hex page id (must match server.ts).
+const PAGE_ID = String.raw`[a-f0-9]{32}`;
 
 export default defineConfig({
   root: 'client',
@@ -10,8 +14,20 @@ export default defineConfig({
     port: CLIENT_PORT,
     strictPort: true,
     proxy: {
-      '/sessions': { target: `http://localhost:${API_PORT}`, changeOrigin: true, ws: false },
-      '/healthz': { target: `http://localhost:${API_PORT}`, changeOrigin: true },
+      '/new': { target: API_TARGET, changeOrigin: true },
+      '/healthz': { target: API_TARGET, changeOrigin: true },
+      // /:id/result — always API.
+      [`^/${PAGE_ID}/result(?:\\?.*)?$`]: { target: API_TARGET, changeOrigin: true },
+      // /:id — content-negotiated. Browser navigation (Accept: text/html) gets
+      // the SPA; fetch() from the renderer (Accept: */*) is proxied to the API.
+      [`^/${PAGE_ID}(?:\\?.*)?$`]: {
+        target: API_TARGET,
+        changeOrigin: true,
+        bypass(req) {
+          const accept = req.headers.accept ?? '';
+          if (accept.includes('text/html')) return '/index.html';
+        },
+      },
     },
   },
   build: {
