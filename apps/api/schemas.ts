@@ -46,6 +46,8 @@ export const envSchema = z.object({
   OTEL_SERVICE_NAME: z.string().optional(),
   NODE_ENV: z.enum(['development', 'production', 'test']).optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).optional(),
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 });
 
 export type Env = z.infer<typeof envSchema>;

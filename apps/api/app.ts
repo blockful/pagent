@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
+import type { Context } from 'hono';
+import { rateLimiter } from 'hono-rate-limiter';
 import { randomBytes } from 'node:crypto';
 import * as db from './db.ts';
 import type { Page } from './db.ts';
@@ -23,6 +25,30 @@ export const MAX_BODY_BYTES = 256 * 1024; // 256 KB
 export const pages = new Map<string, Page>();
 
 export const newId = () => randomBytes(16).toString('hex');
+
+// Extract the rate-limit key from the request. Behind Railway / Vercel the
+// real client IP arrives in x-forwarded-for (first hop). In local dev and
+// tests no proxy is present, so we collapse everything into a single bucket.
+const clientKey = (c: Context): string => {
+  const fwd = c.req.header('x-forwarded-for');
+  if (fwd) return fwd.split(',')[0].trim();
+  // Fallback for local dev / tests where no proxy is present. We deliberately
+  // collapse all unknown clients into a single bucket — anonymous traffic is
+  // rate-limited as one logical client.
+  return 'anonymous';
+};
+
+const newPageLimiter = rateLimiter({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  limit: env.RATE_LIMIT_MAX,
+  standardHeaders: 'draft-7', // sets RateLimit-* headers per IETF draft 7
+  keyGenerator: clientKey,
+  handler: (c) => {
+    const retryAfter = Math.ceil(env.RATE_LIMIT_WINDOW_MS / 1000);
+    c.header('Retry-After', String(retryAfter));
+    return c.json({ error: 'rate_limited', retry_after_seconds: retryAfter }, 429);
+  },
+});
 
 export const isExpired = (p: Page) => Date.now() >= p.expiresAt;
 
@@ -80,7 +106,7 @@ app.use('*', async (c, next) => {
 
 app.get('/health', (c) => c.json({ ok: true, pages: pages.size }));
 
-app.post('/new', async (c) => {
+app.post('/new', newPageLimiter, async (c) => {
   const raw = await c.req.json().catch(() => null);
   const result = newPageBodySchema.safeParse(raw);
   if (!result.success) {

@@ -42,5 +42,8 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "hono-rate-limiter": "^0.5.3"
   }
 }

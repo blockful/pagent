@@ -144,4 +144,18 @@ describe('envSchema', () => {
     const r = envSchema.safeParse({ DATABASE_URL: 'postgresql://x', LOG_LEVEL: 'banana' });
     expect(r.success).toBe(false);
   });
+
+  it('applies default RATE_LIMIT_MAX=30 and RATE_LIMIT_WINDOW_MS=60000 when absent', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'postgresql://x' });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.RATE_LIMIT_MAX).toBe(30);
+      expect(r.data.RATE_LIMIT_WINDOW_MS).toBe(60_000);
+    }
+  });
+
+  it('rejects RATE_LIMIT_MAX="-1" (non-positive)', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'postgresql://x', RATE_LIMIT_MAX: '-1' });
+    expect(r.success).toBe(false);
+  });
 });
