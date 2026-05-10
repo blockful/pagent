@@ -4,6 +4,7 @@ import { repeat } from 'lit/directives/repeat.js';
 import * as v0_9 from '@a2ui/web_core/v0_9';
 import { basicCatalog } from '@a2ui/lit/v0_9';
 import '@a2ui/lit/v0_9'; // registers <a2ui-surface>
+import './home'; // registers <home-page>
 
 type PageState = 'open' | 'submitted' | 'received';
 type PageResponse = {
@@ -237,4 +238,11 @@ class AgentUIApp extends SignalWatcher(LitElement) {
 }
 
 customElements.define('agent-ui-app', AgentUIApp);
-document.getElementById('app')!.appendChild(document.createElement('agent-ui-app'));
+
+const root = document.getElementById('app')!;
+if (!pageId) {
+  root.classList.add('is-home');
+  root.appendChild(document.createElement('home-page'));
+} else {
+  root.appendChild(document.createElement('agent-ui-app'));
+}
