@@ -22,7 +22,7 @@ if (status.enabled) {
       // The exporter appends /v1/traces. Grafana Cloud's gateway accepts the
       // base /otlp path; users set OTEL_EXPORTER_OTLP_ENDPOINT to that base.
       url: `${status.endpoint.replace(/\/$/, '')}/v1/traces`,
-      headers: parseOtlpHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
+      headers: parseOtlpHeaders(env.OTEL_EXPORTER_OTLP_HEADERS),
     }),
     instrumentations: [
       getNodeAutoInstrumentations({

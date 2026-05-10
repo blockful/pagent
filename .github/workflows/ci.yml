@@ -42,6 +42,10 @@ jobs:
         run: npm test
 
       - name: Build web
+        # VITE_API_URL is required by `vite build` (see apps/web/vite.config.ts).
+        # CI uses a placeholder; production deploys set the real value in Vercel.
+        env:
+          VITE_API_URL: https://pagent.up.railway.app
         run: npm run build:web
 
       - name: Verify MCP bundle is up to date
