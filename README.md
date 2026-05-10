@@ -217,3 +217,7 @@ curl -s http://localhost:8787/v1/<pageId>/result
 # -> { "state": "submitted", "result": { ... } }    (first read after submit; flips to received)
 # -> { "state": "received",  "result": { ... } }    (subsequent reads)
 ```
+
+## Releases
+
+For the release procedure, see [docs/RELEASING.md](docs/RELEASING.md).
