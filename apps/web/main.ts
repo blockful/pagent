@@ -245,8 +245,9 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       // before handing off to the processor. The processor already throws on unknown
       // catalogIds (outcome A), but this gate fails loudly with a user-visible message.
       assertCatalogsAllowed(spec, ALLOWED_CATALOG_IDS);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- spec is opaque (PRD §spec); processMessages accepts any[]
-      this.processor.processMessages(spec as any);
+      // spec crosses the API trust boundary as unknown; cast to the typed shape so
+      // the compiler will catch any future mismatch in A2UI's input contract.
+      this.processor.processMessages(spec as v0_9.A2uiMessage[]);
       this.error = null;
     } catch (err) {
       console.error('processMessages failed', err, spec);
