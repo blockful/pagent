@@ -1,17 +1,24 @@
 import { LitElement, html, css } from 'lit';
 
+type InstallKind = 'plugin' | 'http';
+
+const INSTALL_COMMANDS: Record<InstallKind, string> = {
+  plugin: '/plugin marketplace add blockful/pagent\n/plugin install pagent@pagent',
+  http: 'claude mcp add --scope project --transport http pagent "https://pagent.up.railway.app/mcp"',
+};
+
 class HomePage extends LitElement {
   static properties = {
     copied: { state: true },
   };
 
-  declare copied: boolean;
+  declare copied: InstallKind | null;
 
   private _copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     super();
-    this.copied = false;
+    this.copied = null;
   }
 
   disconnectedCallback() {
@@ -19,17 +26,16 @@ class HomePage extends LitElement {
     if (this._copyTimer) clearTimeout(this._copyTimer);
   }
 
-  private async _onCopy() {
-    const cmds = '/plugin marketplace add blockful/pagent\n' + '/plugin install pagent@pagent';
+  private async _onCopy(which: InstallKind) {
     try {
-      await navigator.clipboard.writeText(cmds);
+      await navigator.clipboard.writeText(INSTALL_COMMANDS[which]);
     } catch {
       // clipboard may be unavailable (insecure context); still flash UX
     }
-    this.copied = true;
+    this.copied = which;
     if (this._copyTimer) clearTimeout(this._copyTimer);
     this._copyTimer = setTimeout(() => {
-      this.copied = false;
+      this.copied = null;
     }, 1800);
   }
 
@@ -186,6 +192,10 @@ class HomePage extends LitElement {
     .lede strong {
       color: var(--ink);
       font-weight: 500;
+    }
+
+    .install + .install {
+      margin-top: 14px;
     }
 
     .install {
@@ -500,12 +510,12 @@ class HomePage extends LitElement {
                 <span class="install-label" id="install-label">Install · Claude Code</span>
                 <button
                   type="button"
-                  class="copy-btn ${this.copied ? 'is-copied' : ''}"
-                  @click=${this._onCopy}
+                  class="copy-btn ${this.copied === 'plugin' ? 'is-copied' : ''}"
+                  @click=${() => this._onCopy('plugin')}
                   aria-label="Copy install commands to clipboard"
                   aria-live="polite"
                 >
-                  ${this.copied ? 'Copied ✓' : 'Copy'}
+                  ${this.copied === 'plugin' ? 'Copied ✓' : 'Copy'}
                 </button>
               </div>
               <pre
@@ -515,6 +525,30 @@ class HomePage extends LitElement {
               <div class="install-foot">
                 Verify with <code>/mcp</code> — you'll see <code>show_ui</code> &amp;
                 <code>check_result</code>.
+              </div>
+            </div>
+
+            <div class="install" aria-labelledby="install-http-label">
+              <div class="install-head">
+                <span class="install-label" id="install-http-label"
+                  >Or via HTTP · any MCP client</span
+                >
+                <button
+                  type="button"
+                  class="copy-btn ${this.copied === 'http' ? 'is-copied' : ''}"
+                  @click=${() => this._onCopy('http')}
+                  aria-label="Copy HTTP MCP install command to clipboard"
+                  aria-live="polite"
+                >
+                  ${this.copied === 'http' ? 'Copied ✓' : 'Copy'}
+                </button>
+              </div>
+              <pre
+                class="install-body"
+              ><code><span class="prompt">›</span>claude mcp add --scope project --transport http pagent "https://pagent.up.railway.app/mcp"</code></pre>
+              <div class="install-foot">
+                Same tools, no local install. Works with Codex, OpenCode, Cursor, Cline, anything
+                that speaks streamable HTTP MCP.
               </div>
             </div>
 

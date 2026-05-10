@@ -17,8 +17,11 @@ import { randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { MAX_BODY_BYTES, ALLOWED_ORIGINS } from '../app.ts';
+import { clientKey } from '../client-key.ts';
+import { env } from '../schemas.ts';
 import * as store from '../store.ts';
 import { logger } from '../logger.ts';
+import { RateLimiter } from './rate-limit.ts';
 import { registerPagentTools, type PageOps } from './tools.ts';
 
 export type McpHttpConfig = {
@@ -27,6 +30,9 @@ export type McpHttpConfig = {
   /** Override for the request body cap. Defaults to MAX_BODY_BYTES from
    *  app.ts so REST and MCP enforce the same limit unless tests need otherwise. */
   maxBodyBytes?: number;
+  /** Override the rate limiter (e.g. for tests). Defaults to a per-IP limiter
+   *  using RATE_LIMIT_MAX / RATE_LIMIT_WINDOW_MS — same envs as the REST side. */
+  rateLimiter?: RateLimiter;
 };
 
 // Mirrors apps/api/request-id.ts — caller-supplied IDs accepted within bounds,
@@ -55,11 +61,13 @@ function applyBaseHeaders(req: IncomingMessage, res: ServerResponse, requestId: 
   res.setHeader('X-Content-Type-Options', 'nosniff');
   const origin = req.headers.origin;
   if (typeof origin === 'string') {
+    // Always set Vary: Origin when the response varies by Origin — caches
+    // in front of the API need this even when the value is `*`.
+    res.setHeader('Vary', 'Origin');
     if (!ALLOWED_ORIGINS) {
       res.setHeader('Access-Control-Allow-Origin', '*');
     } else if (ALLOWED_ORIGINS.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Vary', 'Origin');
     }
   }
 }
@@ -81,6 +89,7 @@ export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
 export function makeMcpHttpHandler(cfg: McpHttpConfig) {
   const ops = buildInProcessOps(cfg);
   const maxBytes = cfg.maxBodyBytes ?? MAX_BODY_BYTES;
+  const limiter = cfg.rateLimiter ?? new RateLimiter(env.RATE_LIMIT_MAX, env.RATE_LIMIT_WINDOW_MS);
 
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const requestId = getOrCreateRequestId(req);
@@ -108,6 +117,30 @@ export function makeMcpHttpHandler(cfg: McpHttpConfig) {
       res.statusCode = 204;
       res.end();
       return;
+    }
+
+    // Rate limit: only counts POSTs (the only method that does meaningful
+    // work in stateless mode). Mirrors REST's per-IP limiter on POST /new
+    // but uses a separate bucket — see rate-limit.ts for the trade-off.
+    // Headers follow IETF draft-7 (combined `RateLimit` + `RateLimit-Policy`)
+    // to match what hono-rate-limiter emits on the REST side.
+    if (req.method === 'POST') {
+      const result = limiter.check(clientKey(req.headers['x-forwarded-for']));
+      res.setHeader(
+        'RateLimit',
+        `limit=${result.limit}, remaining=${result.remaining}, reset=${result.secondsUntilReset}`,
+      );
+      res.setHeader('RateLimit-Policy', `${result.limit};w=${limiter.windowSeconds()}`);
+      if (!result.allowed) {
+        res.setHeader('Retry-After', String(result.secondsUntilReset));
+        respondJson(res, 429, {
+          error: 'rate_limited',
+          retry_after_seconds: result.secondsUntilReset,
+          message: `Too many requests; retry after ${result.secondsUntilReset} seconds`,
+          request_id: requestId,
+        });
+        return;
+      }
     }
 
     let body: unknown;
@@ -171,16 +204,26 @@ async function readJsonBody(req: IncomingMessage, maxBytes: number): Promise<unk
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let bytes = 0;
+    let settled = false;
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      // Don't destroy the socket — that would tear down the response we're
+      // about to send. Just stop accumulating; Node will drain the stream.
+      reject(err);
+    };
     req.on('data', (chunk: Buffer) => {
+      if (settled) return;
       bytes += chunk.length;
       if (bytes > maxBytes) {
-        req.destroy();
-        reject(new Error(`request body exceeds the ${maxBytes}-byte limit`));
+        fail(new Error(`request body exceeds the ${maxBytes}-byte limit`));
         return;
       }
       chunks.push(chunk);
     });
     req.on('end', () => {
+      if (settled) return;
+      settled = true;
       if (chunks.length === 0) return resolve(undefined);
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
@@ -188,6 +231,7 @@ async function readJsonBody(req: IncomingMessage, maxBytes: number): Promise<unk
         reject(err instanceof Error ? err : new Error(String(err)));
       }
     });
-    req.on('error', reject);
+    req.on('error', (err) => fail(err));
+    req.on('aborted', () => fail(new Error('request aborted')));
   });
 }
