@@ -18,7 +18,7 @@ export default defineConfig({
         handler(html) {
           const csp = buildCsp(process.env.VITE_API_URL);
           return html.replace(
-            /<head>/,
+            /<head>/i,
             `<head>\n    <meta http-equiv="Content-Security-Policy" content="${csp}">`,
           );
         },

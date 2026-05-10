@@ -39,19 +39,24 @@ Or run the Husky hook directly: `.husky/pre-push` (covers the first four steps).
 
 Confirm the GitHub Actions CI workflow is green on the PR targeting `main`.
 
-### 3. Bump versions — five files, all must agree
+### 3. Bump versions — six files, all must agree
 
 There is no automated version-bump script. Edit each file manually (or with `sed -i`):
 
-| File                         | Field       |
-| ---------------------------- | ----------- |
-| `package.json` (root)        | `"version"` |
-| `apps/api/package.json`      | `"version"` |
-| `apps/web/package.json`      | `"version"` |
-| `apps/mcp/package.json`      | `"version"` |
-| `.claude-plugin/plugin.json` | `"version"` |
+| File                         | Field          |
+| ---------------------------- | -------------- |
+| `package.json` (root)        | `"version"`    |
+| `apps/api/package.json`      | `"version"`    |
+| `apps/web/package.json`      | `"version"`    |
+| `apps/mcp/package.json`      | `"version"`    |
+| `.claude-plugin/plugin.json` | `"version"`    |
+| `docs/openapi.yaml`          | `info.version` |
 
-Quick one-liner (replace `X.Y.Z`):
+> **Version drift note:** `docs/openapi.yaml` is currently at `0.1.0` while
+> all other files are at `0.0.1`. This is a known inconsistency introduced
+> during early development. Bring them into sync on the next release.
+
+Quick one-liner for the JSON/plugin files (replace `X.Y.Z`):
 
 ```bash
 NEW=X.Y.Z
@@ -61,9 +66,11 @@ sed -i '' "s/\"version\": \".*\"/\"version\": \"$NEW\"/" \
   apps/web/package.json \
   apps/mcp/package.json \
   .claude-plugin/plugin.json
+# Also update the OpenAPI spec:
+sed -i '' "s/^  version: .*/  version: $NEW/" docs/openapi.yaml
 ```
 
-Verify with `grep -r '"version"' package.json apps/*/package.json .claude-plugin/plugin.json` — all five should show the same string.
+Verify with `grep -r '"version"' package.json apps/*/package.json .claude-plugin/plugin.json` — all five JSON files should show the same string; then check `grep 'version:' docs/openapi.yaml` matches too.
 
 > Note: `npm version --workspaces` does not reliably propagate to `private: true` workspaces in all npm versions, and it does not touch `.claude-plugin/plugin.json` at all. Manual editing is the canonical path.
 

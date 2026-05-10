@@ -14,6 +14,12 @@ export default defineConfig({
       provider: 'v8',
       include: ['apps/api/**/*.ts', 'apps/mcp/**/*.ts'],
       exclude: ['**/*.test.ts', '**/dist/**'],
+      thresholds: {
+        lines: 70,
+        functions: 70,
+        branches: 60,
+        statements: 70,
+      },
     },
   },
 });

@@ -1,3 +1,6 @@
+> **Historical document — describes the pre-rename V0 design. The current API
+> is documented in [README.md](../README.md) and [docs/openapi.yaml](openapi.yaml).**
+
 # Handoff prompt for next agent
 
 Copy everything below this line into a fresh agent session.

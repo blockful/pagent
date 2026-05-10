@@ -566,15 +566,4 @@ describe('error message field', () => {
     expect(typeof body.message).toBe('string');
     expect((body.message as string).length).toBeGreaterThan(0);
   });
-
-  it('429 body has a non-empty message field (covered in depth by rate-limit.test.ts)', async () => {
-    // This lightweight check just verifies the shape. Full rate-limit
-    // exhaustion tests live in rate-limit.test.ts to avoid polluting the
-    // shared rate-limiter state used by all other tests in this file.
-    // We assert the shape by directly calling the handler's onError path via
-    // rate-limit.test.ts, which uses a dynamic import with RATE_LIMIT_MAX=3.
-    // Here we skip the exhaustion test and mark it as a shape contract only.
-    // (The actual 429 message assertion is in rate-limit.test.ts.)
-    expect(true).toBe(true); // placeholder — see rate-limit.test.ts
-  });
 });

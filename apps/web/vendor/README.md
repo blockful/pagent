@@ -42,15 +42,17 @@ When you need to update to a newer upstream release:
    ```
 2. Copy the runtime artifacts over the existing vendor directories:
    ```
-   cp -r /tmp/a2ui/renderers/lit/dist       apps/web/vendor/a2ui-lit/
-   cp    /tmp/a2ui/renderers/lit/package.json apps/web/vendor/a2ui-lit/
-   cp    /tmp/a2ui/renderers/lit/README.md    apps/web/vendor/a2ui-lit/
-   cp    /tmp/a2ui/LICENSE                    apps/web/vendor/a2ui-lit/
+   cp -r /tmp/a2ui/renderers/lit/dist          apps/web/vendor/a2ui-lit/
+   cp    /tmp/a2ui/renderers/lit/package.json  apps/web/vendor/a2ui-lit/
+   cp    /tmp/a2ui/renderers/lit/README.md     apps/web/vendor/a2ui-lit/
+   cp    /tmp/a2ui/renderers/lit/CHANGELOG.md  apps/web/vendor/a2ui-lit/
+   cp    /tmp/a2ui/LICENSE                     apps/web/vendor/a2ui-lit/
 
-   cp -r /tmp/a2ui/renderers/web_core/dist       apps/web/vendor/a2ui-web-core/
-   cp    /tmp/a2ui/renderers/web_core/package.json apps/web/vendor/a2ui-web-core/
-   cp    /tmp/a2ui/renderers/web_core/README.md    apps/web/vendor/a2ui-web-core/
-   cp    /tmp/a2ui/LICENSE                         apps/web/vendor/a2ui-web-core/
+   cp -r /tmp/a2ui/renderers/web_core/dist          apps/web/vendor/a2ui-web-core/
+   cp    /tmp/a2ui/renderers/web_core/package.json  apps/web/vendor/a2ui-web-core/
+   cp    /tmp/a2ui/renderers/web_core/README.md     apps/web/vendor/a2ui-web-core/
+   cp    /tmp/a2ui/renderers/web_core/CHANGELOG.md  apps/web/vendor/a2ui-web-core/
+   cp    /tmp/a2ui/LICENSE                          apps/web/vendor/a2ui-web-core/
    ```
 3. Run `npm install` from the repo root to update `package-lock.json`.
 4. Run `npm run build:web` to verify the build succeeds.

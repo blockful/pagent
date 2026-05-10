@@ -13,6 +13,7 @@ export default tseslint.config(
       'apps/web/vendor/**',
       'apps/mcp/server.bundle.js',
       'apps/web/.vercel/**',
+      '.claude/**',
     ],
   },
   js.configs.recommended,

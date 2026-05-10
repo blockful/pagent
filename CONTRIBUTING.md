@@ -115,13 +115,13 @@ npm run test:coverage # coverage report
 
 ## When you change…
 
-| Area                        | Also touch                                                                                               |
-| --------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `apps/mcp/server.ts`        | Run `npm run build:mcp`, commit the regenerated `server.bundle.js`. CI will fail if the bundle is stale. |
-| API request/response shapes | Update Zod schemas in `apps/api/schemas.ts` **and** the API section in `README.md`.                      |
-| Env vars                    | Update `apps/api/schemas.ts` `envSchema`, `apps/api/.env.example`, **and** the README deploy section.    |
-| Vendored a2ui               | Follow `apps/web/vendor/README.md`.                                                                      |
-| Version bump                | Follow `docs/RELEASING.md`.                                                                              |
+| Area                        | Also touch                                                                                                |
+| --------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `apps/mcp/server.ts`        | Run `npm run build:mcp`, commit the regenerated `server.bundle.js`. CI will fail if the bundle is stale.  |
+| API request/response shapes | Update Zod schemas in `apps/api/schemas.ts`, the API section in `README.md`, **and** `docs/openapi.yaml`. |
+| Env vars                    | Update `apps/api/schemas.ts` `envSchema`, `apps/api/.env.example`, **and** the README deploy section.     |
+| Vendored a2ui               | Follow `apps/web/vendor/README.md`.                                                                       |
+| Version bump                | Follow `docs/RELEASING.md`.                                                                               |
 
 ---
 

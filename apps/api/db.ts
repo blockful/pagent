@@ -122,7 +122,7 @@ export async function submitPage(
   const rows = await c<{ id: string }[]>`
     update pages
     set state = 'submitted',
-        result = ${c.json(action as never)},
+        result = ${c.json(action as Parameters<typeof c.json>[0])},
         submitted_at = now()
     where id = ${id} and state = 'open' and expires_at > now()
     returning id
@@ -169,7 +169,7 @@ export async function insertPage(p: Page): Promise<void> {
   await withRetry(async () => {
     const c = client();
     await c`insert into pages (id, spec, state, expires_at)
-            values (${p.id}, ${c.json(p.spec as never)}, 'open', to_timestamp(${p.expiresAt} / 1000.0))`;
+            values (${p.id}, ${c.json(p.spec as Parameters<typeof c.json>[0])}, 'open', to_timestamp(${p.expiresAt} / 1000.0))`;
   });
 }
 

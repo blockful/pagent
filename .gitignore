@@ -15,3 +15,7 @@ production.env
 
 # Vitest coverage output
 coverage/
+
+# IDE / tooling state directories
+.claude/
+.vercel/
