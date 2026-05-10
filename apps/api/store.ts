@@ -25,10 +25,7 @@ export type AdvanceResultOutcome =
 
 export const newId = (): string => randomBytes(16).toString('hex');
 
-export async function createPage(
-  spec: unknown,
-  cfg: CreatePageConfig,
-): Promise<ShowUiResult> {
+export async function createPage(spec: unknown, cfg: CreatePageConfig): Promise<ShowUiResult> {
   const now = Date.now();
   const page: Page = {
     id: newId(),

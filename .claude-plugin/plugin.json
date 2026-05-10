@@ -5,5 +5,18 @@
   "author": "Alexandro T. Netto",
   "homepage": "https://github.com/blockful/pagent",
   "license": "MIT",
-  "keywords": ["generative-ui", "agentic-ui", "a2ui", "mcp", "ai-agents", "claude-code", "forms", "dashboard", "interactive", "browser-rendering", "terminal-ui", "declarative-ui"]
+  "keywords": [
+    "generative-ui",
+    "agentic-ui",
+    "a2ui",
+    "mcp",
+    "ai-agents",
+    "claude-code",
+    "forms",
+    "dashboard",
+    "interactive",
+    "browser-rendering",
+    "terminal-ui",
+    "declarative-ui"
+  ]
 }
