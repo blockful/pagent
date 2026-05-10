@@ -15,6 +15,8 @@ type PageResponse = {
 
 const pageId = location.pathname.replace(/^\/+/, '').split('/')[0];
 
+const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 60_000;
 
@@ -77,7 +79,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       this.awaiting = true;
       this.awaitingMessage = 'Sent — waiting for the agent…';
       try {
-        const res = await fetch(`/${pageId}/result`, {
+        const res = await fetch(`${API_BASE}/${pageId}/result`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -121,7 +123,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
 
   private async loadPage() {
     try {
-      const res = await fetch(`/${pageId}`, {
+      const res = await fetch(`${API_BASE}/${pageId}`, {
         headers: { accept: 'application/json' },
       });
       if (res.status === 404) {
@@ -175,7 +177,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       if (!this.isConnected) return;
       if (Date.now() >= this.pollDeadline) return;
       try {
-        const res = await fetch(`/${pageId}`, {
+        const res = await fetch(`${API_BASE}/${pageId}`, {
           headers: { accept: 'application/json' },
         });
         if (res.ok) {

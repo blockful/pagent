@@ -18,7 +18,7 @@
 ###############################################################################
 
 ### Confirm the API is running. Returns { ok, pages: <count> }.
-GET {{apiHost}}/healthz
+GET {{apiHost}}/health
 
 ###############################################################################
 # 2. Create a page (spec inline)

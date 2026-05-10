@@ -6,24 +6,36 @@ See [PRD.md](./PRD.md) for the design and [HANDOFF.md](./HANDOFF.md) for build c
 
 ## Layout
 
+npm-workspaces monorepo. Three apps + the plugin scaffolding.
+
 ```
-server.ts                            # REST service (Hono, single file)
-client/                              # Vite-served renderer (mounts @a2ui/lit's <a2ui-surface>)
-mcp/                                 # stdio MCP server: show_ui + check_result
+apps/
+├── api/                             # REST service (Hono). Deployed on Railway.
+│   ├── server.ts
+│   ├── railway.json
+│   └── .env.example
+├── web/                             # Vite-served renderer. Deployed on Vercel.
+│   ├── index.html, main.ts
+│   ├── vite.config.ts
+│   ├── vercel.json
+│   └── .env.example
+└── mcp/                             # stdio MCP server: show_ui + check_result
+    ├── server.ts
+    └── smoke.mjs
 skills/agent-ui-session/SKILL.md     # drop-in skill teaching the polling pattern
 .claude-plugin/plugin.json           # Claude Code plugin manifest
 .mcp.json                            # plugin's MCP server registration
 ```
 
-The repo doubles as a Claude Code plugin: `.claude-plugin/`, `skills/`, and `.mcp.json` make it installable with `claude --plugin-dir <path>`.
+The repo doubles as a Claude Code plugin: `.claude-plugin/`, `skills/`, and `.mcp.json` at the repo root make it installable with `claude --plugin-dir <path>`. The skill stays at the root because Claude Code's plugin loader looks for `skills/` next to `.claude-plugin/`, even though the skill conceptually belongs to `apps/mcp/`.
 
 ## Quick start (development)
 
 ```bash
 git clone <this-repo>
 cd agent-ui-session
-npm install
-npm run dev          # API on :8787, renderer on :8788
+npm install                         # workspaces install for all three apps
+npm run dev                         # API on :8787, renderer on :8788
 ```
 
 Open `http://localhost:8788/<page_id>` to view a page.
@@ -44,12 +56,46 @@ Inside that Claude session, `show_ui` and `check_result` are now callable tools 
 
 ### Production-install gaps
 
-This is **not yet** a one-command public install. Two things are needed for that:
+This is **not yet** a one-command public install. The deploy targets below are wired up; a public release still needs:
 
-1. **Hosted REST service.** Right now the plugin assumes you can reach `http://localhost:8787`. For others to use it without running anything, the service has to be deployed somewhere stable and the plugin defaulted to that URL.
-2. **Plugin distribution.** Either publish a release `.zip` (then users do `claude --plugin-url <url>`), or list it in a marketplace (then users do `/plugin install agent-ui-session`).
+1. A live **Railway** deployment of `apps/api/` (so the plugin doesn't depend on `localhost:8787`).
+2. A live **Vercel** deployment of `apps/web/` (so the user-facing URL points at a real host).
+3. Plugin distribution: publish a release `.zip` (users do `claude --plugin-url <url>`) or list in a marketplace (users do `/plugin install agent-ui-session`).
 
-Until both are done, the install path above is "clone repo + run dev server + plug in locally".
+Until those are done, the install path above is "clone repo + run dev server + plug in locally".
+
+## Deploy
+
+### `apps/api/` → Railway
+
+`apps/api/railway.json` contains the build + start config. To deploy:
+
+1. Create a new Railway service from this repo.
+2. Set **Root Directory** to `apps/api` so Railway picks up the railway.json.
+3. Set environment variables (see `apps/api/.env.example`):
+   - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://agent-ui-session.vercel.app`). Used in `show_ui` responses.
+   - `ALLOWED_ORIGINS` — comma-separated origins allowed to call the API (set to your Vercel URL).
+   - `PORT` — Railway sets this automatically; the server reads it.
+   - `PAGE_TTL_MS` — optional; default 30 minutes.
+4. Deploy. Railway runs `npm install` (which walks up to the workspace root) and starts the API with `npm -w @agent-ui-session/api run start`.
+
+The `/health` endpoint is configured as the healthcheck path.
+
+### `apps/web/` → Vercel
+
+`apps/web/vercel.json` handles the build. To deploy:
+
+1. Create a new Vercel project from this repo.
+2. Set **Root Directory** to `apps/web` so vercel.json is picked up.
+3. Set environment variables (see `apps/web/.env.example`):
+   - `VITE_API_URL` — the Railway URL of `apps/api` (e.g. `https://agent-ui-session-api.up.railway.app`). Inlined at build time, so a redeploy is needed if this changes.
+4. Deploy. Vercel runs `npm install` from the monorepo root (workspace install) and `npm run build:web`, outputting `apps/web/dist/`.
+
+The web app falls back to relative paths when `VITE_API_URL` is unset, so dev (`npm run dev`) still works through Vite's proxy.
+
+### Order matters
+
+Deploy Railway first to get the API URL. Then deploy Vercel with `VITE_API_URL` set to it. Then go back to Railway and set `PUBLIC_URL` + `ALLOWED_ORIGINS` to the Vercel URL.
 
 ## API
 
@@ -69,7 +115,8 @@ A page is single-shot and walks a 3-state machine: `open -> submitted -> receive
 With `npm run dev` running, in another terminal:
 
 ```bash
-node mcp/smoke.mjs
+npm run smoke
+# (alias for `node apps/mcp/smoke.mjs`)
 # follow the printed URL, fill the form — check_result returns the action
 ```
 

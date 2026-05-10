@@ -9,13 +9,13 @@ const API_TARGET = `http://localhost:${API_PORT}`;
 const PAGE_ID = String.raw`[a-f0-9]{32}`;
 
 export default defineConfig({
-  root: 'client',
+  // The web app is its own Vite root now (apps/web/). index.html lives here.
   server: {
     port: CLIENT_PORT,
     strictPort: true,
     proxy: {
       '/new': { target: API_TARGET, changeOrigin: true },
-      '/healthz': { target: API_TARGET, changeOrigin: true },
+      '/health': { target: API_TARGET, changeOrigin: true },
       // /:id/result — always API.
       [`^/${PAGE_ID}/result(?:\\?.*)?$`]: { target: API_TARGET, changeOrigin: true },
       // /:id — content-negotiated. Browser navigation (Accept: text/html) gets
@@ -31,7 +31,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: resolve(import.meta.dirname, 'dist/client'),
+    outDir: resolve(import.meta.dirname, 'dist'),
     emptyOutDir: true,
   },
   appType: 'spa',

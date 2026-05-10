@@ -21,6 +21,10 @@ type Page = {
 const PORT = Number(process.env.PORT ?? 8787);
 const PUBLIC_URL = process.env.PUBLIC_URL ?? `http://localhost:${PORT}`;
 const PAGE_TTL_MS = Number(process.env.PAGE_TTL_MS ?? 30 * 60 * 1000);
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ?.split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 const pages = new Map<string, Page>();
 
@@ -49,9 +53,11 @@ setInterval(() => {
 // --- App ---------------------------------------------------------------------
 
 const app = new Hono();
-app.use('*', cors());
+// If ALLOWED_ORIGINS is set, restrict to that comma-separated list.
+// If unset (e.g. local dev), allow all origins.
+app.use('*', cors({ origin: ALLOWED_ORIGINS ?? '*' }));
 
-app.get('/healthz', (c) => c.json({ ok: true, pages: pages.size }));
+app.get('/health', (c) => c.json({ ok: true, pages: pages.size }));
 
 app.post('/new', async (c) => {
   const body = await c.req.json().catch(() => null) as { spec?: unknown } | null;
