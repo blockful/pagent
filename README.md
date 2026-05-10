@@ -1,5 +1,7 @@
 # Pagent
 
+[![CI](https://github.com/blockful/pagent/actions/workflows/ci.yml/badge.svg)](https://github.com/blockful/pagent/actions/workflows/ci.yml)
+
 Hosted UI rendering for terminal-bound AI agents. The agent emits an A2UI surface to this service, prints a short URL, and reads the user's interactions back via API.
 
 - **Live API:** https://pagent.up.railway.app
