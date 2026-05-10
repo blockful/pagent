@@ -93,6 +93,32 @@ The agent calls `show_ui`, prints a URL (hosted at `https://pagent.vercel.app`),
 
 **Point at a different service?** Set `PAGENT_URL` before launching Claude. By default the MCP talks to `https://pagent.up.railway.app`.
 
+## Use it from any MCP client (HTTP transport)
+
+Beyond the Claude Code plugin, pagent's MCP also speaks the streamable HTTP transport — so any MCP-capable client (Codex, OpenCode, Cursor, Cline, Continue, etc.) can connect with one command and zero local install:
+
+```bash
+# Claude Code, without the plugin (HTTP MCP, scoped to the current project)
+claude mcp add --scope project --transport http pagent "https://pagent.up.railway.app/mcp"
+```
+
+For other clients, drop this into whichever `mcp.json` / config file they read:
+
+```json
+{
+  "mcpServers": {
+    "pagent": {
+      "type": "http",
+      "url": "https://pagent.up.railway.app/mcp"
+    }
+  }
+}
+```
+
+The HTTP MCP runs in the same process as the REST service (single Railway deploy, no extra infra) and shares its tool definitions with the bundled stdio MCP — `show_ui` / `check_result` behave identically across transports, including the polling-pattern guidance baked into the tool descriptions.
+
+**Self-hosting?** Replace the URL with `http://your-host:8787/mcp`.
+
 ## Quick start (development)
 
 ```bash

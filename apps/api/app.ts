@@ -4,13 +4,12 @@ import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import type { Context } from 'hono';
 import { rateLimiter } from 'hono-rate-limiter';
-import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { apiReference } from '@scalar/hono-api-reference';
 import * as db from './db.ts';
-import type { Page } from './db.ts';
+import * as store from './store.ts';
 import { env, pageIdSchema, newPageBodySchema, resultBodySchema } from './schemas.ts';
 import { logger } from './logger.ts';
 import type { RequestIdVariables } from './request-id.ts';
@@ -37,8 +36,6 @@ export const PAGE_TTL_MS = env.PAGE_TTL_MS;
 export const ALLOWED_ORIGINS = env.ALLOWED_ORIGINS;
 
 export const MAX_BODY_BYTES = 256 * 1024; // 256 KB
-
-export const newId = () => randomBytes(16).toString('hex');
 
 // Extract the rate-limit key from the request. Behind Railway / Vercel the
 // real client IP arrives in x-forwarded-for. In local dev and tests no proxy
@@ -200,17 +197,11 @@ const newPageHandler = async (c: Context) => {
       400,
     );
   }
-  const now = Date.now();
-  const page: Page = {
-    id: newId(),
-    spec: result.data.spec,
-    state: 'open',
-    result: null,
-    createdAt: now,
-    expiresAt: now + PAGE_TTL_MS,
-  };
-  await db.insertPage(page);
-  return c.json({ id: page.id, url: `${PUBLIC_URL}/${page.id}`, expires_at: page.expiresAt }, 201);
+  const created = await store.createPage(result.data.spec, {
+    publicUrl: PUBLIC_URL,
+    pageTtlMs: PAGE_TTL_MS,
+  });
+  return c.json(created, 201);
 };
 
 const getPageHandler = async (c: Context) => {
@@ -262,9 +253,10 @@ const getResultHandler = async (c: Context) => {
   const idResult = pageIdSchema.safeParse(c.req.param('id'));
   if (!idResult.success)
     return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
-  const r = await db.fetchAndAdvanceResult(idResult.data);
-  if (!r) return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
-  return c.json({ state: r.stateAtRead, result: r.result });
+  const outcome = await store.advanceResult(idResult.data);
+  if (outcome.kind === 'not_found')
+    return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
+  return c.json({ state: outcome.state, result: outcome.result });
 };
 
 // --- Routes ------------------------------------------------------------------

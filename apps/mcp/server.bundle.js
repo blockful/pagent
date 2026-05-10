@@ -21098,6 +21098,85 @@ var StdioServerTransport = class {
   }
 };
 
+// apps/api/mcp/tools.ts
+var SHOW_UI_DESCRIPTION = [
+  "Render an interactive UI in the user's browser \u2014 forms, pickers, dashboards, confirmations, multi-step wizards, surveys.",
+  "Returns { page_id, url, expires_at }. PRINT the URL so the user can open it. The agent never sees the user typing \u2014 only the final submitted result.",
+  "Each page is single-shot: one spec, one result. For a follow-up question, call show_ui again with a fresh spec \u2014 there is no surface-replace mechanism.",
+  "After this call, poll check_result on your own cadence to read the user response (start at 2-3s, back off exponentially up to ~30s; do other useful work between polls rather than blocking)."
+].join("\n\n");
+var SHOW_UI_INPUT_DESCRIPTION = [
+  "A2UI v0.9 spec \u2014 an array of A2UI messages.",
+  'Start with one createSurface, then updateComponents with a tree whose root component MUST have id "root".',
+  "The basic catalog (https://a2ui.org/specification/v0_9/basic_catalog.json) provides Column, Row, Card, Text, TextField, Button, Checkbox, Image, Divider, List, Tabs, Slider.",
+  'Buttons fire actions via { action: { event: { name, context } } }; bind input fields with { value: { path: "/key" } } and reference those paths in the button context so user input flows back.',
+  "Keep specs small \u2014 one screen, one purpose."
+].join(" ");
+var CHECK_RESULT_DESCRIPTION = [
+  "Fetch the current state of a page created by show_ui. Fire-and-return \u2014 does NOT block or wait.",
+  'Returns { state, result, page_id } where state is "open" | "submitted" | "received".',
+  'When state is "open", the user has not responded yet \u2014 wait a few seconds and call again. When "submitted", result is the user input as an A2UI client-action: { name, surfaceId, sourceComponentId, context, timestamp }. When "received", you already read the result on a prior poll (treat as duplicate).',
+  "If the page expired (Page not found), do NOT retry the same page_id \u2014 ask the user in chat whether to start over, then call show_ui with a fresh spec."
+].join("\n\n");
+function registerPagentTools(server2, ops) {
+  server2.registerTool(
+    "show_ui",
+    {
+      title: "Show UI to the user",
+      description: SHOW_UI_DESCRIPTION,
+      inputSchema: {
+        spec: external_exports.any().describe(SHOW_UI_INPUT_DESCRIPTION)
+      }
+    },
+    async ({ spec }) => {
+      const created = await ops.showUi(spec);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `UI ready. Share this URL with the user:
+${created.url}
+
+page_id: ${created.id}`
+          }
+        ],
+        structuredContent: {
+          page_id: created.id,
+          url: created.url,
+          expires_at: created.expires_at
+        }
+      };
+    }
+  );
+  server2.registerTool(
+    "check_result",
+    {
+      title: "Check whether the user has submitted yet",
+      description: CHECK_RESULT_DESCRIPTION,
+      inputSchema: {
+        page_id: external_exports.string().regex(/^[a-f0-9]{32}$/, "invalid page_id").describe("The page_id returned by show_ui.")
+      }
+    },
+    async ({ page_id }) => {
+      const outcome = await ops.checkResult(page_id);
+      if (outcome.kind === "not_found") {
+        throw new Error(
+          `Page ${page_id} not found (expired or deleted). Don't retry the same page_id \u2014 ask the user whether to start over, then call show_ui with a fresh spec.`
+        );
+      }
+      const text = outcome.result == null ? `User has not responded yet (state: ${outcome.state}). Call check_result again in a few seconds.` : `User submitted: ${JSON.stringify(outcome.result)}`;
+      return {
+        content: [{ type: "text", text }],
+        structuredContent: {
+          state: outcome.state,
+          result: outcome.result,
+          page_id
+        }
+      };
+    }
+  );
+}
+
 // apps/mcp/server.ts
 var SERVICE_URL = (process.env.PAGENT_URL ?? "https://pagent.up.railway.app").replace(/\/$/, "");
 function formatRetryHint(body) {
@@ -21109,88 +21188,34 @@ function formatRetryHint(body) {
   }
   return "";
 }
-var server = new McpServer({
-  name: "pagent",
-  version: "0.0.1"
-});
-server.registerTool(
-  "show_ui",
-  {
-    title: "Show UI to the user",
-    description: "Create a new UI page from a spec. Returns { page_id, url, expires_at } \u2014 print the URL so the user can open it. After this, poll check_result on your own cadence to read the user submission.",
-    inputSchema: {
-      spec: external_exports.any().describe(
-        'The UI surface spec (A2UI v0.9). An array of A2UI v0.9 messages (createSurface / updateComponents / updateDataModel / deleteSurface). The root component MUST have id "root".'
-      )
-    }
-  },
-  async ({ spec }) => {
+async function readError(res, fallbackVerb) {
+  const body = await res.json().catch(() => ({}));
+  const hint = formatRetryHint(body);
+  const message = body?.message ?? `HTTP ${res.status}`;
+  return new Error(`${fallbackVerb} failed (${res.status}): ${message}${hint ? `. ${hint}` : ""}`);
+}
+var restOps = {
+  async showUi(spec) {
     const res = await fetch(`${SERVICE_URL}/new`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ spec })
     });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      const hint = formatRetryHint(body);
-      const message = body?.message ?? `HTTP ${res.status}`;
-      throw new Error(`show_ui failed (${res.status}): ${message}${hint ? `. ${hint}` : ""}`);
-    }
-    const created = await res.json();
-    return {
-      content: [
-        {
-          type: "text",
-          text: `UI ready. Share this URL with the user:
-${created.url}
-
-page_id: ${created.id}`
-        }
-      ],
-      structuredContent: {
-        page_id: created.id,
-        url: created.url,
-        expires_at: created.expires_at
-      }
-    };
-  }
-);
-server.registerTool(
-  "check_result",
-  {
-    title: "Check whether the user has submitted yet",
-    description: 'Fetch the current state of a page. Fire-and-return \u2014 does NOT block or wait. Returns { state, result, page_id } where state is "open" | "submitted" | "received" and result is null until the user submits. The agent decides its own polling cadence.',
-    inputSchema: {
-      page_id: external_exports.string().describe("The page_id returned by show_ui.")
-    }
+    if (!res.ok) throw await readError(res, "show_ui");
+    return await res.json();
   },
-  async ({ page_id }) => {
+  async checkResult(page_id) {
     const res = await fetch(`${SERVICE_URL}/${page_id}/result`, {
       headers: { accept: "application/json" }
     });
-    if (res.status === 404) {
-      const body2 = await res.json().catch(() => ({}));
-      const message = body2?.message ?? "Page not found (expired or deleted)";
-      throw new Error(`check_result failed (404): ${message}`);
-    }
-    if (!res.ok) {
-      const body2 = await res.json().catch(() => ({}));
-      const hint = formatRetryHint(body2);
-      const message = body2?.message ?? `HTTP ${res.status}`;
-      throw new Error(`check_result failed (${res.status}): ${message}${hint ? `. ${hint}` : ""}`);
-    }
+    if (res.status === 404) return { kind: "not_found" };
+    if (!res.ok) throw await readError(res, "check_result");
     const body = await res.json();
-    const text = body.result == null ? `User has not responded yet (state: ${body.state}). Call check_result again in a few seconds.` : `User submitted: ${JSON.stringify(body.result)}`;
-    return {
-      content: [{ type: "text", text }],
-      structuredContent: {
-        state: body.state,
-        result: body.result,
-        page_id
-      }
-    };
+    return { kind: "state", state: body.state, result: body.result };
   }
-);
+};
+var server = new McpServer({ name: "pagent", version: "0.0.1" });
+registerPagentTools(server, restOps);
 if (import.meta.url === new URL(process.argv[1], import.meta.url).href) {
   await server.connect(new StdioServerTransport());
 }
