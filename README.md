@@ -223,3 +223,5 @@ curl -s http://localhost:8787/v1/<pageId>/result
 For the release procedure, see [docs/RELEASING.md](docs/RELEASING.md).
 
 For security-related reports, see [SECURITY.md](SECURITY.md).
+
+For contribution guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
