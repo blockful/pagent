@@ -180,7 +180,7 @@ This section is for on-call engineers. It documents the observable surface of th
 system so you can answer "is it broken, what broke, how do I fix it?" without
 reading the code.
 
-- **Machine-readable API contract:** `GET /openapi.yaml` (OpenAPI 3.1). Also at `docs/openapi.yaml` in the repo for offline browsing, Postman imports, and Python client generation.
+- **Machine-readable API contract:** `GET /openapi.json` (canonical JSON, OpenAPI 3.1) or `GET /openapi.yaml` (same spec, raw YAML for humans). Interactive reference at `GET /docs` (Scalar). Source lives at `docs/openapi.yaml` in the repo and is loaded once at boot.
 
 ### Health check
 
@@ -310,8 +310,13 @@ POST   /v1/:id/result           body: <action>     -> { ok }              (brows
 GET    /v1/:id/result                              -> { state, result }   (agent reads, marks "received" on first read)
 ```
 
-A machine-readable OpenAPI 3.1 contract is served at `GET /openapi.yaml`.
-The same file is committed at `docs/openapi.yaml` for offline browsing.
+The API publishes its OpenAPI 3.1 spec at the conventional locations:
+
+- `GET /openapi.json` — canonical machine-readable spec (what every third-party tool expects)
+- `GET /openapi.yaml` — same spec in YAML for humans
+- `GET /docs` — interactive Scalar API Reference
+
+The hand-authored source lives at `docs/openapi.yaml` and is loaded once at boot.
 
 The unversioned paths (`/new`, `/:id`, `/:id/result`) remain wired to the same
 handlers for the lifetime of the v1 series, but every response carries a

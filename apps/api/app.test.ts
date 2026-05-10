@@ -477,31 +477,54 @@ describe('error handler', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /openapi.yaml
+// OpenAPI surface
 // ---------------------------------------------------------------------------
 
-describe('GET /openapi.yaml', () => {
-  it('returns the YAML with application/yaml content-type', async () => {
+describe('OpenAPI surface', () => {
+  it('GET /openapi.json returns parsed spec with application/json content-type', async () => {
+    const res = await app.fetch(new Request('http://test/openapi.json'));
+    expect(res.status).toBe(200);
+    const ct = res.headers.get('content-type') ?? '';
+    expect(ct).toContain('application/json');
+    const body = await res.json();
+    expect(body.openapi).toBe('3.1.0');
+    expect(body.info.title).toBe('Pagent API');
+  });
+
+  it('GET /openapi.yaml returns the raw YAML', async () => {
     const res = await app.fetch(new Request('http://test/openapi.yaml'));
     expect(res.status).toBe(200);
     const ct = res.headers.get('content-type') ?? '';
     expect(ct).toContain('application/yaml');
     const body = await res.text();
     expect(body.trimStart()).toMatch(/^openapi:/);
+    expect(body.trimStart()).not.toMatch(/^\{/);
   });
 
-  it('sets X-Request-ID header', async () => {
-    const res = await app.fetch(new Request('http://test/openapi.yaml'));
-    expect(res.headers.get('x-request-id')).toMatch(/^[a-f0-9]{32}$/);
+  it('GET /openapi.json includes all expected paths', async () => {
+    const res = await app.fetch(new Request('http://test/openapi.json'));
+    const body = await res.json();
+    expect(body.paths).toHaveProperty('/v1/new');
+    expect(body.paths).toHaveProperty('/v1/{id}');
+    expect(body.paths).toHaveProperty('/v1/{id}/result');
+    expect(body.paths).toHaveProperty('/health');
   });
 
-  it('body contains all expected paths', async () => {
-    const res = await app.fetch(new Request('http://test/openapi.yaml'));
+  it('GET /docs returns HTML with Scalar marker', async () => {
+    const res = await app.fetch(new Request('http://test/docs'));
+    expect(res.status).toBe(200);
+    const ct = res.headers.get('content-type') ?? '';
+    expect(ct.toLowerCase()).toMatch(/text\/html/);
     const body = await res.text();
-    expect(body).toContain('/v1/new');
-    expect(body).toContain('/v1/{id}');
-    expect(body).toContain('/v1/{id}/result');
-    expect(body).toContain('/health');
+    const lower = body.toLowerCase();
+    expect(lower.includes('pagent api reference') || lower.includes('scalar')).toBe(true);
+  });
+
+  it('GET /docs and /openapi.json both carry X-Request-ID', async () => {
+    const resDocs = await app.fetch(new Request('http://test/docs'));
+    const resJson = await app.fetch(new Request('http://test/openapi.json'));
+    expect(resDocs.headers.get('x-request-id')).toMatch(/^[a-f0-9]{32}$/);
+    expect(resJson.headers.get('x-request-id')).toMatch(/^[a-f0-9]{32}$/);
   });
 });
 

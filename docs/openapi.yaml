@@ -83,30 +83,31 @@ paths:
                 db: error
                 message: Database connection failed
 
-  /openapi.yaml:
+  /openapi.json:
     get:
-      operationId: getOpenapiYaml
+      operationId: getOpenapiJson
       tags: [Operations]
-      summary: This OpenAPI document
+      summary: OpenAPI 3.1 spec (JSON — canonical machine-readable form)
       description: |
-        Returns the canonical OpenAPI 3.1 document for this API as
-        `application/yaml`. Loaded once at boot from `docs/openapi.yaml`
-        and served from memory. Returns 503 if the file was missing at boot.
+        Returns the canonical OpenAPI 3.1 document as `application/json`.
+        Parsed once at boot from `docs/openapi.yaml` and cached in memory.
+        This is the URL that tooling (Postman, Insomnia, OpenAPI Generator,
+        Stoplight) expects to fetch. Returns 503 if the source file was
+        missing at boot.
       responses:
         '200':
-          description: The OpenAPI document.
+          description: The OpenAPI document as JSON.
           headers:
             X-Request-ID:
               $ref: '#/components/headers/XRequestId'
           content:
-            application/yaml:
+            application/json:
               schema:
-                type: string
+                type: object
         '503':
           description: |
-            The `docs/openapi.yaml` file was not found at boot. This is a
-            deployment configuration issue — ensure the file is present in
-            the repository and deployed alongside the API.
+            `docs/openapi.yaml` was not found at boot. Ensure the file is
+            present in the repository and deployed alongside the API.
           headers:
             X-Request-ID:
               $ref: '#/components/headers/XRequestId'
@@ -118,6 +119,62 @@ paths:
                   error:
                     type: string
                     enum: [openapi_unavailable]
+
+  /openapi.yaml:
+    get:
+      operationId: getOpenapiYaml
+      tags: [Operations]
+      summary: OpenAPI 3.1 spec (YAML — human-readable courtesy copy)
+      description: |
+        Returns the same OpenAPI 3.1 document as `application/yaml`.
+        Served raw from memory (no re-serialisation). Useful for humans
+        who prefer YAML. Tooling should prefer `/openapi.json`.
+        Returns 503 if the source file was missing at boot.
+      responses:
+        '200':
+          description: The OpenAPI document as YAML.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/yaml:
+              schema:
+                type: string
+        '503':
+          description: |
+            `docs/openapi.yaml` was not found at boot. Ensure the file is
+            present in the repository and deployed alongside the API.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [openapi_unavailable]
+
+  /docs:
+    get:
+      operationId: getApiDocs
+      tags: [Operations]
+      summary: Interactive Scalar API Reference
+      description: |
+        Returns an HTML page rendering the Pagent API Reference via Scalar.
+        Scalar fetches `/openapi.json` client-side and renders an interactive
+        explorer — no build step required. Opens directly in a browser.
+      responses:
+        '200':
+          description: The Scalar API Reference HTML page.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            text/html:
+              schema:
+                type: string
 
   /v1/new:
     post:
