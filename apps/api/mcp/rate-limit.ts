@@ -34,11 +34,13 @@ export class RateLimiter {
 
   private readonly buckets = new Map<string, Bucket>();
   private callsSinceSweep = 0;
+  private readonly limit: number;
+  private readonly windowMs: number;
 
-  constructor(
-    private readonly limit: number,
-    private readonly windowMs: number,
-  ) {}
+  constructor(limit: number, windowMs: number) {
+    this.limit = limit;
+    this.windowMs = windowMs;
+  }
 
   /** Increment the bucket for `key` and return whether the request is allowed. */
   check(key: string, now: number = Date.now()): RateLimitResult {
