@@ -10,7 +10,7 @@ import type { Page } from './db.ts';
 import { env, pageIdSchema, newPageBodySchema, resultBodySchema } from './schemas.ts';
 import { logger } from './logger.ts';
 import type { RequestIdVariables } from './request-id.ts';
-import { requestId, getLog } from './request-id.ts';
+import { requestId, getLog, getRequestId } from './request-id.ts';
 
 // --- Config ------------------------------------------------------------------
 
@@ -90,6 +90,16 @@ app.use('*', async (c, next) => {
     },
     'request',
   );
+});
+
+// --- Global error handler ----------------------------------------------------
+// Safety net for any unhandled exception that escapes a route handler.
+// Hono's framework default emits HTML / plain text — this replaces it with a
+// structured JSON 500 so every JSON-expecting client gets a parseable response.
+
+app.onError((err, c) => {
+  getLog(c).error({ err, method: c.req.method, path: c.req.path }, 'unhandled error');
+  return c.json({ error: 'internal_error', request_id: getRequestId(c) }, 500);
 });
 
 // --- Health (unversioned — ops endpoint, not part of the API contract) -------

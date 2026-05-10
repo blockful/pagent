@@ -388,6 +388,68 @@ describe('request-id middleware', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Global error handler
+// ---------------------------------------------------------------------------
+
+describe('error handler', () => {
+  it('returns JSON 500 when getActivePage throws', async () => {
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('connection terminated'),
+    );
+    const res = await app.fetch(new Request(`http://test/v1/${UNKNOWN_ID}`));
+    expect(res.status).toBe(500);
+    const body = await json(res);
+    expect(body.error).toBe('internal_error');
+    expect(typeof body.request_id).toBe('string');
+    expect(res.headers.get('content-type')).toContain('application/json');
+  });
+
+  it('500 body includes the request_id from X-Request-ID header', async () => {
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+    const res = await app.fetch(
+      new Request(`http://test/v1/${UNKNOWN_ID}`, {
+        headers: { 'X-Request-ID': 'smoketest-abc' },
+      }),
+    );
+    expect(res.status).toBe(500);
+    const body = await json(res);
+    expect(body.request_id).toBe('smoketest-abc');
+    expect(res.headers.get('x-request-id')).toBe('smoketest-abc');
+  });
+
+  it('500 body never leaks the error message', async () => {
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('SECRET sql: SELECT * FROM users WHERE password = ...'),
+    );
+    const res = await app.fetch(new Request(`http://test/v1/${UNKNOWN_ID}`));
+    expect(res.status).toBe(500);
+    const body = await json(res);
+    const serialised = JSON.stringify(body);
+    expect(serialised).not.toContain('SECRET');
+    expect(serialised).not.toContain('SELECT');
+    expect(serialised).not.toContain('sql');
+  });
+
+  it('insertPage throw on POST /v1/new returns 500', async () => {
+    (db.insertPage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db write failed'));
+    const res = await app.fetch(req('POST', '/v1/new', { spec: { anything: 1 } }));
+    expect(res.status).toBe(500);
+    const body = await json(res);
+    expect(body.error).toBe('internal_error');
+    expect(typeof body.request_id).toBe('string');
+  });
+
+  it('submitPage throw on POST /v1/:id/result returns 500', async () => {
+    (db.submitPage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db write failed'));
+    const res = await app.fetch(req('POST', `/v1/${UNKNOWN_ID}/result`, validAction));
+    expect(res.status).toBe(500);
+    const body = await json(res);
+    expect(body.error).toBe('internal_error');
+    expect(typeof body.request_id).toBe('string');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Deprecation shim
 // ---------------------------------------------------------------------------
 
