@@ -25,6 +25,9 @@ if (status.enabled) {
 
   sdk = new NodeSDK({
     serviceName: status.serviceName,
+    // Grafana Cloud's OTLP gateway and grafana/otel-lgtm both accept the
+    // base /otlp path; users set OTEL_EXPORTER_OTLP_ENDPOINT to that base
+    // and the exporters append /v1/<signal>.
     traceExporter: new OTLPTraceExporter({ url: `${base}/v1/traces`, headers }),
     metricReader: new PeriodicExportingMetricReader({
       exporter: new OTLPMetricExporter({ url: `${base}/v1/metrics`, headers }),

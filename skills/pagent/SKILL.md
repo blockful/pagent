@@ -1,9 +1,32 @@
 ---
 name: pagent
-description: Show interactive UI to the user without owning a renderer. Use when text or markdown can't express what you need — a form, a confirmation, a multi-step picker, a small dashboard.
+description: Render an interactive browser UI — forms, pickers, multi-select, confirmations/approvals, dashboards, wizards, surveys. This skill should be used when the user asks to "show a form", "ask me via UI", "let me pick", "confirm before you", "give me a dashboard", or wants any prompt that needs typed input, structured choices, sliders, checkboxes, or multi-step flows. Prefer this over markdown tables or yes/no chat questions whenever real input widgets would be clearer.
 ---
 
 # Showing UI to your user
+
+## When to use this skill
+
+Reach for `show_ui` whenever a real input widget would beat asking the user to type freeform answers in chat. Examples that should trigger it:
+
+- "Ask me my favorite color via a UI form."
+- "Let me pick from the top 5 candidates you found."
+- "Confirm before you delete those files — show me a real button, not a yes/no in chat."
+- "Build me a quick dashboard of the test results."
+- "Walk me through this setup as a multi-step wizard."
+- "Give me a slider so I can tune the threshold and see the count update."
+
+Indirect cues count too: "let me choose", "let me approve", "show me", "give me a form", "make me pick", or any time the next step needs structured input (numbers, dates, multi-select, file paths) rather than a sentence.
+
+Examples where this skill should NOT trigger — keep these as plain text/markdown:
+
+- "Show me a markdown table of these results." (rendering, not input)
+- "Summarize the diff." (no user input expected)
+- "What's the capital of France?" (one-shot factual, no choice to make)
+
+Rule of thumb: if the next message you'd send the user contains a question they need to answer, prefer `show_ui` over asking in chat — unless the answer is one short sentence.
+
+## How it works
 
 You don't have a screen, but your user does. Call `show_ui(spec)` with an A2UI v0.9 surface and the tool returns `{ page_id, url }`. **Print the URL** so the user can open it. Then call `check_result(page_id)` — it returns immediately with `{ state, result }`. If `state === "open"`, the user hasn't responded yet: wait a few seconds (or do other useful work) and call `check_result` again. When `state === "submitted"`, `result` carries the user's input as an A2UI client-action: `{ name, surfaceId, sourceComponentId, context, timestamp }`. The renderer detects that you've fetched the result (state flips to `"received"` on your first read) and shows "the agent has your input" feedback to the user. Each page is **single-shot**: one spec, one result. For a follow-up question, call `show_ui` again with a fresh spec — there is no surface-replace mechanism.
 

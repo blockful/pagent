@@ -56,7 +56,8 @@ apps/
 └── mcp/                             # stdio MCP server: show_ui + check_result
     ├── server.ts                     # source
     ├── server.bundle.js              # esbuild output, shipped to plugin users
-    └── smoke.mjs
+    ├── smoke.mjs
+    └── .env.example
 infra/
 └── observability/                   # self-hosted Grafana stack on Railway
     ├── Dockerfile                    # grafana/otel-lgtm + provisioning
@@ -71,6 +72,28 @@ skills/pagent/SKILL.md                # drop-in skill teaching the polling patte
 the self-hosted Grafana stack (metrics, traces, logs) on Railway.
 
 The repo doubles as a Claude Code plugin and a self-hosted marketplace: `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `skills/`, and `.mcp.json` at the repo root make it installable from GitHub with two slash commands. The skill stays at the root because Claude Code's plugin loader looks for `skills/` next to `.claude-plugin/`, even though the skill conceptually belongs to `apps/mcp/`.
+
+## Environment variables
+
+Each app validates its environment at boot/build with Zod and fails loudly on missing or malformed values — no silent defaults that bite in production. `.env.example` files in each app are the source of truth.
+
+| App                                               | Variable                   | Required?           | Validation / default                                                                                |
+| ------------------------------------------------- | -------------------------- | ------------------- | --------------------------------------------------------------------------------------------------- |
+| **api** ([`.env.example`](apps/api/.env.example)) | `DATABASE_URL`             | **always**          | Non-empty string. Boot fails with a `ZodError` otherwise.                                           |
+|                                                   | `PUBLIC_URL`               | **production**      | Valid URL. Used in `show_ui` responses.                                                             |
+|                                                   | `ALLOWED_ORIGINS`          | **production**      | Comma-separated origin list. CORS allow-list.                                                       |
+|                                                   | `PORT`                     | optional            | Coerced to number. Default `8787`. Railway sets this.                                               |
+|                                                   | `PAGE_TTL_MS`              | optional            | Coerced to number. Default `1800000` (30 min).                                                      |
+|                                                   | `RATE_LIMIT_MAX`           | optional            | Positive integer. Default `30`.                                                                     |
+|                                                   | `RATE_LIMIT_WINDOW_MS`     | optional            | Positive integer. Default `60000`.                                                                  |
+|                                                   | `NODE_ENV`                 | optional            | One of `development` \| `production` \| `test`. Gates the production-only refinements above.        |
+|                                                   | `LOG_LEVEL`                | optional            | Pino level. Default `info`.                                                                         |
+|                                                   | `OTEL_EXPORTER_OTLP_*`     | optional            | OpenTelemetry exporter config. Leave `OTEL_EXPORTER_OTLP_ENDPOINT` unset to disable tracing.        |
+| **web** ([`.env.example`](apps/web/.env.example)) | `VITE_API_URL`             | **`vite build`**    | Valid URL. Inlined at build time and embedded in CSP. `vite dev` allows it unset (uses Vite proxy). |
+|                                                   | `API_PORT` / `CLIENT_PORT` | optional (dev only) | Valid port (1–65535). Defaults `8787` / `8788`.                                                     |
+| **mcp** ([`.env.example`](apps/mcp/.env.example)) | `PAGENT_URL`               | optional            | Valid URL when set. Default `https://pagent.up.railway.app`.                                        |
+
+When validation fails, the process logs the offending field and exits with a non-zero code — CI catches misconfigured deploys (`build:web` runs in CI with a placeholder `VITE_API_URL`) before they ship.
 
 ## Install as a Claude Code plugin
 
@@ -100,6 +123,32 @@ You should see `pagent` listed with `show_ui` and `check_result` tools. The plug
 The agent calls `show_ui`, prints a URL (hosted at `https://pagent.vercel.app`), you submit, and the conversation continues.
 
 **Point at a different service?** Set `PAGENT_URL` before launching Claude. By default the MCP talks to `https://pagent.up.railway.app`.
+
+## Use it from any MCP client (HTTP transport)
+
+Beyond the Claude Code plugin, pagent's MCP also speaks the streamable HTTP transport — so any MCP-capable client (Codex, OpenCode, Cursor, Cline, Continue, etc.) can connect with one command and zero local install:
+
+```bash
+# Claude Code, without the plugin (HTTP MCP, scoped to the current project)
+claude mcp add --scope project --transport http pagent "https://pagent.up.railway.app/mcp"
+```
+
+For other clients, drop this into whichever `mcp.json` / config file they read:
+
+```json
+{
+  "mcpServers": {
+    "pagent": {
+      "type": "http",
+      "url": "https://pagent.up.railway.app/mcp"
+    }
+  }
+}
+```
+
+The HTTP MCP runs in the same process as the REST service (single Railway deploy, no extra infra) and shares its tool definitions with the bundled stdio MCP — `show_ui` / `check_result` behave identically across transports, including the polling-pattern guidance baked into the tool descriptions.
+
+**Self-hosting?** Replace the URL with `http://your-host:8787/mcp`.
 
 ## Quick start (development)
 
@@ -164,10 +213,10 @@ The `/health` endpoint is configured as the healthcheck path. Returns 200 only w
 1. Create a new Vercel project from this repo.
 2. Set **Root Directory** to `apps/web` so vercel.json is picked up.
 3. Set environment variables (see `apps/web/.env.example`):
-   - `VITE_API_URL` — the Railway URL of `apps/api` (e.g. `https://pagent.up.railway.app`). Inlined at build time, so a redeploy is needed if this changes.
+   - `VITE_API_URL` — the Railway URL of `apps/api` (e.g. `https://pagent.up.railway.app`). Inlined at build time, so a redeploy is needed if this changes. **Required for `vite build`** — the build fails loudly if missing or malformed (prevents shipping a bundle that silently calls relative paths).
 4. Deploy. Vercel runs `npm install` from the monorepo root (workspace install) and `npm run build:web`, outputting `apps/web/dist/`.
 
-The web app falls back to relative paths when `VITE_API_URL` is unset, so dev (`npm run dev`) still works through Vite's proxy.
+`vite dev` (i.e. `npm run dev`) does not require `VITE_API_URL` — it falls back to Vite's proxy for same-origin paths, so local development works zero-config.
 
 #### Security headers
 

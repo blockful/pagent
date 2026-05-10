@@ -1,9 +1,10 @@
 import './tracing.ts';
-import type { Server as HttpServer } from 'node:http';
-import { serve } from '@hono/node-server';
+import { createServer, type Server as HttpServer } from 'node:http';
+import { getRequestListener } from '@hono/node-server';
 import * as db from './db.ts';
 import { env } from './schemas.ts';
-import { app, PORT, PUBLIC_URL } from './app.ts';
+import { app, PORT, PUBLIC_URL, PAGE_TTL_MS } from './app.ts';
+import { makeMcpHttpHandler } from './mcp/http.ts';
 import { logger } from './logger.ts';
 import { metrics } from './metrics.ts';
 import { shutdownTracing } from './tracing.ts';
@@ -26,9 +27,24 @@ const sweepTimer = setInterval(async () => {
 }, 60_000);
 sweepTimer.unref();
 
-const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
-  logger.info(`pagent listening on ${PUBLIC_URL} (port ${info.port})`);
-}) as HttpServer;
+// Multiplex: /mcp goes through the MCP HTTP transport (which writes directly
+// to the underlying response stream — Hono can't host that cleanly); every
+// other path falls through to the Hono app.
+const honoListener = getRequestListener(app.fetch);
+const mcpHandler = makeMcpHttpHandler({ publicUrl: PUBLIC_URL, pageTtlMs: PAGE_TTL_MS });
+
+const server: HttpServer = createServer((req, res) => {
+  const path = req.url?.split('?', 1)[0];
+  if (path === '/mcp' || path?.startsWith('/mcp/')) {
+    void mcpHandler(req, res);
+    return;
+  }
+  honoListener(req, res);
+});
+
+server.listen(PORT, () => {
+  logger.info(`pagent listening on ${PUBLIC_URL} (port ${PORT})`);
+});
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 let shuttingDown = false;

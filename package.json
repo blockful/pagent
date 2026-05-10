@@ -22,7 +22,7 @@
     "lint:fix": "eslint . --fix",
     "start:api": "npm -w @pagent/api run start",
     "smoke": "node apps/mcp/smoke.mjs",
-    "typecheck": "tsc --noEmit -p apps/api && tsc --noEmit -p apps/web",
+    "typecheck": "tsc --noEmit -p apps/api && tsc --noEmit -p apps/web && tsc --noEmit -p apps/mcp",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
