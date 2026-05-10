@@ -110,6 +110,17 @@ claude --plugin-dir /absolute/path/to/pagent
 PAGENT_URL=http://localhost:8787 claude   # then talk to local API
 ```
 
+### Shutdown behavior
+
+The API handles `SIGTERM` and `SIGINT` gracefully:
+
+1. Stops accepting new connections.
+2. Waits up to 10 seconds for in-flight requests to finish.
+3. Force-closes idle keep-alives if the timeout is hit.
+4. Closes the Postgres pool and exits.
+
+Railway sends SIGTERM during deploys; Ctrl+C in dev sends SIGINT.
+
 ### Quality gate
 
 A Husky `pre-push` hook runs `typecheck → lint → format:check → test`
