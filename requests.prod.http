@@ -1,0 +1,143 @@
+### Agent UI Session — full flow walkthrough (production)
+###
+### Compatible with:
+###   - VS Code: REST Client extension (humao.rest-client)
+###   - JetBrains IDEs: built-in HTTP Client
+###
+### Run requests top-to-bottom. The page id is captured from the
+### POST /new response and reused.
+###
+### Hits the deployed services — no local dev server needed.
+
+@apiHost   = https://pagent.up.railway.app
+@viewHost  = https://pagent.vercel.app
+
+###############################################################################
+# 1. Health check
+###############################################################################
+
+### Confirm the API is up. Returns { ok, pages: <count> }.
+GET {{apiHost}}/health
+
+###############################################################################
+# 2. Create a page (spec inline)
+###############################################################################
+
+### A2UI v0.9 spec: a small form with a text field + submit button.
+### Returns { id, url, expires_at }. `@name` saves the response so we
+### can pull `id` out below.
+# @name createPage
+POST {{apiHost}}/new
+Content-Type: application/json
+
+{
+  "spec": [
+    {
+      "createSurface": {
+        "surfaceId": "main",
+        "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json"
+      }
+    },
+    {
+      "updateComponents": {
+        "surfaceId": "main",
+        "components": [
+          { "id": "root",  "component": "Column", "children": ["title", "field", "submit"] },
+          { "id": "title", "component": "Text",   "text": "What's your favorite color?" },
+          { "id": "field", "component": "TextField", "label": "Color", "value": { "path": "/color" } },
+          { "id": "submit-label", "component": "Text", "text": "Send" },
+          { "id": "submit", "component": "Button", "child": "submit-label", "variant": "primary",
+            "action": { "event": { "name": "submitted", "context": { "color": { "path": "/color" } } } }
+          }
+        ]
+      }
+    }
+  ]
+}
+
+### Capture the id into a variable for the rest of the file.
+@pageId = {{createPage.response.body.id}}
+
+###############################################################################
+# 3. Open the URL in a browser
+###############################################################################
+#
+# Now point your browser at:
+#
+#   {{viewHost}}/{{pageId}}
+#
+# Type a color and click Send. Or skip the browser and run request #6
+# below to simulate the submission via the API.
+
+###############################################################################
+# 4. Renderer's read — inspect the page (no side effect)
+###############################################################################
+
+### What the renderer fetches on mount. Returns
+### { spec, state, result, expires_at }. State should be "open" until
+### someone submits.
+GET {{apiHost}}/{{pageId}}
+
+###############################################################################
+# 5. Agent's first read — state is "open"
+###############################################################################
+
+### The agent polls this endpoint. Returns { state, result } immediately.
+### While the user hasn't submitted, state is "open" and result is null.
+GET {{apiHost}}/{{pageId}}/result
+
+###############################################################################
+# 6. Browser submit — POST the user's action
+###############################################################################
+
+### This is what the renderer POSTs when the user clicks the button.
+### Use it to drive the flow without a browser. Transitions
+### state: open -> submitted. Returns { ok: true }.
+POST {{apiHost}}/{{pageId}}/result
+Content-Type: application/json
+
+{
+  "name": "submitted",
+  "surfaceId": "main",
+  "sourceComponentId": "submit",
+  "context": { "color": "teal" },
+  "timestamp": "2026-05-09T00:00:00.000Z"
+}
+
+###############################################################################
+# 7. Agent reads again — state flips submitted -> received
+###############################################################################
+
+### First read after submit returns { state: "submitted", result: {...} }
+### and transitions the page to "received". Run it once.
+GET {{apiHost}}/{{pageId}}/result
+
+### Second read returns { state: "received", result: {...} }. The result
+### is still readable; the state field is the only thing that changed.
+GET {{apiHost}}/{{pageId}}/result
+
+###############################################################################
+# 8. Try to re-submit — should 409
+###############################################################################
+
+### The page is single-shot. A second POST /:id/result fails with 409
+### because state is no longer "open".
+POST {{apiHost}}/{{pageId}}/result
+Content-Type: application/json
+
+{
+  "name": "submitted",
+  "surfaceId": "main",
+  "sourceComponentId": "submit",
+  "context": { "color": "magenta" },
+  "timestamp": "2026-05-09T00:00:01.000Z"
+}
+
+###############################################################################
+# 9. Renderer re-read — state is now "received"
+###############################################################################
+
+### The renderer can poll GET /:id to upgrade its banner from
+### "waiting for the agent" to "the agent has your input" once state
+### transitions to "received".
+GET {{apiHost}}/{{pageId}}
