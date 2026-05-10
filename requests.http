@@ -1,0 +1,158 @@
+### Agent UI Session — full flow walkthrough
+###
+### Compatible with:
+###   - VS Code: REST Client extension (humao.rest-client)
+###   - JetBrains IDEs: built-in HTTP Client
+###
+### Run requests top-to-bottom. The session id is captured from the
+### POST /sessions response and reused.
+###
+### Prereq: `npm run dev` is running so :8787 (API) and :8788 (renderer)
+### are up.
+
+@apiHost   = http://localhost:8787
+@viewHost  = http://localhost:8788
+
+###############################################################################
+# 1. Health check
+###############################################################################
+
+### Confirm the API is running. Returns { ok, sessions: <count> }.
+GET {{apiHost}}/healthz
+
+###############################################################################
+# 2. Create a session
+###############################################################################
+
+### Returns { id, url, ttl_ms }.
+### `@name` saves the response so we can pull `id` out below.
+# @name createSession
+POST {{apiHost}}/sessions
+
+### Capture the id into a variable for the rest of the file.
+@sessionId = {{createSession.response.body.id}}
+
+### Sanity-check what we got back.
+GET {{apiHost}}/sessions/{{sessionId}}
+
+###############################################################################
+# 3. Publish the surface (the agent's job)
+###############################################################################
+
+### A2UI v0.9 spec: a small form with a text field + submit button.
+### The browser at viewHost/{{sessionId}} will render this live.
+PUT {{apiHost}}/sessions/{{sessionId}}/surface
+Content-Type: application/json
+
+{
+  "format": "a2ui-v0.9",
+  "spec": [
+    {
+      "createSurface": {
+        "surfaceId": "main",
+        "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json"
+      }
+    },
+    {
+      "updateComponents": {
+        "surfaceId": "main",
+        "components": [
+          { "id": "root",  "component": "Column", "children": ["title", "field", "submit"] },
+          { "id": "title", "component": "Text",   "text": "What's your favorite color?" },
+          { "id": "field", "component": "TextField", "label": "Color", "value": { "path": "/color" } },
+          { "id": "submit-label", "component": "Text", "text": "Send" },
+          { "id": "submit", "component": "Button", "child": "submit-label", "variant": "primary",
+            "action": { "event": { "name": "submitted", "context": { "color": { "path": "/color" } } } }
+          }
+        ]
+      }
+    }
+  ]
+}
+
+###############################################################################
+# 4. Open the URL in a browser
+###############################################################################
+#
+# Now point your browser at:
+#
+#   {{viewHost}}/{{sessionId}}
+#
+# Type a color and click Send. Then come back and run the next request.
+
+###############################################################################
+# 5. Read the events the user generated
+###############################################################################
+
+### Long-poll filtered to user_action only. Returns immediately if the
+### user has already clicked, or waits up to 25 s otherwise.
+###
+### Response: { events: [{ type, action: { name, surfaceId, sourceComponentId,
+###             context: { color: "<what you typed>" }, ... } }], cursor }
+GET {{apiHost}}/sessions/{{sessionId}}/events?since=0&type=user_action&timeout_ms=25000
+
+### All events (surface_updated + user_action), unfiltered.
+GET {{apiHost}}/sessions/{{sessionId}}/events?since=0&timeout_ms=200
+
+###############################################################################
+# 6. Simulate the user's submission via the API (no browser needed)
+###############################################################################
+
+### This is what the renderer POSTs when the user clicks the button.
+### Use it to drive the flow without a browser.
+POST {{apiHost}}/sessions/{{sessionId}}/actions
+Content-Type: application/json
+
+{
+  "name": "submitted",
+  "surfaceId": "main",
+  "sourceComponentId": "submit",
+  "context": { "color": "teal" },
+  "timestamp": "2026-05-09T00:00:00.000Z"
+}
+
+###############################################################################
+# 7. Push a follow-up surface (the agent's reply)
+###############################################################################
+
+### Replaces the form with a confirmation. The browser updates live via SSE.
+PUT {{apiHost}}/sessions/{{sessionId}}/surface
+Content-Type: application/json
+
+{
+  "format": "a2ui-v0.9",
+  "spec": [
+    { "createSurface": { "surfaceId": "main", "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json" } },
+    { "updateComponents": {
+        "surfaceId": "main",
+        "components": [
+          { "id": "root",  "component": "Column", "children": ["title", "msg"] },
+          { "id": "title", "component": "Text", "text": "Got it ✓" },
+          { "id": "msg",   "component": "Text", "text": "Thanks — the agent is processing." }
+        ]
+    } }
+  ]
+}
+
+###############################################################################
+# 8. Stream events live (SSE)
+###############################################################################
+#
+# The Accept header switches the same /events endpoint to Server-Sent
+# Events. VS Code REST Client renders each `data:` chunk as it arrives.
+#
+# Run this and then run request #6 (or click the button in the browser)
+# to see events stream in real time.
+GET {{apiHost}}/sessions/{{sessionId}}/events?since=0
+Accept: text/event-stream
+
+###############################################################################
+# 9. Clean up
+###############################################################################
+
+### Deletes the session. Any open SSE streams receive a `session_closed`
+### event and end gracefully.
+DELETE {{apiHost}}/sessions/{{sessionId}}
+
+### Confirm it's gone.
+GET {{apiHost}}/sessions/{{sessionId}}
