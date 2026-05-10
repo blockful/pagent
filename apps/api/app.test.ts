@@ -225,3 +225,45 @@ describe('GET /:id/result', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Security headers
+// ---------------------------------------------------------------------------
+
+describe('security headers', () => {
+  it('sets X-Content-Type-Options nosniff on every response', async () => {
+    const res = await app.fetch(new Request('http://test/health'));
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('sets X-Frame-Options DENY', async () => {
+    const res = await app.fetch(new Request('http://test/health'));
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
+  });
+
+  it('sets Strict-Transport-Security with includeSubDomains', async () => {
+    const res = await app.fetch(new Request('http://test/health'));
+    const hsts = res.headers.get('strict-transport-security');
+    expect(hsts).not.toBeNull();
+    expect(hsts).toContain('max-age=');
+    expect(hsts).toContain('includeSubDomains');
+  });
+
+  it('sets Referrer-Policy', async () => {
+    const res = await app.fetch(new Request('http://test/health'));
+    const rp = res.headers.get('referrer-policy');
+    expect(rp).not.toBeNull();
+    expect(rp!.length).toBeGreaterThan(0);
+  });
+
+  it('does NOT set Content-Security-Policy on the JSON API', async () => {
+    const res = await app.fetch(new Request('http://test/health'));
+    expect(res.headers.get('content-security-policy')).toBeNull();
+  });
+
+  it('sets headers on error responses too', async () => {
+    const res = await app.fetch(new Request('http://test/new', { method: 'POST' }));
+    expect(res.status).toBe(400);
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+});

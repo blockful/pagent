@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
+import { secureHeaders } from 'hono/secure-headers';
 import type { Context } from 'hono';
 import { rateLimiter } from 'hono-rate-limiter';
 import { randomBytes } from 'node:crypto';
@@ -80,6 +81,22 @@ setInterval(() => {
 // --- App ---------------------------------------------------------------------
 
 export const app = new Hono();
+app.use(
+  '*',
+  secureHeaders({
+    // contentSecurityPolicy is intentionally omitted — Hono does not set CSP
+    // by default, and its HTML-page preset would be noise on a JSON API.
+    // Hono defaults X-Frame-Options to SAMEORIGIN; bump to DENY — this API
+    // has no frames to embed and DENY is more restrictive.
+    xFrameOptions: 'DENY',
+    // Browsers default Cross-Origin-Resource-Policy to same-origin which would
+    // block the renderer at pagent.vercel.app from reading API responses at
+    // pagent.up.railway.app. CORS already gates cross-origin reads explicitly.
+    crossOriginResourcePolicy: 'cross-origin',
+    // Defaults are fine for everything else (HSTS, X-Content-Type-Options
+    // nosniff, Referrer-Policy no-referrer, etc.)
+  }),
+);
 app.use('*', cors({ origin: ALLOWED_ORIGINS ?? '*' }));
 
 app.use(
