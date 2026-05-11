@@ -21098,6 +21098,9 @@ var StdioServerTransport = class {
   }
 };
 
+// apps/mcp/server.ts
+import { pathToFileURL } from "node:url";
+
 // apps/api/mcp/tools.ts
 var SHOW_UI_DESCRIPTION = [
   "Render an interactive UI in the user's browser \u2014 forms, pickers, dashboards, confirmations, multi-step wizards, surveys.",
@@ -21125,7 +21128,7 @@ function registerPagentTools(server2, ops) {
       title: "Show UI to the user",
       description: SHOW_UI_DESCRIPTION,
       inputSchema: {
-        spec: external_exports.any().describe(SHOW_UI_INPUT_DESCRIPTION)
+        spec: external_exports.array(external_exports.record(external_exports.unknown())).describe(SHOW_UI_INPUT_DESCRIPTION)
       }
     },
     async ({ spec }) => {
@@ -21137,7 +21140,8 @@ function registerPagentTools(server2, ops) {
             text: `UI ready. Share this URL with the user:
 ${created.url}
 
-page_id: ${created.id}`
+page_id: ${created.id}
+expires_at: ${created.expires_at}`
           }
         ],
         structuredContent: {
@@ -21177,6 +21181,17 @@ page_id: ${created.id}`
   );
 }
 
+// apps/mcp/lib.ts
+function formatRetryHint(body) {
+  if (typeof body.retry_after_seconds === "number") {
+    return `Retry after ${body.retry_after_seconds}s`;
+  }
+  if (typeof body.max_bytes === "number") {
+    return `Reduce body to \u2264${body.max_bytes} bytes`;
+  }
+  return "";
+}
+
 // apps/mcp/server.ts
 var envSchema = external_exports.preprocess(
   (raw) => {
@@ -21199,19 +21214,10 @@ try {
   process.exit(1);
 }
 var SERVICE_URL = (env.PAGENT_URL ?? "https://pagent.up.railway.app").replace(/\/$/, "");
-function formatRetryHint(body) {
-  if (typeof body.retry_after_seconds === "number") {
-    return `Retry after ${body.retry_after_seconds}s`;
-  }
-  if (typeof body.max_bytes === "number") {
-    return `Reduce body to \u2264${body.max_bytes} bytes`;
-  }
-  return "";
-}
 async function readError(res, fallbackVerb) {
   const body = await res.json().catch(() => ({}));
   const hint = formatRetryHint(body);
-  const message = body?.message ?? `HTTP ${res.status}`;
+  const message = body.message ?? `HTTP ${res.status}`;
   return new Error(`${fallbackVerb} failed (${res.status}): ${message}${hint ? `. ${hint}` : ""}`);
 }
 var restOps = {
@@ -21236,9 +21242,6 @@ var restOps = {
 };
 var server = new McpServer({ name: "pagent", version: "0.0.1" });
 registerPagentTools(server, restOps);
-if (import.meta.url === new URL(process.argv[1], import.meta.url).href) {
+if (pathToFileURL(process.argv[1]).href === import.meta.url) {
   await server.connect(new StdioServerTransport());
 }
-export {
-  formatRetryHint
-};

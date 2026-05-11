@@ -8,8 +8,10 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { registerPagentTools, type PageOps } from '../api/mcp/tools.ts';
+import { formatRetryHint } from './lib.ts';
 
 // Empty strings (set by some shells / launchers when a var is "unset") need
 // to be normalised to undefined before .url().optional() runs.
@@ -35,24 +37,8 @@ try {
   process.exit(1);
 }
 
+// Read once at startup; fine for a short-lived stdio process.
 const SERVICE_URL = (env.PAGENT_URL ?? 'https://pagent.up.railway.app').replace(/\/$/, '');
-
-/**
- * Build a short, actionable hint from a structured API error body.
- * Rate-limit hint takes precedence over size hint (more urgent signal).
- */
-export function formatRetryHint(body: {
-  retry_after_seconds?: number;
-  max_bytes?: number;
-}): string {
-  if (typeof body.retry_after_seconds === 'number') {
-    return `Retry after ${body.retry_after_seconds}s`;
-  }
-  if (typeof body.max_bytes === 'number') {
-    return `Reduce body to ≤${body.max_bytes} bytes`;
-  }
-  return '';
-}
 
 type ApiErrorBody = {
   message?: string;
@@ -63,7 +49,7 @@ type ApiErrorBody = {
 async function readError(res: Response, fallbackVerb: string): Promise<Error> {
   const body = (await res.json().catch(() => ({}))) as ApiErrorBody;
   const hint = formatRetryHint(body);
-  const message = body?.message ?? `HTTP ${res.status}`;
+  const message = body.message ?? `HTTP ${res.status}`;
   return new Error(`${fallbackVerb} failed (${res.status}): ${message}${hint ? `. ${hint}` : ''}`);
 }
 
@@ -96,6 +82,7 @@ registerPagentTools(server, restOps);
 
 // Boot guard — only start the stdio transport when run directly, so tests
 // (and any future tooling that imports this module) don't spawn a transport.
-if (import.meta.url === new URL(process.argv[1], import.meta.url).href) {
+// pathToFileURL handles both POSIX and Windows path separators correctly.
+if (pathToFileURL(process.argv[1]).href === import.meta.url) {
   await server.connect(new StdioServerTransport());
 }

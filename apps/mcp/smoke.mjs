@@ -32,8 +32,11 @@ child.stdout.on('data', (chunk) => {
     if (msg.id != null && pending.has(msg.id)) {
       const { resolve, reject } = pending.get(msg.id);
       pending.delete(msg.id);
-      // eslint-disable-next-line @typescript-eslint/no-unused-expressions -- ternary calls one of two promise callbacks; both sides are side-effects
-      msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
+      if (msg.error) {
+        reject(new Error(msg.error.message));
+      } else {
+        resolve(msg.result);
+      }
     }
   }
 });
@@ -97,10 +100,10 @@ try {
   console.log(
     `\nOpen this URL in a browser and click the button:\n  ${show.structuredContent.url}`,
   );
-  console.log('\n--- polling check_result (up to 8 attempts, 2→4→8→16→30s backoff)');
+  console.log('\n--- polling check_result (up to 8 attempts, 2→4→8→16→30→30→30→30s backoff)');
 
-  // Backoff: 2→4→8→16→30→30→30→30 seconds (mirrors nextPollDelay in apps/web/poll-backoff.ts
-  // and the cadence recommended in skills/pagent/SKILL.md).
+  // Mirrors nextPollDelay in apps/web/poll-backoff.ts and the cadence
+  // recommended in skills/pagent/SKILL.md.
   function nextDelay(ms) {
     return Math.min(ms * 2, 30_000);
   }

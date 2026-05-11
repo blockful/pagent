@@ -4,9 +4,6 @@
   "private": true,
   "type": "module",
   "description": "MCP server exposing show_ui + check_result tools for pagent",
-  "bin": {
-    "pagent-mcp": "server.ts"
-  },
   "scripts": {
     "start": "node --experimental-strip-types server.ts"
   },
