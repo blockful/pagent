@@ -5,7 +5,7 @@
 Hosted UI rendering for terminal-bound AI agents. The agent emits an A2UI surface to this service, prints a short URL, and reads the user's interactions back via API.
 
 - **Live API:** https://pagent.up.railway.app
-- **Live renderer:** https://pagent.vercel.app
+- **Live renderer:** https://agent-ui-session.vercel.app
 
 See [PRD.md](./PRD.md) for the design and [HANDOFF.md](./docs/HANDOFF.md) for build context.
 
@@ -120,7 +120,7 @@ You should see `pagent` listed with `show_ui` and `check_result` tools. The plug
 
 > "Use the pagent skill to ask me my favorite color via a UI form."
 
-The agent calls `show_ui`, prints a URL (hosted at `https://pagent.vercel.app`), you submit, and the conversation continues.
+The agent calls `show_ui`, prints a URL (hosted at `https://agent-ui-session.vercel.app`), you submit, and the conversation continues.
 
 **Point at a different service?** Set `PAGENT_URL` before launching Claude. By default the MCP talks to `https://pagent.up.railway.app`.
 
@@ -196,7 +196,7 @@ To bypass in an emergency: `git push --no-verify` (don't make this a habit).
 1. Create a new Railway service from this repo.
 2. Set **Root Directory** to `apps/api` so Railway picks up the railway.json.
 3. Set environment variables (see `apps/api/.env.example`):
-   - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://pagent.vercel.app`). Used in `show_ui` responses. **Required in production.** Boot fails loudly if missing.
+   - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://agent-ui-session.vercel.app`). Used in `show_ui` responses. **Required in production.** Boot fails loudly if missing.
    - `ALLOWED_ORIGINS` — comma-separated origins allowed to call the API (set to your Vercel URL). **Required in production.** API boot fails loudly if missing.
    - `PORT` — Railway sets this automatically; the server reads it.
    - `PAGE_TTL_MS` — optional; default 30 minutes.
@@ -299,13 +299,13 @@ in Grafana from the trace and log streams.
 
 ### Common failure modes
 
-| Symptom                                                   | Likely cause                                             | Where to look                                    | First response                                                                                                                           |
-| --------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /health` → 503                                       | Postgres unreachable                                     | Supabase status page; Railway DB env vars        | Check Supabase dashboard. If the DB is up but the env var was rotated, restore `DATABASE_URL` in Railway and redeploy.                   |
-| Spike of 429s on `POST /new`                              | Per-IP rate limit hit (default 30 req / 60 s)            | Railway logs — group by client IP                | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                    |
-| 413 on `POST /new`                                        | Request body > 256 KB                                    | Log field `error: payload_too_large`             | If a real use case, raise `MAX_BODY_BYTES` in `apps/api/app.ts` (code change + redeploy). Otherwise it's spam; ignore.                   |
-| CORS errors in the browser console at `pagent.vercel.app` | `ALLOWED_ORIGINS` does not include the renderer's origin | Browser DevTools → Network → failing preflight   | Add the missing origin to `ALLOWED_ORIGINS` in Railway env and restart the service.                                                      |
-| Boot failure with `ZodError` in Railway logs              | A required env var is missing                            | Railway logs (the process exits before it binds) | Read the Zod validation error — it names the missing field. Usually `PUBLIC_URL` or `ALLOWED_ORIGINS`. Set it in Railway, then redeploy. |
+| Symptom                                                             | Likely cause                                             | Where to look                                    | First response                                                                                                                           |
+| ------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health` → 503                                                 | Postgres unreachable                                     | Supabase status page; Railway DB env vars        | Check Supabase dashboard. If the DB is up but the env var was rotated, restore `DATABASE_URL` in Railway and redeploy.                   |
+| Spike of 429s on `POST /new`                                        | Per-IP rate limit hit (default 30 req / 60 s)            | Railway logs — group by client IP                | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                    |
+| 413 on `POST /new`                                                  | Request body > 256 KB                                    | Log field `error: payload_too_large`             | If a real use case, raise `MAX_BODY_BYTES` in `apps/api/app.ts` (code change + redeploy). Otherwise it's spam; ignore.                   |
+| CORS errors in the browser console at `agent-ui-session.vercel.app` | `ALLOWED_ORIGINS` does not include the renderer's origin | Browser DevTools → Network → failing preflight   | Add the missing origin to `ALLOWED_ORIGINS` in Railway env and restart the service.                                                      |
+| Boot failure with `ZodError` in Railway logs                        | A required env var is missing                            | Railway logs (the process exits before it binds) | Read the Zod validation error — it names the missing field. Usually `PUBLIC_URL` or `ALLOWED_ORIGINS`. Set it in Railway, then redeploy. |
 
 ### Rollback
 

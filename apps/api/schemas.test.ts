@@ -183,8 +183,8 @@ describe('envSchema', () => {
     const r = envSchema.safeParse({
       DATABASE_URL: 'x',
       NODE_ENV: 'production',
-      ALLOWED_ORIGINS: 'https://pagent.vercel.app',
-      PUBLIC_URL: 'https://pagent.vercel.app',
+      ALLOWED_ORIGINS: 'https://agent-ui-session.vercel.app',
+      PUBLIC_URL: 'https://agent-ui-session.vercel.app',
     });
     expect(r.success).toBe(true);
   });
@@ -216,7 +216,7 @@ describe('envSchema', () => {
       DATABASE_URL: 'x',
       NODE_ENV: 'production',
       ALLOWED_ORIGINS: 'https://a.com',
-      PUBLIC_URL: 'https://pagent.vercel.app',
+      PUBLIC_URL: 'https://agent-ui-session.vercel.app',
     });
     expect(r.success).toBe(true);
   });
