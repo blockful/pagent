@@ -6,8 +6,8 @@
   "description": "REST + state-machine service for pagent",
   "main": "server.ts",
   "scripts": {
-    "dev": "node --watch --env-file=.env --experimental-strip-types --import ./tracing.ts server.ts",
-    "start": "node --experimental-strip-types --import ./tracing.ts server.ts"
+    "dev": "node --watch --env-file=.env --experimental-strip-types --import ./instrument.mjs --import ./tracing.ts server.ts",
+    "start": "node --experimental-strip-types --import ./instrument.mjs --import ./tracing.ts server.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
