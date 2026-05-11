@@ -36,10 +36,27 @@ linked:
 # 1. Create the empty service
 railway add --service pagent-observability
 
-# 2. Set the admin password (generate a strong one)
+# 2. Set the admin password (generate a strong one) and the deploy envs.
+#    Each of these is required — without them the service either won't be
+#    reachable, will leak admin access, or won't load our dashboards.
+#      GF_SERVER_HTTP_ADDR=0.0.0.0  — image binds to localhost otherwise;
+#                                     Railway's edge sees 502.
+#      GF_AUTH_ANONYMOUS_ENABLED=false  — image defaults to anon-admin.
+#      PORT=3000  — Railway uses this for both routing and the default port.
+#      GF_PATHS_PROVISIONING=/etc/grafana/provisioning  — image sets
+#                                     GF_PATHS_HOME=/data/grafana, which
+#                                     re-roots provisioning under /data/...;
+#                                     this points it back at our baked-in
+#                                     /etc/grafana/provisioning tree.
 PASS=$(node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))")
-railway variable set "GF_SECURITY_ADMIN_PASSWORD=$PASS" \
-  --service pagent-observability --skip-deploys
+for kv in \
+  "GF_SECURITY_ADMIN_PASSWORD=$PASS" \
+  "GF_SERVER_HTTP_ADDR=0.0.0.0" \
+  "GF_AUTH_ANONYMOUS_ENABLED=false" \
+  "PORT=3000" \
+  "GF_PATHS_PROVISIONING=/etc/grafana/provisioning"; do
+  railway variable set "$kv" --service pagent-observability --skip-deploys
+done
 
 # 3. Attach a 1 GB volume at /data (link the service first)
 railway service link pagent-observability
@@ -59,9 +76,18 @@ railway domain --service pagent-observability --port 3000
 1. **Project → New service → Empty service.**
 2. **Settings → Source → Connect GitHub repo**, root directory
    `infra/observability`.
-3. **Variables:**
+3. **Variables** (all required):
    - `GF_SECURITY_ADMIN_PASSWORD` — strong random value (Railway's
      "Generate" works).
+   - `GF_SERVER_HTTP_ADDR` = `0.0.0.0` — the image binds to `localhost`
+     by default; Railway's edge can't reach it without this.
+   - `GF_AUTH_ANONYMOUS_ENABLED` = `false` — image defaults to enabling
+     anonymous **admin** access (intended for local dev).
+   - `PORT` = `3000` — Railway uses this for routing.
+   - `GF_PATHS_PROVISIONING` = `/etc/grafana/provisioning` — image sets
+     `GF_PATHS_HOME=/data/grafana`, which re-roots provisioning under
+     `/data/...`; this points Grafana back at our baked-in tree so the
+     Pagent dashboards load.
 4. **Volumes:** attach a 1 GB volume mounted at `/data`.
 5. **Networking:** expose port `3000` publicly. Ports `4317`/`4318` stay
    private.
@@ -75,12 +101,13 @@ After deploy, copy the service's **internal** address
 > - **No `VOLUME` directive in the Dockerfile.** Railway rejects it with
 >   "docker VOLUME at Line N is not supported, use Railway Volumes."
 >   Persistence is configured via the Railway Volume API (step 3 above).
-> - **No `healthcheckPath`.** Grafana's `/api/health` returns 200 once the
->   server is ready, but pairing it with Railway's healthcheck made cold
->   starts flap because LGTM's subprocess boot order can leave the
->   reverse-proxy in front of Grafana refusing connections briefly. With
->   no healthcheck, Railway falls back to TCP-on-the-public-port, which is
->   sufficient and stable for this stack.
+> - **`GF_SERVER_HTTP_ADDR=0.0.0.0` is required.** The bundled `grafana.ini` in `grafana/otel-lgtm` binds Grafana to `localhost`, so Railway's reverse-proxy returns `502 Application failed to respond` even though the container is up.
+> - **First boot with a fresh volume takes ~2.5 minutes** (the image
+>   normally cold-starts in ~10 s without a mount; persisting `/data`
+>   slows initial dir creation). Subsequent boots are fast. We omit
+>   `healthcheckPath` for that reason — pairing it with a 2-minute window
+>   makes cold starts flap. Without a healthcheck, Railway falls back to
+>   TCP-on-the-public-port, which is sufficient.
 
 ## Wiring the API service
 
