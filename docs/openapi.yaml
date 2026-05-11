@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pagent API
-  version: 0.1.0
+  version: 0.0.1
   description: |
     Hosted UI rendering for terminal-bound AI agents. The agent emits an
     A2UI surface to this service, prints a short URL, and reads the user's

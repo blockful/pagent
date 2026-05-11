@@ -1,10 +1,10 @@
 /**
- * Unit tests for the formatRetryHint helper exported from server.ts.
+ * Unit tests for the formatRetryHint helper exported from lib.ts.
  * Only the pure helper is tested here; full show_ui / check_result flows
  * are covered by the smoke script (apps/mcp/smoke.mjs).
  */
 import { describe, expect, it } from 'vitest';
-import { formatRetryHint } from './server.ts';
+import { formatRetryHint } from './lib.ts';
 
 describe('formatRetryHint', () => {
   it('returns empty string for an empty body', () => {

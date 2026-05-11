@@ -66,7 +66,7 @@ export function registerPagentTools(server: McpServer, ops: PageOps): void {
       title: 'Show UI to the user',
       description: SHOW_UI_DESCRIPTION,
       inputSchema: {
-        spec: z.any().describe(SHOW_UI_INPUT_DESCRIPTION),
+        spec: z.array(z.record(z.unknown())).describe(SHOW_UI_INPUT_DESCRIPTION),
       },
     },
     async ({ spec }) => {
@@ -75,7 +75,7 @@ export function registerPagentTools(server: McpServer, ops: PageOps): void {
         content: [
           {
             type: 'text',
-            text: `UI ready. Share this URL with the user:\n${created.url}\n\npage_id: ${created.id}`,
+            text: `UI ready. Share this URL with the user:\n${created.url}\n\npage_id: ${created.id}\nexpires_at: ${created.expires_at}`,
           },
         ],
         structuredContent: {

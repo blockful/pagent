@@ -52,10 +52,6 @@ There is no automated version-bump script. Edit each file manually (or with `sed
 | `.claude-plugin/plugin.json` | `"version"`    |
 | `docs/openapi.yaml`          | `info.version` |
 
-> **Version drift note:** `docs/openapi.yaml` is currently at `0.1.0` while
-> all other files are at `0.0.1`. This is a known inconsistency introduced
-> during early development. Bring them into sync on the next release.
-
 Quick one-liner for the JSON/plugin files (replace `X.Y.Z`):
 
 ```bash
@@ -87,7 +83,7 @@ Commit the regenerated `apps/mcp/server.bundle.js` alongside the version bumps. 
 ```bash
 git add package.json apps/api/package.json apps/web/package.json \
         apps/mcp/package.json apps/mcp/server.bundle.js \
-        .claude-plugin/plugin.json
+        .claude-plugin/plugin.json docs/openapi.yaml
 git commit -m "chore(release): vX.Y.Z"
 ```
 
@@ -126,7 +122,7 @@ When a bug on `main` needs a patch release without pulling in unfinished feature
    git checkout -b hotfix/vX.Y.Z+1 vX.Y.Z
    ```
 2. Fix the bug.
-3. Bump the PATCH version across all five files (same as step 3 above).
+3. Bump the PATCH version across all six files (same as step 3 above).
 4. Rebuild the MCP bundle (`npm run build:mcp`).
 5. Run the full local gate (step 1 above).
 6. Commit as `chore(release): vX.Y.Z+1`, push the hotfix branch, open a PR.
