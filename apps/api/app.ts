@@ -73,7 +73,7 @@ app.use(
     // has no frames to embed and DENY is more restrictive.
     xFrameOptions: 'DENY',
     // Browsers default Cross-Origin-Resource-Policy to same-origin which would
-    // block the renderer at pagent.vercel.app from reading API responses at
+    // block the renderer at agent-ui-session.vercel.app from reading API responses at
     // pagent.up.railway.app. CORS already gates cross-origin reads explicitly.
     crossOriginResourcePolicy: 'cross-origin',
     // Defaults are fine for everything else (HSTS, X-Content-Type-Options

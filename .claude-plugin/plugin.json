@@ -1,7 +1,7 @@
 {
   "name": "pagent",
   "version": "0.0.1",
-  "description": "Generative UI for terminal-bound AI agents — render interactive browser UIs (forms, pickers, dashboards, confirmations) via the A2UI protocol. Ships a stdio MCP and skill, with hosted rendering at pagent.vercel.app or self-hosted via PAGENT_URL.",
+  "description": "Generative UI for terminal-bound AI agents — render interactive browser UIs (forms, pickers, dashboards, confirmations) via the A2UI protocol. Ships a stdio MCP and skill, with hosted rendering at agent-ui-session.vercel.app or self-hosted via PAGENT_URL.",
   "author": "Alexandro T. Netto",
   "homepage": "https://github.com/blockful/pagent",
   "license": "MIT",

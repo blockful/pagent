@@ -559,7 +559,7 @@ class HomePage extends LitElement {
               </div>
               <div>
                 <span class="prompt">↳</span
-                ><span class="url">https://pagent.vercel.app/4f2a…b13c</span
+                ><span class="url">https://agent-ui-session.vercel.app/4f2a…b13c</span
                 ><span class="caret"></span>
               </div>
             </div>
