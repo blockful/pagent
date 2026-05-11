@@ -10,7 +10,7 @@
 ### Hits the deployed services — no local dev server needed.
 
 @apiHost   = https://pagent.up.railway.app
-@viewHost  = https://pagent.vercel.app
+@viewHost  = https://agent-ui-session.vercel.app
 
 ###############################################################################
 # 1. Health check
