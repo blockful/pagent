@@ -1,24 +1,22 @@
 import { LitElement, html, css } from 'lit';
 
-type InstallKind = 'plugin' | 'http';
+const AGENT_PROMPT = `Add this MCP and follow the skill so you can render real UI forms for me instead of asking in chat.
 
-const INSTALL_COMMANDS: Record<InstallKind, string> = {
-  plugin: '/plugin marketplace add blockful/pagent\n/plugin install pagent@pagent',
-  http: 'claude mcp add --scope project --transport http pagent "https://pagent.up.railway.app/mcp"',
-};
+MCP:    https://pagent.up.railway.app/mcp
+Skill:  https://raw.githubusercontent.com/blockful/pagent/main/skills/pagent/SKILL.md`;
 
 class HomePage extends LitElement {
   static properties = {
     copied: { state: true },
   };
 
-  declare copied: InstallKind | null;
+  declare copied: boolean;
 
   private _copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     super();
-    this.copied = null;
+    this.copied = false;
   }
 
   disconnectedCallback() {
@@ -26,16 +24,16 @@ class HomePage extends LitElement {
     if (this._copyTimer) clearTimeout(this._copyTimer);
   }
 
-  private async _onCopy(which: InstallKind) {
+  private async _onCopy() {
     try {
-      await navigator.clipboard.writeText(INSTALL_COMMANDS[which]);
+      await navigator.clipboard.writeText(AGENT_PROMPT);
     } catch {
       // clipboard may be unavailable (insecure context); still flash UX
     }
-    this.copied = which;
+    this.copied = true;
     if (this._copyTimer) clearTimeout(this._copyTimer);
     this._copyTimer = setTimeout(() => {
-      this.copied = null;
+      this.copied = false;
     }, 1800);
   }
 
@@ -200,7 +198,7 @@ class HomePage extends LitElement {
 
     .install {
       margin-top: 44px;
-      max-width: 640px;
+      max-width: 720px;
       background: #15140f;
       color: #ebe2d2;
       border-radius: 12px;
@@ -277,6 +275,12 @@ class HomePage extends LitElement {
       line-height: 1.85;
       white-space: pre;
       overflow-x: auto;
+    }
+    .install-body.is-prompt {
+      font-size: 13px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
     .install-body .prompt {
       color: var(--accent);
@@ -507,49 +511,18 @@ class HomePage extends LitElement {
 
             <div class="install" id="install" aria-labelledby="install-label">
               <div class="install-head">
-                <span class="install-label" id="install-label">Install · Claude Code</span>
+                <span class="install-label" id="install-label">Install · Any agent</span>
                 <button
                   type="button"
-                  class="copy-btn ${this.copied === 'plugin' ? 'is-copied' : ''}"
-                  @click=${() => this._onCopy('plugin')}
-                  aria-label="Copy install commands to clipboard"
+                  class="copy-btn ${this.copied ? 'is-copied' : ''}"
+                  @click=${() => this._onCopy()}
+                  aria-label="Copy install prompt to clipboard"
                   aria-live="polite"
                 >
-                  ${this.copied === 'plugin' ? 'Copied ✓' : 'Copy'}
+                  ${this.copied ? 'Copied ✓' : 'Copy prompt'}
                 </button>
               </div>
-              <pre
-                class="install-body"
-              ><code><span class="prompt">›</span>/plugin marketplace add blockful/pagent
-<span class="prompt">›</span>/plugin install pagent@pagent</code></pre>
-              <div class="install-foot">
-                Verify with <code>/mcp</code> — you'll see <code>show_ui</code> &amp;
-                <code>check_result</code>.
-              </div>
-            </div>
-
-            <div class="install" aria-labelledby="install-http-label">
-              <div class="install-head">
-                <span class="install-label" id="install-http-label"
-                  >Or via HTTP · any MCP client</span
-                >
-                <button
-                  type="button"
-                  class="copy-btn ${this.copied === 'http' ? 'is-copied' : ''}"
-                  @click=${() => this._onCopy('http')}
-                  aria-label="Copy HTTP MCP install command to clipboard"
-                  aria-live="polite"
-                >
-                  ${this.copied === 'http' ? 'Copied ✓' : 'Copy'}
-                </button>
-              </div>
-              <pre
-                class="install-body"
-              ><code><span class="prompt">›</span>claude mcp add --scope project --transport http pagent "https://pagent.up.railway.app/mcp"</code></pre>
-              <div class="install-foot">
-                Same tools, no local install. Works with Codex, OpenCode, Cursor, Cline, anything
-                that speaks streamable HTTP MCP.
-              </div>
+              <pre class="install-body is-prompt"><code>${AGENT_PROMPT}</code></pre>
             </div>
 
             <div class="terminal" aria-hidden="true">
@@ -570,12 +543,12 @@ class HomePage extends LitElement {
           <section class="steps">
             <article class="step">
               <div class="step-num">i.</div>
-              <h3>Install in Claude Code</h3>
+              <h3>Install in your agent</h3>
               <p>
-                Run the two commands in the
-                <a href="#install" class="step-link">install panel above</a>. The plugin ships an
-                MCP server (<code>show_ui</code>, <code>check_result</code>) and a skill that
-                teaches the agent when to reach for a form.
+                Copy the prompt from the <a href="#install" class="step-link">panel above</a> into
+                any agent chat. The agent installs the MCP (<code>show_ui</code>,
+                <code>check_result</code>) and reads the skill that teaches it when to reach for a
+                form.
               </p>
             </article>
             <article class="step">
