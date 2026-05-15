@@ -1,11 +1,21 @@
 ---
 name: pagent
-description: Render an interactive browser UI — forms, pickers, multi-select, confirmations/approvals, dashboards, wizards, surveys. This skill should be used when the user asks to "show a form", "ask me via UI", "let me pick", "confirm before you", "give me a dashboard", or wants any prompt that needs typed input, structured choices, sliders, checkboxes, or multi-step flows. Prefer this over markdown tables or yes/no chat questions whenever real input widgets would be clearer.
+description: Render UI in the user's browser. Two tools — show_ui for asking the user a question that needs a structured answer back (forms, pickers, confirmations, dashboards-as-input, multi-step wizards), and show_html for showing a rich visualization the user just looks at (reports, dashboards, charts, infographics, comparison tables, slides). Trigger on "show me", "ask me", "let me pick", "confirm before you", "give me a dashboard", "render a chart", "show a report" — anything that beats plain text in chat. Rule: if anything has to come back from the user, show_ui. If the user just looks, show_html.
 ---
 
 # Showing UI to your user
 
-## When to use this skill
+## Picking a tool
+
+Two tools, one rule: **`show_html` to show; `show_ui` to ask.**
+
+If anything has to come back from the user — a value, a selection, a click — use `show_ui`. If the user just looks at it — a report, a chart, a dashboard, a comparison — use `show_html`. When in doubt, ask yourself: "Do I need to read the user's response?" Yes → `show_ui`. No → `show_html`.
+
+Multi-step flows work the same way: each step is a separate page. Show a dashboard with `show_html`, then ask "what next?" with `show_ui`. Don't try to bundle visualization and input into one page.
+
+Only A2UI pages (created by `show_ui`) have a result. HTML pages (`show_html`) never transition out of `open` — do not poll `check_result` on them.
+
+## When to use show_ui
 
 Reach for `show_ui` whenever a real input widget would beat asking the user to type freeform answers in chat. Examples that should trigger it:
 
@@ -20,13 +30,13 @@ Indirect cues count too: "let me choose", "let me approve", "show me", "give me 
 
 Examples where this skill should NOT trigger — keep these as plain text/markdown:
 
-- "Show me a markdown table of these results." (rendering, not input)
+- "Show me a markdown table of these results." (rendering, not input — use `show_html` if it deserves a real layout)
 - "Summarize the diff." (no user input expected)
 - "What's the capital of France?" (one-shot factual, no choice to make)
 
 Rule of thumb: if the next message you'd send the user contains a question they need to answer, prefer `show_ui` over asking in chat — unless the answer is one short sentence.
 
-## How it works
+## How show_ui works
 
 You don't have a screen, but your user does. Call `show_ui(spec)` with an A2UI v0.9 surface and the tool returns `{ page_id, url }`. **Print the URL** so the user can open it. Then call `check_result(page_id)` — it returns immediately with `{ state, result }`. If `state === "open"`, the user hasn't responded yet: wait a few seconds (or do other useful work) and call `check_result` again. When `state === "submitted"`, `result` carries the user's input as an A2UI client-action: `{ name, surfaceId, sourceComponentId, context, timestamp }`. The renderer detects that you've fetched the result (state flips to `"received"` on your first read) and shows "the agent has your input" feedback to the user. Each page is **single-shot**: one spec, one result. For a follow-up question, call `show_ui` again with a fresh spec — there is no surface-replace mechanism.
 
@@ -85,7 +95,7 @@ Call pattern:
 
 That first read flips the page to `received`; the renderer picks that up and tells the user the agent has their input.
 
-## Polling cadence
+## Polling cadence (show_ui only)
 
 Polling is your call — the service does no waiting on your behalf — so
 spend that latitude wisely. A reasonable shape:
@@ -112,6 +122,60 @@ they'll come back.
 When `check_result` returns `state: "received"`, the user previously
 submitted AND you've already read the result on a prior poll. Treat
 this as "already handled" — usually means a duplicate poll snuck in.
+
+Reminder: do **not** poll `check_result` on pages created with `show_html`
+— HTML pages stay `open` forever and have no result.
+
+## When to use show_html
+
+Reach for `show_html` whenever you want to show the user something rich and visual that text in chat can't do justice to:
+
+- "Show me a styled dashboard of the test results."
+- "Render the last quarter's metrics as an infographic."
+- "Build me a side-by-side comparison table of these three options, with logos."
+- "Give me a one-page report on the open issues, grouped by severity."
+- "Mock up a landing page for this idea."
+- "Show me a chart of the response times."
+
+Indirect cues: "show me", "render", "make me a", "design a", "lay this out as".
+
+NOT for input: if the next message you'd send the user contains a question they need to answer, use `show_ui` instead.
+
+## How show_html works
+
+Call `show_html(html)` with a single string containing the page body. The string can be a full document (`<!doctype html>…`) or a fragment (`<div>…</div>`) — the renderer wraps it in a sandboxed scaffold either way. The tool returns `{ page_id, url }`. **Print the URL** so the user can open it. Do NOT poll `check_result` on this page — HTML is one-way.
+
+Rules (enforced — violations are stripped or rejected server-side):
+
+- **No JavaScript.** `<script>` tags are stripped. `onclick=`, `onload=`, all `on*=` event handlers are stripped. `javascript:` URLs are stripped.
+- **No external assets.** Inline all CSS as `<style>`. Embed images as `data:image/...;base64,...` URIs. No Google Fonts, no CDN scripts, no remote `<img src=https:>`.
+- **No forms.** `<form action=…>` submissions are blocked by CSP. Use `show_ui` if you need input.
+- **No `<iframe>`, `<meta http-equiv=refresh>`, `<object>`, `<embed>`.** Stripped.
+- **1 MB payload cap.** Watch data-URI sizes.
+
+The result: a maximally locked-down sandboxed iframe runs your HTML inside the user's browser. The user views it. Nothing comes back.
+
+## Worked example: a styled report
+
+```python
+html = """
+<style>
+  body { font-family: -apple-system, sans-serif; padding: 32px; max-width: 720px; margin: 0 auto; color: #1b1b1b; }
+  h1 { color: #5154b3; }
+  .stat { display: inline-block; padding: 16px; margin-right: 12px; background: #f5f5f7; border-radius: 8px; }
+  .stat-value { font-size: 32px; font-weight: 700; }
+  .stat-label { font-size: 12px; color: #777; text-transform: uppercase; }
+</style>
+<h1>Q3 Engineering Report</h1>
+<div class="stat"><div class="stat-value">142</div><div class="stat-label">PRs merged</div></div>
+<div class="stat"><div class="stat-value">11</div><div class="stat-label">Bugs closed</div></div>
+<div class="stat"><div class="stat-value">3</div><div class="stat-label">Outages</div></div>
+<p>The team shipped 142 pull requests this quarter…</p>
+"""
+show_html(html)
+```
+
+Print the returned URL. Move on — no polling.
 
 ## Setup expectation
 

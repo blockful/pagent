@@ -7,9 +7,15 @@ info:
     A2UI surface to this service, prints a short URL, and reads the user's
     interactions back via this API.
 
-    Spec contents are opaque to the service. V0 assumes A2UI v0.9 — there
-    is no `format` tag on the wire. See https://github.com/blockful/pagent
-    for the source.
+    Spec contents are opaque to the service. The `format` field on `POST /new`
+    selects how the spec is interpreted:
+    - `a2ui` (default) — `spec` is an A2UI v0.9 message array. Pages take user
+      input and produce a result.
+    - `html` — `spec` is a UTF-8 HTML string (up to 1,000,000 bytes).
+      Pages are view-only: they never transition past `open`, and
+      `POST /{id}/result` returns 400 `invalid_for_format`.
+
+    See https://github.com/blockful/pagent for the source.
 
     ## Page lifecycle
 
@@ -175,15 +181,23 @@ paths:
       tags: [Pages]
       summary: Create a new page
       description: |
-        Creates a new page from an A2UI spec and returns a short URL to share
+        Creates a new page from a spec and returns a short URL to share
         with the user. The page starts in state `open`.
 
-        The `spec` field is opaque — the service stores it verbatim and serves
-        it back to the renderer. No validation is performed on its contents.
+        The `format` field (default `a2ui`) selects the spec shape:
+        - `a2ui` — `spec` is an A2UI v0.9 message array. The service stores
+          and serves it back verbatim. Pages collect user input and produce a
+          result.
+        - `html` — `spec` is a UTF-8 HTML string (up to 1,000,000 bytes). The
+          service sanitises it with DOMPurify before storage. Pages are
+          view-only: they never transition past `open`, and
+          `POST /{id}/result` returns 400 `invalid_for_format`.
 
         **What to do next:** print the returned `url` in the terminal (or chat)
-        so the user can open it in a browser. Then poll `GET /{id}/result`
-        until `state` is no longer `open`.
+        so the user can open it in a browser. For A2UI pages, poll
+        `GET /{id}/result` until `state` is no longer `open`. For HTML pages,
+        there is nothing to poll for — once the user opens the URL, you are
+        done.
 
         Rate-limited to 30 requests per minute per source IP.
       requestBody:
@@ -363,7 +377,10 @@ paths:
         '400':
           description: |
             Request body is malformed or missing required fields (`name`,
-            `surfaceId`). Fix the request before retrying.
+            `surfaceId`); error `bad_request`. Or the target page is HTML
+            (view-only and cannot accept a result); error `invalid_for_format`.
+            Fix the request — or, for `invalid_for_format`, stop trying to
+            submit to this page — before retrying.
           headers:
             X-Request-ID:
               $ref: '#/components/headers/XRequestId'
@@ -496,8 +513,20 @@ components:
 
     Spec:
       description: >
-        Opaque A2UI v0.9 message array. The service stores and returns this
-        verbatim without parsing or validating its structure.
+        Page contents. Shape depends on the request's `format` field:
+        `a2ui` (default) — an array of A2UI v0.9 messages; the service stores
+        and returns this verbatim without parsing the structure.
+        `html` — a UTF-8 HTML string up to 1,000,000 bytes; the service runs
+        DOMPurify on the string at create time and stores the sanitised
+        result.
+      oneOf:
+        - type: array
+          description: A2UI v0.9 message array (when format is `a2ui`).
+          items:
+            type: object
+            additionalProperties: true
+        - type: string
+          description: HTML body, up to 1,000,000 bytes (when format is `html`).
       example:
         - createSurface:
             surfaceId: main
@@ -506,12 +535,28 @@ components:
             surfaceId: main
             components: []
 
+    PageFormat:
+      type: string
+      enum: [a2ui, html]
+      description: |
+        Spec format. `a2ui` (default) — `spec` is an A2UI v0.9 message array.
+        `html` — `spec` is a UTF-8 HTML string up to 1,000,000 bytes; the
+        page becomes view-only and never produces a result.
+
     NewPageRequest:
       type: object
       required: [spec]
       properties:
         spec:
           $ref: '#/components/schemas/Spec'
+        format:
+          type: string
+          enum: [a2ui, html]
+          default: a2ui
+          description: |
+            Spec format. `a2ui` (default) — `spec` is an A2UI v0.9 message array.
+            `html` — `spec` is a UTF-8 HTML string up to 1,000,000 bytes; the
+            page becomes view-only and never produces a result.
 
     NewPageResponse:
       type: object
@@ -537,13 +582,16 @@ components:
       properties:
         spec:
           $ref: '#/components/schemas/Spec'
+        format:
+          $ref: '#/components/schemas/PageFormat'
         state:
           $ref: '#/components/schemas/PageState'
         result:
           type: object
           nullable: true
           description: >
-            The submitted A2UI action, or null if the page is still open.
+            The submitted A2UI action, or null if the page is still open or
+            if the page is an HTML page (HTML pages never produce a result).
             Shape mirrors `ResultRequest`.
         expires_at:
           type: integer
@@ -590,11 +638,14 @@ components:
       properties:
         state:
           $ref: '#/components/schemas/PageState'
+        format:
+          $ref: '#/components/schemas/PageFormat'
         result:
           type: object
           nullable: true
           description: >
             The submitted A2UI action, or null if the page is still `open`.
+            HTML pages always return null here — they never produce a result.
 
     SubmitOk:
       type: object
@@ -636,7 +687,11 @@ components:
       properties:
         error:
           type: string
-          enum: [bad_request]
+          enum: [bad_request, invalid_for_format]
+          description: |
+            `bad_request` — body is malformed or fails schema validation.
+            `invalid_for_format` — operation is not supported for this page's
+            format (e.g. POSTing a result to an HTML page).
         message:
           type: string
           description: Human-readable description of why the request was rejected.

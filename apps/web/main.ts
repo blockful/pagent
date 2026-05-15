@@ -7,13 +7,16 @@ import '@a2ui/lit/v0_9'; // registers <a2ui-surface>
 import './home'; // registers <home-page>
 import { assertCatalogsAllowed } from './spec-guard.js';
 import { nextPollDelay, pollTimeoutMessage } from './poll-backoff.js';
+import { createSandboxedIframe } from './html-renderer.js';
 
 /** Hard-coded allowlist of catalog URLs the renderer is permitted to use. */
 const ALLOWED_CATALOG_IDS = [basicCatalog.id] as const;
 
+type PageFormat = 'a2ui' | 'html';
 type PageState = 'open' | 'submitted' | 'received';
 type PageResponse = {
   spec: unknown;
+  format?: PageFormat; // optional for forward-compat with older API responses
   state: PageState;
   result: unknown | null;
   expires_at: number | string;
@@ -38,6 +41,8 @@ class AgentUIApp extends SignalWatcher(LitElement) {
     awaiting: { state: true },
     awaitingMessage: { state: true },
     awaitingStalled: { state: true },
+    format: { state: true },
+    htmlBody: { state: true },
   };
 
   static styles = css`
@@ -145,6 +150,29 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       font-family: 'Material Symbols Outlined', sans-serif;
       font-variation-settings: 'FILL' 1;
     }
+    .html-chrome {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      background: light-dark(rgba(245, 245, 247, 0.95), rgba(20, 24, 32, 0.95));
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
+      font-size: 13px;
+      color: var(--muted, #777);
+    }
+    .html-chrome-label::before {
+      content: '✦ ';
+      opacity: 0.6;
+    }
+    .html-chrome-report {
+      color: inherit;
+      text-decoration: underline;
+      font-size: 12px;
+    }
+    .html-chrome-report:hover {
+      color: var(--fg, #1b1b1b);
+    }
   `;
 
   declare status: 'connecting' | 'live' | 'closed' | 'error';
@@ -153,6 +181,8 @@ class AgentUIApp extends SignalWatcher(LitElement) {
   declare awaiting: boolean;
   declare awaitingMessage: string;
   declare awaitingStalled: boolean;
+  declare format: PageFormat;
+  declare htmlBody: string | null;
 
   constructor() {
     super();
@@ -162,6 +192,8 @@ class AgentUIApp extends SignalWatcher(LitElement) {
     this.awaiting = false;
     this.awaitingMessage = 'Sent — waiting for the agent…';
     this.awaitingStalled = false;
+    this.format = 'a2ui';
+    this.htmlBody = null;
   }
 
   private processor = new v0_9.MessageProcessor(
@@ -235,6 +267,18 @@ class AgentUIApp extends SignalWatcher(LitElement) {
         return;
       }
       const page = (await res.json()) as PageResponse;
+      this.format = page.format ?? 'a2ui';
+
+      if (this.format === 'html') {
+        // HTML pages are pre-sanitized server-side. We trust the byte-string
+        // and wrap it in a sandboxed iframe. The iframe is opaque-origin and
+        // JS-free; nothing it does can reach back into this shell.
+        this.htmlBody = typeof page.spec === 'string' ? page.spec : '';
+        this.status = 'live';
+        return;
+      }
+
+      // A2UI path (existing behavior).
       this.applySpec(page.spec);
       this.status = 'live';
 
@@ -334,6 +378,11 @@ class AgentUIApp extends SignalWatcher(LitElement) {
     if (this.status === 'closed') {
       return html`<div class="status">Session ended.</div>`;
     }
+
+    if (this.format === 'html') {
+      return this.renderHtml();
+    }
+
     const surfaces = Array.from(this.processor.model.surfacesMap.entries());
     if (surfaces.length === 0) {
       return html`<div class="pending">
@@ -366,6 +415,43 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       </div>
       ${this.error ? html`<div class="error">${this.error}</div>` : nothing}
     </section>`;
+  }
+
+  private renderHtml() {
+    if (this.htmlBody == null) {
+      return html`<div class="pending">
+        <div class="spinner"></div>
+        <div class="status">Loading…</div>
+      </div>`;
+    }
+    return html`
+      <header class="html-chrome" role="contentinfo">
+        <span class="html-chrome-label">AI-generated content</span>
+        <a
+          class="html-chrome-report"
+          href=${`mailto:alex@blockful.io?subject=${encodeURIComponent(`Abuse report for page ${pageId}`)}&body=${encodeURIComponent(`Page id: ${pageId}\nDescribe the abuse:\n\n`)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Report
+        </a>
+      </header>
+      ${this.htmlIframe()}
+    `;
+  }
+
+  // The Lit literal cannot embed a raw iframe element easily because Lit owns
+  // attribute setting and srcdoc would be re-escaped. We construct the iframe
+  // imperatively and stash it across renders via this helper.
+  private cachedIframe: HTMLIFrameElement | null = null;
+  private cachedIframeFor: string | null = null;
+  private htmlIframe() {
+    if (this.htmlBody == null) return nothing;
+    if (this.cachedIframe == null || this.cachedIframeFor !== this.htmlBody) {
+      this.cachedIframe = createSandboxedIframe(this.htmlBody);
+      this.cachedIframeFor = this.htmlBody;
+    }
+    return this.cachedIframe;
   }
 }
 
