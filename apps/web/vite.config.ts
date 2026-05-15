@@ -19,7 +19,7 @@ const envSchema = z.preprocess(
     CLIENT_PORT: z.coerce.number().int().min(1).max(65535).optional().default(8788),
     VITE_API_URL: z
       .string()
-      .url('VITE_API_URL must be a valid URL (e.g. https://pagent.up.railway.app)')
+      .url('VITE_API_URL must be a valid URL (e.g. https://api.pagent.link)')
       .optional(),
   }),
 );
@@ -40,7 +40,7 @@ export default defineConfig(({ command }) => {
   // where the renderer and API live on different origins. Fail loud here.
   if (command === 'build' && !env.VITE_API_URL) {
     console.error(
-      'VITE_API_URL is required for `vite build`. Set it to the API origin (e.g. https://pagent.up.railway.app).',
+      'VITE_API_URL is required for `vite build`. Set it to the API origin (e.g. https://api.pagent.link).',
     );
     process.exit(1);
   }

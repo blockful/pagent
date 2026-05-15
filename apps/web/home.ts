@@ -2,7 +2,7 @@ import { LitElement, html, css } from 'lit';
 
 const AGENT_PROMPT = `Add this MCP and follow the skill so you can render real UI forms for me instead of asking in chat.
 
-MCP:    https://pagent.up.railway.app/mcp
+MCP:    https://api.pagent.link/mcp
 Skill:  https://raw.githubusercontent.com/blockful/pagent/main/skills/pagent/SKILL.md`;
 
 class HomePage extends LitElement {
@@ -531,8 +531,7 @@ class HomePage extends LitElement {
                 ><span class="dim">"ask me my favorite color via a UI"</span>
               </div>
               <div>
-                <span class="prompt">↳</span
-                ><span class="url">https://pagent.vercel.app/4f2a…b13c</span
+                <span class="prompt">↳</span><span class="url">https://pagent.link/4f2a…b13c</span
                 ><span class="caret"></span>
               </div>
             </div>

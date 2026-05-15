@@ -1,4 +1,4 @@
-# PRD — Agent UI Session
+# PRD — Pagent
 
 ## Problem
 
@@ -36,7 +36,7 @@ guarantee built into V0.
 sequenceDiagram
   autonumber
   participant A as Agent (via MCP)
-  participant S as agent-ui-session service
+  participant S as pagent service
   participant U as User (browser)
 
   A->>S: POST /new { spec }

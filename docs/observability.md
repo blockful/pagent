@@ -161,7 +161,7 @@ Redeploy. The API boot log should show:
 
 ## Tracing one request end-to-end
 
-1. Hit any endpoint, e.g. `curl -i https://pagent.up.railway.app/health`.
+1. Hit any endpoint, e.g. `curl -i https://api.pagent.link/health`.
 2. Note the `x-trace-id` response header.
 3. In Grafana, **Explore → Tempo → search by trace ID** → paste the value.
 4. The trace shows the full HTTP span and any DB queries.

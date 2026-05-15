@@ -35,7 +35,7 @@ info:
     url: https://github.com/blockful/pagent/blob/main/LICENSE
 
 servers:
-  - url: https://pagent.up.railway.app
+  - url: https://api.pagent.link
     description: Production
   - url: http://localhost:8787
     description: Local development
@@ -573,7 +573,7 @@ components:
           description: >
             Short URL for the user to open in a browser. Points to the
             Pagent renderer with this page's ID.
-          example: https://pagent.vercel.app/c0f2ec161aac8b1a8d26222f45ca812d
+          example: https://pagent.link/c0f2ec161aac8b1a8d26222f45ca812d
         expires_at:
           type: integer
           description: Unix epoch milliseconds when this page will be deleted.

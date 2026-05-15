@@ -21273,7 +21273,7 @@ try {
   console.error("Invalid environment for pagent MCP:", e);
   process.exit(1);
 }
-var SERVICE_URL = (env.PAGENT_URL ?? "https://pagent.up.railway.app").replace(/\/$/, "");
+var SERVICE_URL = (env.PAGENT_URL ?? "https://api.pagent.link").replace(/\/$/, "");
 async function readError(res, fallbackVerb) {
   const body = await res.json().catch(() => ({}));
   const hint = formatRetryHint(body);

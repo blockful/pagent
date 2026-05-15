@@ -156,6 +156,6 @@ Users who already installed the plugin will pick up the reverted `main` on their
 ## Post-release
 
 - Update `README.md` quickstart if any new commands or env-vars shipped.
-- Confirm Railway auto-deployed from `main`: `curl https://pagent.up.railway.app/health`.
-- Confirm Vercel auto-deployed from `main`: open `https://pagent.vercel.app` and check the page loads.
+- Confirm Railway auto-deployed from `main`: `curl https://api.pagent.link/health`.
+- Confirm Vercel auto-deployed from `main`: open `https://pagent.link` and check the page loads.
 - If the Railway or Vercel deploys did not trigger automatically, redeploy manually from their dashboards.
