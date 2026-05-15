@@ -203,11 +203,14 @@ describe('POST /new with format=html', () => {
     expect(page.spec as string).toContain('<div>safe</div>');
   });
 
-  it('rejects HTML payloads > 1 MB', async () => {
+  it('rejects HTML payloads > 1 MB with 413 payload_too_large', async () => {
     const big = 'a'.repeat(1_000_001);
     const res = await app.fetch(req('POST', '/new', { format: 'html', spec: big }));
-    // bodyLimit middleware fires before Zod when body is over the absolute cap.
-    expect([400, 413]).toContain(res.status);
+    // The wire body (with JSON wrapping) exceeds the 1 MB bodyLimit, so the
+    // bodyLimit middleware fires before Zod parsing and returns 413.
+    expect(res.status).toBe(413);
+    const body = await json(res);
+    expect(body.error).toBe('payload_too_large');
   });
 
   it('accepts A2UI payloads with implicit default format (backwards compat)', async () => {

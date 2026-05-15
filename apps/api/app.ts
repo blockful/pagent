@@ -239,7 +239,7 @@ const newPageHandler = async (c: Context) => {
   if (format === 'html') {
     const { output, removedTags, removedAttrs } = sanitize(spec as string);
     getLog(c).info(
-      { format, removedTags, removedAttrs },
+      { format, sanitizer_removed_tags: removedTags, sanitizer_removed_attrs: removedAttrs },
       'sanitized html submission',
     );
     storedSpec = output;
@@ -277,16 +277,21 @@ const submitResultHandler = async (c: Context) => {
   const page = await db.getActivePage(idResult.data);
   if (!page)
     return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
-  if (page.format !== 'a2ui') {
+  if (page.format === 'html') {
     return c.json(
       {
         error: 'invalid_for_format',
         format: page.format,
-        message: `POST /:id/result is not supported for format=${page.format}; HTML pages are view-only`,
+        message: 'POST /:id/result is not supported for format=html; HTML pages are view-only',
       },
       400,
     );
   }
+  // Future formats: TypeScript exhaustiveness check — if PageFormat grows a new
+  // variant, this assignment fails to typecheck and forces maintainers to
+  // either handle the format above or remove it from the discriminated union.
+  const _exhaustive: 'a2ui' = page.format;
+  void _exhaustive;
 
   const raw = await c.req.json().catch(() => null);
   const bodyResult = resultBodySchema.safeParse(raw);

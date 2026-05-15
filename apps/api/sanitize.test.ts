@@ -88,6 +88,31 @@ describe('sanitize', () => {
     expect(out).not.toContain('data:text/html');
   });
 
+  it('strips data:application/javascript URLs', () => {
+    const out = sanitize('<a href="data:application/javascript,alert(1)">click</a>').output;
+    expect(out).not.toContain('data:application/javascript');
+  });
+
+  it('strips <applet>', () => {
+    const out = sanitize('<applet code="x.class"></applet>').output;
+    expect(out).not.toContain('<applet');
+  });
+
+  it('strips <frame>', () => {
+    const out = sanitize('<frame src="https://attacker.example">').output;
+    expect(out).not.toContain('<frame');
+  });
+
+  it('strips <frameset>', () => {
+    const out = sanitize('<frameset><frame src="x"></frameset>').output;
+    expect(out).not.toContain('<frameset');
+  });
+
+  it('strips onload event handler', () => {
+    const out = sanitize('<body onload="alert(1)">x</body>').output;
+    expect(out).not.toContain('onload');
+  });
+
   it('strips formaction (form override attack)', () => {
     const out = sanitize('<button formaction="https://attacker.example">x</button>').output;
     expect(out).not.toContain('formaction');

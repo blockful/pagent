@@ -187,15 +187,21 @@ describe('getActivePage retry semantics', () => {
 // carries `format`, that a row projection including `format` produces a Page
 // with the expected discriminator, and that PageFormat is the closed union.
 
+// Type test: PageFormat is a closed union — assigning anything outside
+// 'a2ui' | 'html' must fail to typecheck. The `@ts-expect-error` directive
+// does the verification at compile time; npm run typecheck will fail if the
+// union ever loosens. No runtime assertion is needed (and would be misleading
+// since 'pdf' === 'pdf' is trivially true at runtime).
+// @ts-expect-error — only 'a2ui' | 'html' should typecheck.
+const _pageFormatClosedUnion: PageFormat = 'pdf';
+void _pageFormatClosedUnion;
+
 describe('Page format column (structural)', () => {
-  it('PageFormat is the closed union "a2ui" | "html"', () => {
+  it('PageFormat accepts the two allowed string literals', () => {
     const a: PageFormat = 'a2ui';
     const h: PageFormat = 'html';
     expect(a).toBe('a2ui');
     expect(h).toBe('html');
-    // @ts-expect-error — only 'a2ui' | 'html' should typecheck.
-    const _bad: PageFormat = 'pdf';
-    expect(_bad).toBe('pdf');
   });
 
   it('Page accepts format and exposes it on the read shape', () => {

@@ -30,6 +30,7 @@ const FORBID_ATTR = ['formaction', 'srcdoc', 'xlink:href'];
 const ALLOWED_URI_REGEXP =
   /^(?:https:|mailto:|#|data:image\/(?:png|jpe?g|gif|webp|svg\+xml);base64,)/i;
 
+// Must remain synchronous — DOMPurify hook state is module-global.
 export function sanitize(html: string): {
   output: string;
   removedTags: number;
@@ -39,8 +40,9 @@ export function sanitize(html: string): {
   let removedAttrs = 0;
 
   // Hooks are global per DOMPurify instance. Reset and re-register on each
-  // call so the counters start clean. removeAllHooks runs again at the end
-  // to leave the instance pristine for the next caller.
+  // call so the counters start clean. The try/finally ensures hooks always
+  // clear even if sanitize() throws partway, leaving the instance pristine
+  // for the next caller.
   DOMPurify.removeAllHooks();
   DOMPurify.addHook('uponSanitizeElement', (_node, data) => {
     if (data.allowedTags[data.tagName] === false) removedTags++;
@@ -49,26 +51,28 @@ export function sanitize(html: string): {
     if (!data.allowedAttributes[data.attrName]) removedAttrs++;
   });
 
-  const output = DOMPurify.sanitize(html, {
-    USE_PROFILES: { html: true, svg: true },
-    // <style> is not in the default html profile but is essential for inline
-    // CSS (the renderer's CSP allows style-src 'unsafe-inline'). Re-enable it
-    // explicitly so payloads with embedded styles aren't silently stripped.
-    ADD_TAGS: ['style'],
-    FORBID_TAGS,
-    FORBID_ATTR,
-    ALLOWED_URI_REGEXP,
-    ALLOW_DATA_ATTR: false,
-    // FORCE_BODY parses the input as body content (rather than a full
-    // document), so root-level <style> tags survive instead of being treated
-    // as head-only and dropped. The renderer wraps our output inside <body>
-    // anyway, so this matches the eventual placement.
-    FORCE_BODY: true,
-    WHOLE_DOCUMENT: false,
-    RETURN_TRUSTED_TYPE: false,
-  }) as string;
+  try {
+    const output = DOMPurify.sanitize(html, {
+      USE_PROFILES: { html: true, svg: true },
+      // <style> is not in the default html profile but is essential for inline
+      // CSS (the renderer's CSP allows style-src 'unsafe-inline'). Re-enable it
+      // explicitly so payloads with embedded styles aren't silently stripped.
+      ADD_TAGS: ['style'],
+      FORBID_TAGS,
+      FORBID_ATTR,
+      ALLOWED_URI_REGEXP,
+      ALLOW_DATA_ATTR: false,
+      // FORCE_BODY parses the input as body content (rather than a full
+      // document), so root-level <style> tags survive instead of being treated
+      // as head-only and dropped. The renderer wraps our output inside <body>
+      // anyway, so this matches the eventual placement.
+      FORCE_BODY: true,
+      WHOLE_DOCUMENT: false,
+      RETURN_TRUSTED_TYPE: false,
+    }) as string;
 
-  DOMPurify.removeAllHooks();
-
-  return { output, removedTags, removedAttrs };
+    return { output, removedTags, removedAttrs };
+  } finally {
+    DOMPurify.removeAllHooks();
+  }
 }

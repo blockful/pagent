@@ -29,6 +29,7 @@ export type ShowUiResult = {
 // path adds the field, this can be tightened to required.
 export type CheckResultOutcome =
   | { kind: 'not_found' }
+  // TODO(phase-2): make required after stdio MCP server is updated
   | { kind: 'state'; state: PageState; result: unknown; format?: PageFormat };
 
 export interface PageOps {
