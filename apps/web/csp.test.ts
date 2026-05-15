@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCsp } from './csp.js';
+import { buildCsp, buildIframeCsp } from './csp.js';
 
 const ALL_DIRECTIVES = [
   'default-src',
@@ -46,5 +46,53 @@ describe('buildCsp', () => {
         expect(csp, `missing ${directive} for apiUrl=${apiUrl}`).toContain(directive);
       }
     }
+  });
+});
+
+describe('buildIframeCsp', () => {
+  const csp = buildIframeCsp();
+
+  it("sets default-src 'none'", () => {
+    expect(csp).toMatch(/default-src 'none'/);
+  });
+
+  it("allows img-src 'self' data:", () => {
+    expect(csp).toMatch(/img-src 'self' data:/);
+  });
+
+  it("allows style-src 'unsafe-inline' only (no external)", () => {
+    expect(csp).toMatch(/style-src 'unsafe-inline'/);
+    expect(csp).not.toMatch(/style-src[^;]*https:/);
+  });
+
+  it('allows font-src data: only', () => {
+    expect(csp).toMatch(/font-src data:/);
+    expect(csp).not.toMatch(/font-src[^;]*https:/);
+  });
+
+  it("blocks form submission via form-action 'none'", () => {
+    expect(csp).toMatch(/form-action 'none'/);
+  });
+
+  it("blocks nested iframes via frame-src 'none'", () => {
+    expect(csp).toMatch(/frame-src 'none'/);
+  });
+
+  it("blocks base-uri rewriting via base-uri 'none'", () => {
+    expect(csp).toMatch(/base-uri 'none'/);
+  });
+
+  it('declares sandbox', () => {
+    expect(csp).toMatch(/(^|; )sandbox(;|$)/);
+  });
+
+  it('does not enable scripts (no script-src directive)', () => {
+    // default-src 'none' covers script-src by default; explicit script-src
+    // would be a regression — assert absence.
+    expect(csp).not.toMatch(/script-src/);
+  });
+
+  it('does not include frame-ancestors (handled upstream by shell X-Frame-Options)', () => {
+    expect(csp).not.toMatch(/frame-ancestors/);
   });
 });

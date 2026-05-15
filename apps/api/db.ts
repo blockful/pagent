@@ -25,9 +25,12 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}
 
 export type PageState = 'open' | 'submitted' | 'received';
 
+export type PageFormat = 'a2ui' | 'html';
+
 export type Page = {
   id: string;
   spec: unknown;
+  format: PageFormat;
   state: PageState;
   result: unknown;
   createdAt: number;
@@ -45,6 +48,7 @@ export async function init(connectionString: string): Promise<void> {
     create table if not exists pages (
       id           text primary key,
       spec         jsonb       not null,
+      format       text        not null default 'a2ui' check (format in ('a2ui','html')),
       state        text        not null check (state in ('open','submitted','received')),
       result       jsonb,
       created_at   timestamptz not null default now(),
@@ -52,6 +56,14 @@ export async function init(connectionString: string): Promise<void> {
       submitted_at timestamptz,
       received_at  timestamptz
     )
+  `;
+  // Pick up the column on pre-existing deployments. Idempotent — safe to run
+  // on every boot. Backfill is implicit via the default.
+  await sql`
+    alter table pages
+      add column if not exists format text
+        not null default 'a2ui'
+        check (format in ('a2ui','html'))
   `;
   await sql`create index if not exists pages_expires_at_idx on pages (expires_at)`;
 }
@@ -75,6 +87,7 @@ function client(): ReturnType<typeof postgres> {
 type PageRow = {
   id: string;
   spec: unknown;
+  format: PageFormat;
   state: PageState;
   result: unknown;
   created_at: Date;
@@ -85,7 +98,7 @@ export async function getActivePage(id: string): Promise<Page | null> {
   return withRetry(async () => {
     const c = client();
     const rows = await c<PageRow[]>`
-      select id, spec, state, result, created_at, expires_at
+      select id, spec, format, state, result, created_at, expires_at
       from pages
       where id = ${id} and expires_at > now()
     `;
@@ -94,6 +107,7 @@ export async function getActivePage(id: string): Promise<Page | null> {
     return {
       id: r.id,
       spec: r.spec,
+      format: r.format,
       state: r.state,
       result: r.result,
       createdAt: r.created_at.getTime(),
@@ -150,13 +164,13 @@ export async function submitPage(id: string, action: unknown): Promise<SubmitOut
  */
 export async function fetchAndAdvanceResult(
   id: string,
-): Promise<{ stateAtRead: PageState; result: unknown } | null> {
+): Promise<{ stateAtRead: PageState; result: unknown; format: PageFormat } | null> {
   const c = client();
-  const rows = await c<{ state: PageState; result: unknown }[]>`
-    select state, result from pages where id = ${id} and expires_at > now()
+  const rows = await c<{ state: PageState; result: unknown; format: PageFormat }[]>`
+    select state, result, format from pages where id = ${id} and expires_at > now()
   `;
   if (rows.length === 0) return null;
-  const { state, result } = rows[0];
+  const { state, result, format } = rows[0];
   const stateAtRead = state;
   if (state === 'submitted') {
     await c`
@@ -165,14 +179,20 @@ export async function fetchAndAdvanceResult(
       where id = ${id} and state = 'submitted'
     `;
   }
-  return { stateAtRead, result };
+  return { stateAtRead, result, format };
 }
 
 export async function insertPage(p: Page): Promise<void> {
   await withRetry(async () => {
     const c = client();
-    await c`insert into pages (id, spec, state, expires_at)
-            values (${p.id}, ${c.json(p.spec as Parameters<typeof c.json>[0])}, 'open', to_timestamp(${p.expiresAt} / 1000.0))`;
+    await c`insert into pages (id, spec, format, state, expires_at)
+            values (
+              ${p.id},
+              ${c.json(p.spec as Parameters<typeof c.json>[0])},
+              ${p.format},
+              'open',
+              to_timestamp(${p.expiresAt} / 1000.0)
+            )`;
   });
 }
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { HTML_MAX_BYTES } from './limits.ts';
 
 // --- Page ID -----------------------------------------------------------------
 
@@ -6,10 +7,27 @@ export const pageIdSchema = z.string().regex(/^[a-f0-9]{32}$/, 'invalid page id'
 
 // --- Request bodies ----------------------------------------------------------
 
-// spec is opaque (PRD §spec): only presence is enforced, never contents.
-export const newPageBodySchema = z
-  .object({ spec: z.unknown() })
-  .refine((b) => 'spec' in b, { message: "missing 'spec'" });
+// spec contents are opaque per format:
+//   a2ui — unknown JSON (passed through to the renderer; PRD §spec)
+//   html — UTF-8 string with a 1 MB cap
+// The default for `format` keeps every pre-discriminator client working
+// without changes (they POST `{ spec }` and land on the a2ui branch).
+// The a2ui branch enforces presence of the `spec` key (allows null but not
+// missing) so a stray `{}` still gets a 400 — matches pre-discriminator behavior.
+export const newPageBodySchema = z.union([
+  z
+    .object({
+      format: z.literal('a2ui').optional().default('a2ui'),
+      spec: z.unknown(),
+    })
+    .refine((b) => 'spec' in b, { message: "missing 'spec'" }),
+  z.object({
+    format: z.literal('html'),
+    spec: z.string().min(1).max(HTML_MAX_BYTES),
+  }),
+]);
+
+export type NewPageBody = z.infer<typeof newPageBodySchema>;
 
 // A2UI client action — passthrough so future fields don't 400 us.
 export const resultBodySchema = z

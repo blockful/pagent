@@ -75,10 +75,25 @@ function applyBaseHeaders(req: IncomingMessage, res: ServerResponse, requestId: 
 export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
   return {
     async showUi(spec) {
-      return store.createPage(spec, {
+      return store.createPage(spec, 'a2ui', {
         publicUrl: cfg.publicUrl,
         pageTtlMs: cfg.pageTtlMs,
       });
+    },
+    async showHtml(html) {
+      // No request context here — log at the module logger level. The REST
+      // POST /new path passes a request-scoped child logger; this is the MCP
+      // path. store.createHtmlPage handles sanitize+log+store in one ritual
+      // and throws SanitizedEmptyError if the input was stripped to empty —
+      // the MCP transport surfaces the throw to the client as an error.
+      return store.createHtmlPage(
+        html,
+        {
+          publicUrl: cfg.publicUrl,
+          pageTtlMs: cfg.pageTtlMs,
+        },
+        logger,
+      );
     },
     async checkResult(page_id) {
       return store.advanceResult(page_id);

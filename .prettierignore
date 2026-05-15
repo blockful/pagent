@@ -5,3 +5,8 @@ apps/web/vendor/
 apps/mcp/server.bundle.js
 apps/web/.vercel/
 package-lock.json
+# Plan/spec documents contain embedded TypeScript pseudo-code that prettier
+# mis-parses into semantically-broken output (e.g. `{ a: 'x' | 'y', b }` is
+# parsed as a comma expression). Keep them author-formatted.
+docs/superpowers/plans/
+docs/superpowers/specs/

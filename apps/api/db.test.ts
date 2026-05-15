@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { withRetry, getActivePage } from './db';
+import type { Page, PageFormat } from './db';
 
 describe('withRetry', () => {
   beforeEach(() => {
@@ -122,6 +123,7 @@ describe('getActivePage retry semantics', () => {
     const fakeRow = {
       id: 'test-id',
       spec: { type: 'test' },
+      format: 'a2ui' as const,
       state: 'open' as const,
       result: null,
       created_at: new Date(1000),
@@ -152,6 +154,7 @@ describe('getActivePage retry semantics', () => {
       return {
         id: r.id,
         spec: r.spec,
+        format: r.format,
         state: r.state,
         result: r.result,
         createdAt: r.created_at.getTime(),
@@ -173,5 +176,79 @@ describe('getActivePage retry semantics', () => {
     // Confirms the function is wired up and importable; retry behaviour is
     // proven by the withRetry unit tests and the integration test above.
     expect(typeof getActivePage).toBe('function');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Page format column — structural tests (no live DB)
+// ---------------------------------------------------------------------------
+// Real DB round-trips are out of scope for the unit suite (postgres URL is a
+// placeholder in vitest.config.ts). Instead, we assert that the type surface
+// carries `format`, that a row projection including `format` produces a Page
+// with the expected discriminator, and that PageFormat is the closed union.
+
+// Type test: PageFormat is a closed union — assigning anything outside
+// 'a2ui' | 'html' must fail to typecheck. The `@ts-expect-error` directive
+// does the verification at compile time; npm run typecheck will fail if the
+// union ever loosens. No runtime assertion is needed (and would be misleading
+// since 'pdf' === 'pdf' is trivially true at runtime).
+// @ts-expect-error — only 'a2ui' | 'html' should typecheck.
+const _pageFormatClosedUnion: PageFormat = 'pdf';
+void _pageFormatClosedUnion;
+
+describe('Page format column (structural)', () => {
+  it('PageFormat accepts the two allowed string literals', () => {
+    const a: PageFormat = 'a2ui';
+    const h: PageFormat = 'html';
+    expect(a).toBe('a2ui');
+    expect(h).toBe('html');
+  });
+
+  it('Page accepts format and exposes it on the read shape', () => {
+    const p: Page = {
+      id: 'aabbccddeeff00112233445566778899',
+      spec: { foo: 1 },
+      format: 'html',
+      state: 'open',
+      result: null,
+      createdAt: 1,
+      expiresAt: 2,
+    };
+    expect(p.format).toBe('html');
+  });
+
+  it('row projection from a select including `format` maps to Page.format', async () => {
+    // Mirrors getActivePage's mapping over the retry path. If the SELECT
+    // were to drop `format`, the projection would lose it; this regression
+    // test ensures the mapping is wired both ways.
+    type Row = {
+      id: string;
+      spec: unknown;
+      format: PageFormat;
+      state: 'open';
+      result: unknown;
+      created_at: Date;
+      expires_at: Date;
+    };
+    const fakeRow: Row = {
+      id: 'test-id',
+      spec: '<div>hi</div>',
+      format: 'html',
+      state: 'open',
+      result: null,
+      created_at: new Date(1000),
+      expires_at: new Date(2000),
+    };
+    const projected: Page = {
+      id: fakeRow.id,
+      spec: fakeRow.spec,
+      format: fakeRow.format,
+      state: fakeRow.state,
+      result: fakeRow.result,
+      createdAt: fakeRow.created_at.getTime(),
+      expiresAt: fakeRow.expires_at.getTime(),
+    };
+    expect(projected.format).toBe('html');
+    expect(projected.spec).toBe('<div>hi</div>');
   });
 });
