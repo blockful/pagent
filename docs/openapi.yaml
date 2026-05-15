@@ -237,9 +237,10 @@ paths:
                 $ref: '#/components/schemas/Error400'
         '413':
           description: |
-            Request body exceeds the service limit. Reduce the spec size.
-            The service caps the body at `max_bytes` bytes (currently 262 144).
-            Simplify or paginate your spec and retry.
+            Request body exceeds the service limit. A2UI specs cap at
+            256 000 bytes (post-parse); HTML payloads cap at 1 000 000 bytes
+            (wire body limit). The response's `format` field tells you which
+            cap fired so you can size the next submission appropriately.
           headers:
             X-Request-ID:
               $ref: '#/components/headers/XRequestId'
@@ -249,7 +250,9 @@ paths:
                 $ref: '#/components/schemas/Error413'
               example:
                 error: payload_too_large
-                max_bytes: 262144
+                format: a2ui
+                max_bytes: 256000
+                message: A2UI spec exceeds the 256 KB limit; use format "html" for larger payloads only when appropriate
         '429':
           description: |
             Per-IP rate limit exceeded. Wait `retry_after_seconds` seconds
@@ -687,11 +690,21 @@ components:
       properties:
         error:
           type: string
-          enum: [bad_request, invalid_for_format]
+          enum: [bad_request, invalid_for_format, sanitized_empty]
           description: |
             `bad_request` — body is malformed or fails schema validation.
             `invalid_for_format` — operation is not supported for this page's
             format (e.g. POSTing a result to an HTML page).
+            `sanitized_empty` — `POST /new` with `format: "html"` whose payload
+            was reduced to empty by the sanitizer (only forbidden tags like
+            `<script>` or `<iframe>` were supplied). Re-author the HTML with
+            safe markup and inline styles.
+        format:
+          type: string
+          enum: [a2ui, html]
+          description: |
+            Present on `invalid_for_format` and `sanitized_empty` errors —
+            identifies which format triggered the rejection.
         message:
           type: string
           description: Human-readable description of why the request was rejected.
@@ -734,14 +747,21 @@ components:
         error:
           type: string
           enum: [payload_too_large]
+        format:
+          type: string
+          enum: [a2ui, html]
+          description: |
+            The format whose size cap was exceeded. `a2ui` caps at 256 000 bytes
+            (enforced post-parse). `html` caps at 1 000 000 bytes (enforced by
+            the body-limit middleware before parse).
         max_bytes:
           type: integer
-          description: Maximum allowed body size in bytes.
-          example: 262144
+          description: Maximum allowed body size in bytes for this format.
+          example: 256000
         message:
           type: string
           description: Human-readable description of the size limit.
-          example: Request body exceeds the 262144-byte limit
+          example: A2UI spec exceeds the 256 KB limit; use format "html" for larger payloads only when appropriate
 
     Error429:
       type: object
