@@ -38,7 +38,7 @@ try {
 }
 
 // Read once at startup; fine for a short-lived stdio process.
-const SERVICE_URL = (env.PAGENT_URL ?? 'https://pagent.up.railway.app').replace(/\/$/, '');
+const SERVICE_URL = (env.PAGENT_URL ?? 'https://api.pagent.link').replace(/\/$/, '');
 
 type ApiErrorBody = {
   message?: string;

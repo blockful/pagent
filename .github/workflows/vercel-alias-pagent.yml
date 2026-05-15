@@ -1,8 +1,8 @@
-name: Pin pagent.vercel.app to latest production
+name: Pin pagent.link to latest production
 
-# Re-alias pagent.vercel.app to whichever pagent project deployment Vercel
-# has just promoted to production. Required because the bare pagent.vercel.app
-# subdomain is owned by another team's project at the project-domain layer
+# Re-alias pagent.link to whichever pagent project deployment Vercel
+# has just promoted to production. Required because the bare pagent.link
+# domain is owned by another team's project at the project-domain layer
 # (Vercel rejects adding it as our project's auto-tracking domain), so we
 # can serve from it via deployment aliases but it does NOT auto-update on
 # new prod deploys. This workflow does the re-alias for us.
@@ -29,7 +29,7 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_PROJECT_ID: prj_JhOxWsbBLRb1Sdo19Thbz4eHOyj7
       VERCEL_TEAM_ID: team_zDJQ6yrYdOu79gJBmUIBVYCV
-      ALIAS: pagent.vercel.app
+      ALIAS: pagent.link
     steps:
       - name: Skip if VERCEL_TOKEN is unset
         id: gate

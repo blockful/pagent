@@ -5,7 +5,7 @@
     {
       "name": "pagent",
       "source": "./",
-      "description": "Generative UI for terminal-bound AI agents — render interactive browser UIs (forms, pickers, dashboards, confirmations) via the A2UI protocol. Ships a stdio MCP and skill, with hosted rendering at pagent.vercel.app or self-hosted via PAGENT_URL.",
+      "description": "Generative UI for terminal-bound AI agents — render interactive browser UIs (forms, pickers, dashboards, confirmations) via the A2UI protocol. Ships a stdio MCP and skill, with hosted rendering at pagent.link or self-hosted via PAGENT_URL.",
       "category": "productivity",
       "tags": ["generative-ui", "agentic-ui", "a2ui", "mcp"]
     }

@@ -4,8 +4,8 @@
 
 Hosted UI rendering for terminal-bound AI agents. The agent emits an A2UI surface to this service, prints a short URL, and reads the user's interactions back via API.
 
-- **Live API:** https://pagent.up.railway.app
-- **Live renderer:** https://pagent.vercel.app
+- **Live API:** https://api.pagent.link
+- **Live renderer:** https://pagent.link
 
 See [PRD.md](./PRD.md) for the design and [HANDOFF.md](./docs/HANDOFF.md) for build context.
 
@@ -91,7 +91,7 @@ Each app validates its environment at boot/build with Zod and fails loudly on mi
 |                                                   | `OTEL_EXPORTER_OTLP_*`     | optional            | OpenTelemetry exporter config. Leave `OTEL_EXPORTER_OTLP_ENDPOINT` unset to disable tracing.        |
 | **web** ([`.env.example`](apps/web/.env.example)) | `VITE_API_URL`             | **`vite build`**    | Valid URL. Inlined at build time and embedded in CSP. `vite dev` allows it unset (uses Vite proxy). |
 |                                                   | `API_PORT` / `CLIENT_PORT` | optional (dev only) | Valid port (1–65535). Defaults `8787` / `8788`.                                                     |
-| **mcp** ([`.env.example`](apps/mcp/.env.example)) | `PAGENT_URL`               | optional            | Valid URL when set. Default `https://pagent.up.railway.app`.                                        |
+| **mcp** ([`.env.example`](apps/mcp/.env.example)) | `PAGENT_URL`               | optional            | Valid URL when set. Default `https://api.pagent.link`.                                              |
 
 When validation fails, the process logs the offending field and exits with a non-zero code — CI catches misconfigured deploys (`build:web` runs in CI with a placeholder `VITE_API_URL`) before they ship.
 
@@ -120,9 +120,9 @@ You should see `pagent` listed with `show_ui` and `check_result` tools. The plug
 
 > "Use the pagent skill to ask me my favorite color via a UI form."
 
-The agent calls `show_ui`, prints a URL (hosted at `https://pagent.vercel.app`), you submit, and the conversation continues.
+The agent calls `show_ui`, prints a URL (hosted at `https://pagent.link`), you submit, and the conversation continues.
 
-**Point at a different service?** Set `PAGENT_URL` before launching Claude. By default the MCP talks to `https://pagent.up.railway.app`.
+**Point at a different service?** Set `PAGENT_URL` before launching Claude. By default the MCP talks to `https://api.pagent.link`.
 
 ## Use it from any MCP client (HTTP transport)
 
@@ -130,7 +130,7 @@ Beyond the Claude Code plugin, pagent's MCP also speaks the streamable HTTP tran
 
 ```bash
 # Claude Code, without the plugin (HTTP MCP, scoped to the current project)
-claude mcp add --scope project --transport http pagent "https://pagent.up.railway.app/mcp"
+claude mcp add --scope project --transport http pagent "https://api.pagent.link/mcp"
 ```
 
 For other clients, drop this into whichever `mcp.json` / config file they read:
@@ -140,7 +140,7 @@ For other clients, drop this into whichever `mcp.json` / config file they read:
   "mcpServers": {
     "pagent": {
       "type": "http",
-      "url": "https://pagent.up.railway.app/mcp"
+      "url": "https://api.pagent.link/mcp"
     }
   }
 }
@@ -196,7 +196,7 @@ To bypass in an emergency: `git push --no-verify` (don't make this a habit).
 1. Create a new Railway service from this repo.
 2. Set **Root Directory** to `apps/api` so Railway picks up the railway.json.
 3. Set environment variables (see `apps/api/.env.example`):
-   - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://pagent.vercel.app`). Used in `show_ui` responses. **Required in production.** Boot fails loudly if missing.
+   - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://pagent.link`). Used in `show_ui` responses. **Required in production.** Boot fails loudly if missing.
    - `ALLOWED_ORIGINS` — comma-separated origins allowed to call the API (set to your Vercel URL). **Required in production.** API boot fails loudly if missing.
    - `PORT` — Railway sets this automatically; the server reads it.
    - `PAGE_TTL_MS` — optional; default 30 minutes.
@@ -213,7 +213,7 @@ The `/health` endpoint is configured as the healthcheck path. Returns 200 only w
 1. Create a new Vercel project from this repo.
 2. Set **Root Directory** to `apps/web` so vercel.json is picked up.
 3. Set environment variables (see `apps/web/.env.example`):
-   - `VITE_API_URL` — the Railway URL of `apps/api` (e.g. `https://pagent.up.railway.app`). Inlined at build time, so a redeploy is needed if this changes. **Required for `vite build`** — the build fails loudly if missing or malformed (prevents shipping a bundle that silently calls relative paths).
+   - `VITE_API_URL` — the Railway URL of `apps/api` (e.g. `https://api.pagent.link`). Inlined at build time, so a redeploy is needed if this changes. **Required for `vite build`** — the build fails loudly if missing or malformed (prevents shipping a bundle that silently calls relative paths).
 4. Deploy. Vercel runs `npm install` from the monorepo root (workspace install) and `npm run build:web`, outputting `apps/web/dist/`.
 
 `vite dev` (i.e. `npm run dev`) does not require `VITE_API_URL` — it falls back to Vite's proxy for same-origin paths, so local development works zero-config.
@@ -266,7 +266,7 @@ refactor. The response shape is exactly what is shown above.
 Quick smoke from the terminal:
 
 ```bash
-curl -sf https://pagent.up.railway.app/health
+curl -sf https://api.pagent.link/health
 ```
 
 ### Logs and traces
@@ -299,13 +299,13 @@ in Grafana from the trace and log streams.
 
 ### Common failure modes
 
-| Symptom                                                   | Likely cause                                             | Where to look                                    | First response                                                                                                                           |
-| --------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /health` → 503                                       | Postgres unreachable                                     | Supabase status page; Railway DB env vars        | Check Supabase dashboard. If the DB is up but the env var was rotated, restore `DATABASE_URL` in Railway and redeploy.                   |
-| Spike of 429s on `POST /new`                              | Per-IP rate limit hit (default 30 req / 60 s)            | Railway logs — group by client IP                | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                    |
-| 413 on `POST /new`                                        | Request body > 256 KB                                    | Log field `error: payload_too_large`             | If a real use case, raise `MAX_BODY_BYTES` in `apps/api/app.ts` (code change + redeploy). Otherwise it's spam; ignore.                   |
-| CORS errors in the browser console at `pagent.vercel.app` | `ALLOWED_ORIGINS` does not include the renderer's origin | Browser DevTools → Network → failing preflight   | Add the missing origin to `ALLOWED_ORIGINS` in Railway env and restart the service.                                                      |
-| Boot failure with `ZodError` in Railway logs              | A required env var is missing                            | Railway logs (the process exits before it binds) | Read the Zod validation error — it names the missing field. Usually `PUBLIC_URL` or `ALLOWED_ORIGINS`. Set it in Railway, then redeploy. |
+| Symptom                                             | Likely cause                                             | Where to look                                    | First response                                                                                                                           |
+| --------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health` → 503                                 | Postgres unreachable                                     | Supabase status page; Railway DB env vars        | Check Supabase dashboard. If the DB is up but the env var was rotated, restore `DATABASE_URL` in Railway and redeploy.                   |
+| Spike of 429s on `POST /new`                        | Per-IP rate limit hit (default 30 req / 60 s)            | Railway logs — group by client IP                | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                    |
+| 413 on `POST /new`                                  | Request body > 256 KB                                    | Log field `error: payload_too_large`             | If a real use case, raise `MAX_BODY_BYTES` in `apps/api/app.ts` (code change + redeploy). Otherwise it's spam; ignore.                   |
+| CORS errors in the browser console at `pagent.link` | `ALLOWED_ORIGINS` does not include the renderer's origin | Browser DevTools → Network → failing preflight   | Add the missing origin to `ALLOWED_ORIGINS` in Railway env and restart the service.                                                      |
+| Boot failure with `ZodError` in Railway logs        | A required env var is missing                            | Railway logs (the process exits before it binds) | Read the Zod validation error — it names the missing field. Usually `PUBLIC_URL` or `ALLOWED_ORIGINS`. Set it in Railway, then redeploy. |
 
 ### Rollback
 
@@ -328,7 +328,7 @@ git push --force-with-lease
 Watch CI go green, then verify:
 
 ```bash
-curl -sf https://pagent.up.railway.app/health && echo ok
+curl -sf https://api.pagent.link/health && echo ok
 ```
 
 ### Operational tunables

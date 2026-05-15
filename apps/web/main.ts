@@ -34,7 +34,7 @@ const POLL_BACKOFF_FACTOR = 2;
 const POLL_TIMEOUT_MS = 60_000;
 
 // TODO: make REPORT_EMAIL configurable via VITE_REPORT_EMAIL once self-hosters need it.
-// Until then, abuse reports for pagent.vercel.app route to the project maintainer.
+// Until then, abuse reports for pagent.link route to the project maintainer.
 const REPORT_EMAIL = 'alex@blockful.io';
 
 class AgentUIApp extends SignalWatcher(LitElement) {

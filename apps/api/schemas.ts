@@ -90,7 +90,7 @@ export const envSchema = z.preprocess(
           code: 'custom',
           path: ['ALLOWED_ORIGINS'],
           message:
-            'ALLOWED_ORIGINS is required in production. Set it to a comma-separated list of origins permitted to call the API (e.g. https://pagent.vercel.app).',
+            'ALLOWED_ORIGINS is required in production. Set it to a comma-separated list of origins permitted to call the API (e.g. https://pagent.link).',
         });
       }
       if (cfg.NODE_ENV === 'production' && !cfg.PUBLIC_URL) {
@@ -98,7 +98,7 @@ export const envSchema = z.preprocess(
           code: 'custom',
           path: ['PUBLIC_URL'],
           message:
-            'PUBLIC_URL is required in production. Set it to the renderer URL (e.g. https://pagent.vercel.app).',
+            'PUBLIC_URL is required in production. Set it to the renderer URL (e.g. https://pagent.link).',
         });
       }
     }),

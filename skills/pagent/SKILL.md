@@ -179,4 +179,4 @@ Print the returned URL. Move on — no polling.
 
 ## Setup expectation
 
-These tools talk to the hosted `pagent` REST service at `https://pagent.up.railway.app` by default. Set the `PAGENT_URL` env var to point at a self-hosted instance (e.g. `http://localhost:8787` if you're running the repo locally).
+These tools talk to the hosted `pagent` REST service at `https://api.pagent.link` by default. Set the `PAGENT_URL` env var to point at a self-hosted instance (e.g. `http://localhost:8787` if you're running the repo locally).
