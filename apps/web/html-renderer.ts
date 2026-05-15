@@ -27,7 +27,7 @@ export function buildScaffoldedHtml(sanitizedHtml: string): string {
 <meta http-equiv="Content-Security-Policy" content="${buildIframeCsp()}">
 <meta name="robots" content="noindex,nofollow,noarchive">
 <meta name="referrer" content="no-referrer">
-<base target="_blank" rel="noopener noreferrer nofollow ugc">
+<base target="_blank">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 </head>
 <body>${sanitizedHtml}</body>
@@ -51,6 +51,6 @@ export function createSandboxedIframe(sanitizedHtml: string): HTMLIFrameElement 
   iframe.setAttribute('loading', 'lazy');
   iframe.title = 'Agent-generated content';
   iframe.srcdoc = buildScaffoldedHtml(sanitizedHtml);
-  iframe.style.cssText = 'width:100%;height:100vh;border:0;display:block';
+  iframe.style.cssText = 'flex:1 1 auto;width:100%;border:0;display:block;min-height:0';
   return iframe;
 }

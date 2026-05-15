@@ -33,6 +33,10 @@ const POLL_MAX_MS = 30_000;
 const POLL_BACKOFF_FACTOR = 2;
 const POLL_TIMEOUT_MS = 60_000;
 
+// TODO: make REPORT_EMAIL configurable via VITE_REPORT_EMAIL once self-hosters need it.
+// Until then, abuse reports for pagent.vercel.app route to the project maintainer.
+const REPORT_EMAIL = 'alex@blockful.io';
+
 class AgentUIApp extends SignalWatcher(LitElement) {
   static properties = {
     status: { state: true },
@@ -172,6 +176,12 @@ class AgentUIApp extends SignalWatcher(LitElement) {
     }
     .html-chrome-report:hover {
       color: var(--fg, #1b1b1b);
+    }
+    .html-stack {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      min-height: 0;
     }
   `;
 
@@ -425,18 +435,20 @@ class AgentUIApp extends SignalWatcher(LitElement) {
       </div>`;
     }
     return html`
-      <header class="html-chrome" role="contentinfo">
-        <span class="html-chrome-label">AI-generated content</span>
-        <a
-          class="html-chrome-report"
-          href=${`mailto:alex@blockful.io?subject=${encodeURIComponent(`Abuse report for page ${pageId}`)}&body=${encodeURIComponent(`Page id: ${pageId}\nDescribe the abuse:\n\n`)}`}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Report
-        </a>
-      </header>
-      ${this.htmlIframe()}
+      <div class="html-stack">
+        <header class="html-chrome" role="banner">
+          <span class="html-chrome-label">AI-generated content</span>
+          <a
+            class="html-chrome-report"
+            href=${`mailto:${REPORT_EMAIL}?subject=${encodeURIComponent(`Abuse report for page ${pageId}`)}&body=${encodeURIComponent(`Page id: ${pageId}\nDescribe the abuse:\n\n`)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Report
+          </a>
+        </header>
+        ${this.htmlIframe()}
+      </div>
     `;
   }
 

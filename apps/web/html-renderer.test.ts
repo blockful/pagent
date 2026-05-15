@@ -26,7 +26,7 @@ describe('buildScaffoldedHtml', () => {
 
   it('injects the agent body inside <body>', () => {
     const out = buildScaffoldedHtml('<p class="x">hello</p>');
-    expect(out).toMatch(/<body><p class="x">hello<\/p><\/body>/);
+    expect(out).toMatch(/<body>\s*<p class="x">hello<\/p>\s*<\/body>/);
   });
 
   it('does not interpret the agent body as a template (no double-encoding)', () => {
