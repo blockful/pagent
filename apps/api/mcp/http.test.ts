@@ -161,6 +161,42 @@ describe('SDK client', () => {
     await client.close();
   });
 
+  it('show_html sanitizes the input before storage and returns id/url/expires_at', async () => {
+    const client = await newSdkClient();
+    const result = await client.callTool({
+      name: 'show_html',
+      arguments: { html: '<p>safe</p><script>alert(1)</script>' },
+    });
+    const sc = result.structuredContent as Record<string, unknown>;
+    expect(typeof sc.page_id).toBe('string');
+    expect((sc.page_id as string).length).toBe(32);
+    expect(sc.url).toMatch(/^http:\/\/test\.local\//);
+    expect(typeof sc.expires_at).toBe('number');
+    // db.insertPage receives the sanitized spec — <script> is stripped, the
+    // safe <p> survives.
+    expect(db.insertPage).toHaveBeenCalledTimes(1);
+    const [insertedPage] = (db.insertPage as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(insertedPage.format).toBe('html');
+    expect(typeof insertedPage.spec).toBe('string');
+    expect(insertedPage.spec as string).toContain('<p>safe</p>');
+    expect(insertedPage.spec as string).not.toContain('<script');
+    expect(insertedPage.spec as string).not.toContain('alert(1)');
+    await client.close();
+  });
+
+  it('show_html surfaces an error when sanitization yields empty output', async () => {
+    const client = await newSdkClient();
+    const result = await client.callTool({
+      name: 'show_html',
+      arguments: { html: '<script>x</script>' },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]?.text ?? '';
+    expect(text).toMatch(/stripped/i);
+    expect(db.insertPage).not.toHaveBeenCalled();
+    await client.close();
+  });
+
   it('check_result returns the open state for an existing page', async () => {
     (db.fetchAndAdvanceResult as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       stateAtRead: 'open',

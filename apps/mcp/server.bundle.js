@@ -21101,6 +21101,9 @@ var StdioServerTransport = class {
 // apps/mcp/server.ts
 import { pathToFileURL } from "node:url";
 
+// apps/api/limits.ts
+var HTML_MAX_BYTES = 1e6;
+
 // apps/api/mcp/tools.ts
 var SHOW_UI_DESCRIPTION = [
   "Ask the user a question that needs a structured answer back. Forms, pickers, confirmations, multi-step wizards, surveys, dashboards-as-input.",
@@ -21120,7 +21123,11 @@ var SHOW_HTML_DESCRIPTION = [
   "Show the user a rich visualization: a styled report, dashboard, chart, infographic, comparison table, slide, or other view-only artifact.",
   "Returns { page_id, url, expires_at }. PRINT the URL so the user can open it. The page is one-way \u2014 the user looks at it; nothing comes back.",
   "Do NOT poll check_result for HTML pages; they never produce a result. If you need a follow-up decision, call show_ui after with a fresh spec.",
-  "Constraints (enforced \u2014 violations are stripped or rejected): no <script> tags, no on*= event handlers, no javascript: URLs (JavaScript does not run); no external assets \u2014 inline all CSS as <style>, embed images as data:image/...;base64,... URIs (no Google Fonts, no CDN libraries, no remote <img src=https:>); no <form> submissions (use show_ui for input); no <iframe>, <meta http-equiv=refresh>; 1 MB payload cap."
+  "Constraints (enforced \u2014 violations are stripped or rejected):",
+  "No JavaScript: no <script> tags, no on*= event handlers, no javascript: URLs. JavaScript does not run.",
+  "No external assets: inline all CSS as <style>, embed images as data:image/...;base64,... URIs. No Google Fonts, no CDN libraries, no remote <img src=https:>.",
+  "No forms, iframes, or meta refresh: <form> submissions (use show_ui for input), <iframe>, and <meta http-equiv=refresh> are stripped.",
+  "1 MB payload cap."
 ].join("\n\n");
 var SHOW_HTML_INPUT_DESCRIPTION = [
   "A single UTF-8 HTML string. May be a fragment or a full document; the renderer wraps it in a sandboxed scaffold either way.",
@@ -21171,7 +21178,7 @@ expires_at: ${created.expires_at}`
       title: "Show HTML visualization to the user",
       description: SHOW_HTML_DESCRIPTION,
       inputSchema: {
-        html: external_exports.string().min(1).max(1e6).describe(SHOW_HTML_INPUT_DESCRIPTION)
+        html: external_exports.string().min(1).max(HTML_MAX_BYTES).describe(SHOW_HTML_INPUT_DESCRIPTION)
       }
     },
     async ({ html }) => {
@@ -21213,7 +21220,14 @@ View-only \u2014 do not poll check_result for this page.`
           `Page ${page_id} not found (expired or deleted). Don't retry the same page_id \u2014 ask the user whether to start over, then call show_ui (or show_html) with a fresh spec.`
         );
       }
-      const text = outcome.format === "html" ? `Page ${page_id} is an HTML view (format: html). It does not produce a result \u2014 stop polling. If you need a follow-up decision, call show_ui with a fresh spec.` : outcome.result == null ? `User has not responded yet (state: ${outcome.state}). Call check_result again in a few seconds.` : `User submitted: ${JSON.stringify(outcome.result)}`;
+      let text;
+      if (outcome.format === "html") {
+        text = `Page ${page_id} is an HTML view (format: html). It does not produce a result \u2014 stop polling. If you need a follow-up decision, call show_ui with a fresh spec.`;
+      } else if (outcome.result == null) {
+        text = `User has not responded yet (state: ${outcome.state}). Call check_result again in a few seconds.`;
+      } else {
+        text = `User submitted: ${JSON.stringify(outcome.result)}`;
+      }
       return {
         content: [{ type: "text", text }],
         structuredContent: {

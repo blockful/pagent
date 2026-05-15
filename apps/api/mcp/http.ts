@@ -20,7 +20,6 @@ import { MAX_BODY_BYTES, ALLOWED_ORIGINS } from '../app.ts';
 import { clientKey } from '../client-key.ts';
 import { env } from '../schemas.ts';
 import * as store from '../store.ts';
-import { sanitize } from '../sanitize.ts';
 import { logger } from '../logger.ts';
 import { RateLimiter } from './rate-limit.ts';
 import { registerPagentTools, type PageOps } from './tools.ts';
@@ -82,17 +81,19 @@ export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
       });
     },
     async showHtml(html) {
-      const { output, removedTags, removedAttrs } = sanitize(html);
       // No request context here — log at the module logger level. The REST
-      // POST /new path adds request-scoped fields; this is the MCP path.
-      logger.info(
-        { format: 'html', removedTags, removedAttrs },
-        'sanitized html submission (http mcp)',
+      // POST /new path passes a request-scoped child logger; this is the MCP
+      // path. store.createHtmlPage handles sanitize+log+store in one ritual
+      // and throws SanitizedEmptyError if the input was stripped to empty —
+      // the MCP transport surfaces the throw to the client as an error.
+      return store.createHtmlPage(
+        html,
+        {
+          publicUrl: cfg.publicUrl,
+          pageTtlMs: cfg.pageTtlMs,
+        },
+        logger,
       );
-      return store.createPage(output, 'html', {
-        publicUrl: cfg.publicUrl,
-        pageTtlMs: cfg.pageTtlMs,
-      });
     },
     async checkResult(page_id) {
       return store.advanceResult(page_id);

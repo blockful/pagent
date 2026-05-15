@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { HTML_MAX_BYTES } from './limits.ts';
 
 // --- Page ID -----------------------------------------------------------------
 
@@ -22,7 +23,7 @@ export const newPageBodySchema = z.union([
     .refine((b) => 'spec' in b, { message: "missing 'spec'" }),
   z.object({
     format: z.literal('html'),
-    spec: z.string().min(1).max(1_000_000),
+    spec: z.string().min(1).max(HTML_MAX_BYTES),
   }),
 ]);
 

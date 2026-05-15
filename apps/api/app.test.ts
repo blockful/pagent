@@ -229,6 +229,21 @@ describe('POST /new with format=html', () => {
     expect(body.error).toBe('payload_too_large');
     expect(body.format).toBe('a2ui');
   });
+
+  it('returns 400 sanitized_empty when sanitization yields empty output', async () => {
+    // Pure forbidden tags — DOMPurify strips everything, leaving an empty
+    // string. The handler must reject with a clear error rather than store
+    // an empty HTML page.
+    const res = await app.fetch(
+      req('POST', '/new', { format: 'html', spec: '<script>alert(1)</script>' }),
+    );
+    expect(res.status).toBe(400);
+    const body = await json(res);
+    expect(body.error).toBe('sanitized_empty');
+    expect(body.format).toBe('html');
+    expect(typeof body.message).toBe('string');
+    expect(db.insertPage).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -327,9 +342,7 @@ describe('POST /:id/result', () => {
   it('returns 400 for result body with name: "" (empty name)', async () => {
     // Page must exist (a2ui) so we reach the body-parse stage.
     (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(fakePage());
-    const res = await app.fetch(
-      req('POST', `/${UNKNOWN_ID}/result`, { name: '', surfaceId: 'x' }),
-    );
+    const res = await app.fetch(req('POST', `/${UNKNOWN_ID}/result`, { name: '', surfaceId: 'x' }));
     expect(res.status).toBe(400);
     const body = await json(res);
     expect(body.error).toBe('bad_request');

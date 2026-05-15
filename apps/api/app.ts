@@ -12,8 +12,8 @@ import { trace } from '@opentelemetry/api';
 import * as db from './db.ts';
 import * as store from './store.ts';
 import { clientKey } from './client-key.ts';
+import { HTML_MAX_BYTES } from './limits.ts';
 import { env, pageIdSchema, newPageBodySchema, resultBodySchema } from './schemas.ts';
-import { sanitize } from './sanitize.ts';
 import { logger } from './logger.ts';
 import { metrics, statusClassFor } from './metrics.ts';
 import type { RequestIdVariables } from './request-id.ts';
@@ -39,10 +39,11 @@ export const PUBLIC_URL = env.PUBLIC_URL ?? `http://localhost:${PORT}`;
 export const PAGE_TTL_MS = env.PAGE_TTL_MS;
 export const ALLOWED_ORIGINS = env.ALLOWED_ORIGINS;
 
-// 1 MB is the HTML payload cap (per spec). The historical 256 KB cap for
-// A2UI specs is enforced post-parse in newPageHandler so HTML payloads at the
-// real cap pass through bodyLimit middleware untouched.
-export const MAX_BODY_BYTES = 1_000_000;
+// The absolute body cap matches HTML_MAX_BYTES — the bodyLimit middleware
+// enforces it on the wire body so HTML payloads at the spec'd 1 MB ceiling
+// pass through cleanly. The historical 256 KB cap for A2UI specs is enforced
+// post-parse in newPageHandler. Re-exported for tests / external callers.
+export const MAX_BODY_BYTES = HTML_MAX_BYTES;
 export const A2UI_MAX_SPEC_BYTES = 256_000;
 
 const newPageLimiter = rateLimiter({
@@ -235,17 +236,30 @@ const newPageHandler = async (c: Context) => {
     }
   }
 
-  let storedSpec: unknown = spec;
   if (format === 'html') {
-    const { output, removedTags, removedAttrs } = sanitize(spec as string);
-    getLog(c).info(
-      { format, sanitizer_removed_tags: removedTags, sanitizer_removed_attrs: removedAttrs },
-      'sanitized html submission',
-    );
-    storedSpec = output;
+    try {
+      const created = await store.createHtmlPage(
+        spec as string,
+        { publicUrl: PUBLIC_URL, pageTtlMs: PAGE_TTL_MS },
+        getLog(c),
+      );
+      return c.json(created, 201);
+    } catch (err) {
+      if (err instanceof store.SanitizedEmptyError) {
+        return c.json(
+          {
+            error: 'sanitized_empty',
+            format: 'html',
+            message: err.message,
+          },
+          400,
+        );
+      }
+      throw err;
+    }
   }
 
-  const created = await store.createPage(storedSpec, format, {
+  const created = await store.createPage(spec, format, {
     publicUrl: PUBLIC_URL,
     pageTtlMs: PAGE_TTL_MS,
   });
@@ -275,8 +289,7 @@ const submitResultHandler = async (c: Context) => {
   // Format check happens before body parse to fail fast on HTML pages. HTML
   // pages are view-only — there is no submit pipeline for them.
   const page = await db.getActivePage(idResult.data);
-  if (!page)
-    return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
+  if (!page) return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
   if (page.format === 'html') {
     return c.json(
       {

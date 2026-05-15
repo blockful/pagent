@@ -10,6 +10,7 @@
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { HTML_MAX_BYTES } from '../limits.ts';
 
 // --- Operations contract -----------------------------------------------------
 
@@ -42,11 +43,11 @@ export interface PageOps {
 // skill (Codex, OpenCode, Cursor, Cline, etc.) still get the guidance.
 
 const SHOW_UI_DESCRIPTION = [
-  "Ask the user a question that needs a structured answer back. Forms, pickers, confirmations, multi-step wizards, surveys, dashboards-as-input.",
-  "Returns { page_id, url, expires_at }. PRINT the URL so the user can open it. The agent never sees the user typing — only the final submitted result.",
-  "Each page is single-shot: one spec, one result. For a follow-up question, call show_ui again with a fresh spec — there is no surface-replace mechanism.",
-  "After this call, poll check_result on your own cadence to read the user response (start at 2-3s, back off exponentially up to ~30s; do other useful work between polls rather than blocking).",
-  "If you only want to SHOW something — a report, a chart, an infographic — use show_html instead. show_ui is for input.",
+  'Ask the user a question that needs a structured answer back. Forms, pickers, confirmations, multi-step wizards, surveys, dashboards-as-input.',
+  'Returns { page_id, url, expires_at }. PRINT the URL so the user can open it. The agent never sees the user typing — only the final submitted result.',
+  'Each page is single-shot: one spec, one result. For a follow-up question, call show_ui again with a fresh spec — there is no surface-replace mechanism.',
+  'After this call, poll check_result on your own cadence to read the user response (start at 2-3s, back off exponentially up to ~30s; do other useful work between polls rather than blocking).',
+  'If you only want to SHOW something — a report, a chart, an infographic — use show_html instead. show_ui is for input.',
 ].join('\n\n');
 
 const SHOW_UI_INPUT_DESCRIPTION = [
@@ -58,10 +59,14 @@ const SHOW_UI_INPUT_DESCRIPTION = [
 ].join(' ');
 
 const SHOW_HTML_DESCRIPTION = [
-  "Show the user a rich visualization: a styled report, dashboard, chart, infographic, comparison table, slide, or other view-only artifact.",
-  "Returns { page_id, url, expires_at }. PRINT the URL so the user can open it. The page is one-way — the user looks at it; nothing comes back.",
-  "Do NOT poll check_result for HTML pages; they never produce a result. If you need a follow-up decision, call show_ui after with a fresh spec.",
-  "Constraints (enforced — violations are stripped or rejected): no <script> tags, no on*= event handlers, no javascript: URLs (JavaScript does not run); no external assets — inline all CSS as <style>, embed images as data:image/...;base64,... URIs (no Google Fonts, no CDN libraries, no remote <img src=https:>); no <form> submissions (use show_ui for input); no <iframe>, <meta http-equiv=refresh>; 1 MB payload cap.",
+  'Show the user a rich visualization: a styled report, dashboard, chart, infographic, comparison table, slide, or other view-only artifact.',
+  'Returns { page_id, url, expires_at }. PRINT the URL so the user can open it. The page is one-way — the user looks at it; nothing comes back.',
+  'Do NOT poll check_result for HTML pages; they never produce a result. If you need a follow-up decision, call show_ui after with a fresh spec.',
+  'Constraints (enforced — violations are stripped or rejected):',
+  'No JavaScript: no <script> tags, no on*= event handlers, no javascript: URLs. JavaScript does not run.',
+  'No external assets: inline all CSS as <style>, embed images as data:image/...;base64,... URIs. No Google Fonts, no CDN libraries, no remote <img src=https:>.',
+  'No forms, iframes, or meta refresh: <form> submissions (use show_ui for input), <iframe>, and <meta http-equiv=refresh> are stripped.',
+  '1 MB payload cap.',
 ].join('\n\n');
 
 const SHOW_HTML_INPUT_DESCRIPTION = [
@@ -114,11 +119,7 @@ export function registerPagentTools(server: McpServer, ops: PageOps): void {
       title: 'Show HTML visualization to the user',
       description: SHOW_HTML_DESCRIPTION,
       inputSchema: {
-        html: z
-          .string()
-          .min(1)
-          .max(1_000_000)
-          .describe(SHOW_HTML_INPUT_DESCRIPTION),
+        html: z.string().min(1).max(HTML_MAX_BYTES).describe(SHOW_HTML_INPUT_DESCRIPTION),
       },
     },
     async ({ html }) => {
@@ -158,12 +159,14 @@ export function registerPagentTools(server: McpServer, ops: PageOps): void {
           `Page ${page_id} not found (expired or deleted). Don't retry the same page_id — ask the user whether to start over, then call show_ui (or show_html) with a fresh spec.`,
         );
       }
-      const text =
-        outcome.format === 'html'
-          ? `Page ${page_id} is an HTML view (format: html). It does not produce a result — stop polling. If you need a follow-up decision, call show_ui with a fresh spec.`
-          : outcome.result == null
-            ? `User has not responded yet (state: ${outcome.state}). Call check_result again in a few seconds.`
-            : `User submitted: ${JSON.stringify(outcome.result)}`;
+      let text: string;
+      if (outcome.format === 'html') {
+        text = `Page ${page_id} is an HTML view (format: html). It does not produce a result — stop polling. If you need a follow-up decision, call show_ui with a fresh spec.`;
+      } else if (outcome.result == null) {
+        text = `User has not responded yet (state: ${outcome.state}). Call check_result again in a few seconds.`;
+      } else {
+        text = `User submitted: ${JSON.stringify(outcome.result)}`;
+      }
       return {
         content: [{ type: 'text', text }],
         structuredContent: {
