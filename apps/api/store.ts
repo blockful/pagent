@@ -8,7 +8,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import * as db from './db.ts';
-import type { Page } from './db.ts';
+import type { Page, PageFormat } from './db.ts';
 import { metrics } from './metrics.ts';
 import type { ShowUiResult, CheckResultOutcome } from './mcp/tools.ts';
 
@@ -19,18 +19,23 @@ export type CreatePageConfig = {
 
 export const newId = (): string => randomBytes(16).toString('hex');
 
-export async function createPage(spec: unknown, cfg: CreatePageConfig): Promise<ShowUiResult> {
+export async function createPage(
+  spec: unknown,
+  format: PageFormat,
+  cfg: CreatePageConfig,
+): Promise<ShowUiResult> {
   const now = Date.now();
   const page: Page = {
     id: newId(),
     spec,
+    format,
     state: 'open',
     result: null,
     createdAt: now,
     expiresAt: now + cfg.pageTtlMs,
   };
   await db.insertPage(page);
-  metrics.pagesCreated.add(1);
+  metrics.pagesCreated.add(1, { format });
   return {
     id: page.id,
     url: `${cfg.publicUrl}/${page.id}`,
@@ -41,5 +46,5 @@ export async function createPage(spec: unknown, cfg: CreatePageConfig): Promise<
 export async function advanceResult(id: string): Promise<CheckResultOutcome> {
   const r = await db.fetchAndAdvanceResult(id);
   if (!r) return { kind: 'not_found' };
-  return { kind: 'state', state: r.stateAtRead, result: r.result };
+  return { kind: 'state', state: r.stateAtRead, result: r.result, format: r.format };
 }

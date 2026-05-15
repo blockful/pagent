@@ -75,7 +75,7 @@ function applyBaseHeaders(req: IncomingMessage, res: ServerResponse, requestId: 
 export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
   return {
     async showUi(spec) {
-      return store.createPage(spec, {
+      return store.createPage(spec, 'a2ui', {
         publicUrl: cfg.publicUrl,
         pageTtlMs: cfg.pageTtlMs,
       });

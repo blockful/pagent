@@ -13,6 +13,7 @@ import * as db from './db.ts';
 import * as store from './store.ts';
 import { clientKey } from './client-key.ts';
 import { env, pageIdSchema, newPageBodySchema, resultBodySchema } from './schemas.ts';
+import { sanitize } from './sanitize.ts';
 import { logger } from './logger.ts';
 import { metrics, statusClassFor } from './metrics.ts';
 import type { RequestIdVariables } from './request-id.ts';
@@ -38,7 +39,11 @@ export const PUBLIC_URL = env.PUBLIC_URL ?? `http://localhost:${PORT}`;
 export const PAGE_TTL_MS = env.PAGE_TTL_MS;
 export const ALLOWED_ORIGINS = env.ALLOWED_ORIGINS;
 
-export const MAX_BODY_BYTES = 256 * 1024; // 256 KB
+// 1 MB is the HTML payload cap (per spec). The historical 256 KB cap for
+// A2UI specs is enforced post-parse in newPageHandler so HTML payloads at the
+// real cap pass through bodyLimit middleware untouched.
+export const MAX_BODY_BYTES = 1_000_000;
+export const A2UI_MAX_SPEC_BYTES = 256_000;
 
 const newPageLimiter = rateLimiter({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
@@ -210,7 +215,37 @@ const newPageHandler = async (c: Context) => {
       400,
     );
   }
-  const created = await store.createPage(result.data.spec, {
+  const { format, spec } = result.data;
+
+  if (format === 'a2ui') {
+    // Enforce the historical 256 KB cap on A2UI specs; HTML uses the full 1 MB.
+    // The bodyLimit middleware lets us inspect the parsed value here without
+    // double-paying for the read.
+    const serialized = JSON.stringify(spec ?? null);
+    if (serialized.length > A2UI_MAX_SPEC_BYTES) {
+      return c.json(
+        {
+          error: 'payload_too_large',
+          format: 'a2ui',
+          max_bytes: A2UI_MAX_SPEC_BYTES,
+          message: `A2UI spec exceeds the ${A2UI_MAX_SPEC_BYTES}-byte limit`,
+        },
+        413,
+      );
+    }
+  }
+
+  let storedSpec: unknown = spec;
+  if (format === 'html') {
+    const { output, removedTags, removedAttrs } = sanitize(spec as string);
+    getLog(c).info(
+      { format, removedTags, removedAttrs },
+      'sanitized html submission',
+    );
+    storedSpec = output;
+  }
+
+  const created = await store.createPage(storedSpec, format, {
     publicUrl: PUBLIC_URL,
     pageTtlMs: PAGE_TTL_MS,
   });
@@ -225,6 +260,7 @@ const getPageHandler = async (c: Context) => {
   if (!p) return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
   return c.json({
     spec: p.spec,
+    format: p.format,
     state: p.state,
     result: p.result,
     expires_at: p.expiresAt,
@@ -235,6 +271,23 @@ const submitResultHandler = async (c: Context) => {
   const idResult = pageIdSchema.safeParse(c.req.param('id'));
   if (!idResult.success)
     return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
+
+  // Format check happens before body parse to fail fast on HTML pages. HTML
+  // pages are view-only — there is no submit pipeline for them.
+  const page = await db.getActivePage(idResult.data);
+  if (!page)
+    return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
+  if (page.format !== 'a2ui') {
+    return c.json(
+      {
+        error: 'invalid_for_format',
+        format: page.format,
+        message: `POST /:id/result is not supported for format=${page.format}; HTML pages are view-only`,
+      },
+      400,
+    );
+  }
+
   const raw = await c.req.json().catch(() => null);
   const bodyResult = resultBodySchema.safeParse(raw);
   if (!bodyResult.success) {
@@ -271,7 +324,11 @@ const getResultHandler = async (c: Context) => {
   const outcome = await store.advanceResult(idResult.data);
   if (outcome.kind === 'not_found')
     return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
-  return c.json({ state: outcome.state, result: outcome.result });
+  return c.json({
+    state: outcome.state,
+    result: outcome.result,
+    format: outcome.format,
+  });
 };
 
 // --- Routes ------------------------------------------------------------------

@@ -15,15 +15,21 @@ import { z } from 'zod';
 
 export type PageState = 'open' | 'submitted' | 'received';
 
+export type PageFormat = 'a2ui' | 'html';
+
 export type ShowUiResult = {
   id: string;
   url: string;
   expires_at: number;
 };
 
+// `format` is required on responses from the in-process API path (which knows
+// the format from the DB row) and optional on responses from the stdio
+// adapter (which currently doesn't surface it — see Phase 2). Once the stdio
+// path adds the field, this can be tightened to required.
 export type CheckResultOutcome =
   | { kind: 'not_found' }
-  | { kind: 'state'; state: PageState; result: unknown };
+  | { kind: 'state'; state: PageState; result: unknown; format?: PageFormat };
 
 export interface PageOps {
   showUi(spec: unknown): Promise<ShowUiResult>;
