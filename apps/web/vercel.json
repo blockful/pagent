@@ -4,7 +4,13 @@
   "installCommand": "cd ../.. && npm install",
   "outputDirectory": "dist",
   "framework": null,
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "rewrites": [
+    {
+      "source": "/SKILL.md",
+      "destination": "https://raw.githubusercontent.com/blockful/pagent/main/skills/pagent/SKILL.md"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
   "headers": [
     {
       "source": "/(.*)",

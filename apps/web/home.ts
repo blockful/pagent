@@ -3,7 +3,7 @@ import { LitElement, html, css } from 'lit';
 const AGENT_PROMPT = `Add this MCP and follow the skill so you can render real UI forms for me instead of asking in chat.
 
 MCP:    https://api.pagent.link/mcp
-Skill:  https://raw.githubusercontent.com/blockful/pagent/main/skills/pagent/SKILL.md`;
+Skill:  https://pagent.link/SKILL.md`;
 
 class HomePage extends LitElement {
   static properties = {
