@@ -120,10 +120,14 @@ function postMcp(
 // ---------------------------------------------------------------------------
 
 describe('SDK client', () => {
-  it('lists both tools', async () => {
+  it('lists all three tools', async () => {
     const client = await newSdkClient();
     const result = await client.listTools();
-    expect(result.tools.map((t) => t.name).sort()).toEqual(['check_result', 'show_ui']);
+    expect(result.tools.map((t) => t.name).sort()).toEqual([
+      'check_result',
+      'show_html',
+      'show_ui',
+    ]);
     await client.close();
   });
 
@@ -161,6 +165,7 @@ describe('SDK client', () => {
     (db.fetchAndAdvanceResult as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       stateAtRead: 'open',
       result: null,
+      format: 'a2ui',
     });
     const client = await newSdkClient();
     const result = await client.callTool({
@@ -170,6 +175,7 @@ describe('SDK client', () => {
     const sc = result.structuredContent as Record<string, unknown>;
     expect(sc.state).toBe('open');
     expect(sc.result).toBe(null);
+    expect(sc.format).toBe('a2ui');
     await client.close();
   });
 

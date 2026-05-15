@@ -63,6 +63,15 @@ const restOps: PageOps = {
     if (!res.ok) throw await readError(res, 'show_ui');
     return (await res.json()) as { id: string; url: string; expires_at: number };
   },
+  async showHtml(html) {
+    const res = await fetch(`${SERVICE_URL}/new`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ format: 'html', spec: html }),
+    });
+    if (!res.ok) throw await readError(res, 'show_html');
+    return (await res.json()) as { id: string; url: string; expires_at: number };
+  },
   async checkResult(page_id) {
     const res = await fetch(`${SERVICE_URL}/${page_id}/result`, {
       headers: { accept: 'application/json' },
@@ -72,8 +81,9 @@ const restOps: PageOps = {
     const body = (await res.json()) as {
       state: 'open' | 'submitted' | 'received';
       result: unknown | null;
+      format: 'a2ui' | 'html';
     };
-    return { kind: 'state', state: body.state, result: body.result };
+    return { kind: 'state', state: body.state, result: body.result, format: body.format };
   },
 };
 

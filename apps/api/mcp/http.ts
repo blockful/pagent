@@ -20,6 +20,7 @@ import { MAX_BODY_BYTES, ALLOWED_ORIGINS } from '../app.ts';
 import { clientKey } from '../client-key.ts';
 import { env } from '../schemas.ts';
 import * as store from '../store.ts';
+import { sanitize } from '../sanitize.ts';
 import { logger } from '../logger.ts';
 import { RateLimiter } from './rate-limit.ts';
 import { registerPagentTools, type PageOps } from './tools.ts';
@@ -76,6 +77,19 @@ export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
   return {
     async showUi(spec) {
       return store.createPage(spec, 'a2ui', {
+        publicUrl: cfg.publicUrl,
+        pageTtlMs: cfg.pageTtlMs,
+      });
+    },
+    async showHtml(html) {
+      const { output, removedTags, removedAttrs } = sanitize(html);
+      // No request context here — log at the module logger level. The REST
+      // POST /new path adds request-scoped fields; this is the MCP path.
+      logger.info(
+        { format: 'html', removedTags, removedAttrs },
+        'sanitized html submission (http mcp)',
+      );
+      return store.createPage(output, 'html', {
         publicUrl: cfg.publicUrl,
         pageTtlMs: cfg.pageTtlMs,
       });
