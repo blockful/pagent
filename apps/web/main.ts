@@ -33,10 +33,6 @@ const POLL_MAX_MS = 30_000;
 const POLL_BACKOFF_FACTOR = 2;
 const POLL_TIMEOUT_MS = 60_000;
 
-// TODO: make REPORT_EMAIL configurable via VITE_REPORT_EMAIL once self-hosters need it.
-// Until then, abuse reports for pagent.link route to the project maintainer.
-const REPORT_EMAIL = 'alex@blockful.io';
-
 class AgentUIApp extends SignalWatcher(LitElement) {
   static properties = {
     status: { state: true },
@@ -153,35 +149,6 @@ class AgentUIApp extends SignalWatcher(LitElement) {
     .material-symbols {
       font-family: 'Material Symbols Outlined', sans-serif;
       font-variation-settings: 'FILL' 1;
-    }
-    .html-chrome {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 14px;
-      background: light-dark(rgba(245, 245, 247, 0.95), rgba(20, 24, 32, 0.95));
-      backdrop-filter: blur(8px);
-      border-bottom: 1px solid light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
-      font-size: 13px;
-      color: var(--muted, #777);
-    }
-    .html-chrome-label::before {
-      content: '✦ ';
-      opacity: 0.6;
-    }
-    .html-chrome-report {
-      color: inherit;
-      text-decoration: underline;
-      font-size: 12px;
-    }
-    .html-chrome-report:hover {
-      color: var(--fg, #1b1b1b);
-    }
-    .html-stack {
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      min-height: 0;
     }
   `;
 
@@ -441,22 +408,11 @@ class AgentUIApp extends SignalWatcher(LitElement) {
         <div class="status">Loading…</div>
       </div>`;
     }
-    return html`
-      <div class="html-stack">
-        <header class="html-chrome" role="banner">
-          <span class="html-chrome-label">AI-generated content</span>
-          <a
-            class="html-chrome-report"
-            href=${`mailto:${REPORT_EMAIL}?subject=${encodeURIComponent(`Abuse report for page ${pageId}`)}&body=${encodeURIComponent(`Page id: ${pageId}\nDescribe the abuse:\n\n`)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Report
-          </a>
-        </header>
-        ${this.htmlIframe()}
-      </div>
-    `;
+    // No chrome wrapper — the iframe itself is the page. Defense-in-depth
+    // (sandbox + meta-CSP + server-side sanitize) still applies; the
+    // chrome bar was only a visual disclosure and the product call is to
+    // render HTML pages exactly as if the user opened the .html file.
+    return this.htmlIframe();
   }
 
   // The Lit literal cannot embed a raw iframe element easily because Lit owns

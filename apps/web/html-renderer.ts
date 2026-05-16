@@ -51,6 +51,10 @@ export function createSandboxedIframe(sanitizedHtml: string): HTMLIFrameElement 
   iframe.setAttribute('loading', 'lazy');
   iframe.title = 'Agent-generated content';
   iframe.srcdoc = buildScaffoldedHtml(sanitizedHtml);
-  iframe.style.cssText = 'flex:1 1 auto;width:100%;border:0;display:block;min-height:0';
+  // Full viewport — no chrome wrapper. width:100% honors the parent
+  // (#app.is-html clears the 640 px cap; body has margin:0). height:100vh
+  // pins to the viewport so the iframe content scrolls inside the iframe,
+  // not the outer document.
+  iframe.style.cssText = 'width:100%;height:100vh;border:0;display:block';
   return iframe;
 }
