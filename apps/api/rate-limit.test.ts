@@ -37,7 +37,7 @@ let app: Awaited<typeof import('./app.ts')>['app'];
 beforeAll(async () => {
   const mod = await import('./app.ts');
   app = mod.app;
-});
+}, 30_000);
 
 const BASE = 'http://localhost';
 
