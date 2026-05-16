@@ -120,8 +120,9 @@ export function buildShowcaseSpec() {
     { id: 'div-below', component: 'Text', text: 'Content below the divider.', variant: 'body' },
   ];
 
+  const V = 'v0.9' as const;
   return [
-    { version: 'v0.9', createSurface: { surfaceId: 'showcase', catalogId } },
-    { version: 'v0.9', updateComponents: { surfaceId: 'showcase', components } },
+    { version: V, createSurface: { surfaceId: 'showcase', catalogId } },
+    { version: V, updateComponents: { surfaceId: 'showcase', components } },
   ];
 }

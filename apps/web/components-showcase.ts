@@ -2,7 +2,7 @@ import { SignalWatcher } from '@lit-labs/signals';
 import { LitElement, html, css } from 'lit';
 import * as v0_9 from '@a2ui/web_core/v0_9';
 import { basicCatalog } from '@a2ui/lit/v0_9';
-import { buildShowcaseSpec } from './showcase-spec.js';
+import { buildShowcaseSpec } from './showcase-spec.ts';
 
 class ComponentsShowcase extends SignalWatcher(LitElement) {
   static styles = css`
