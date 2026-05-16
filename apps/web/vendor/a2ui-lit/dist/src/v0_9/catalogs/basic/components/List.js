@@ -71,7 +71,7 @@ let A2uiListElement = (() => {
     :host {
       display: flex;
       overflow: auto;
-      gap: var(--a2ui-list-gap, var(--a2ui-spacing-m, 0.5rem));
+      gap: var(--a2ui-list-gap, 0.75rem);
       padding: var(--a2ui-list-padding, 0);
     }
   `; }

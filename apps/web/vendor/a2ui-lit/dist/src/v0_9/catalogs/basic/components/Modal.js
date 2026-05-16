@@ -84,14 +84,44 @@ let A2uiLitModal = (() => {
       display: inline-block;
     }
     dialog {
-      border: 1px solid var(--a2ui-color-border, #ccc);
-      border-radius: var(--a2ui-modal-border-radius, 8px);
-      padding: var(--a2ui-modal-padding, 24px);
+      border: 1px solid var(--a2ui-color-border, #e4e4e7);
+      border-radius: 0.5rem;
+      padding: 1.5rem;
       min-width: 300px;
+      max-width: 32rem;
+      width: 100%;
       background: var(--a2ui-color-surface, #fff);
+      color: var(--a2ui-color-on-surface, #0a0a0a);
+      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
     }
     dialog::backdrop {
-      background: var(--a2ui-modal-backdrop-bg, rgba(0, 0, 0, 0.5));
+      background: var(--a2ui-modal-backdrop-bg, rgba(0, 0, 0, 0.8));
+    }
+    form[method="dialog"] {
+      text-align: right;
+      margin-bottom: 0.5rem;
+    }
+    form[method="dialog"] button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.75rem;
+      height: 1.75rem;
+      border-radius: 0.25rem;
+      border: none;
+      background: transparent;
+      color: var(--a2ui-color-muted-fg, #71717a);
+      cursor: pointer;
+      font-size: 1rem;
+      opacity: 0.7;
+      transition: opacity 150ms;
+    }
+    form[method="dialog"] button:hover {
+      opacity: 1;
+    }
+    form[method="dialog"] button:focus-visible {
+      outline: 2px solid var(--a2ui-color-ring, var(--a2ui-color-primary, #5154b3));
+      outline-offset: 2px;
     }
   `; }
         createController() {

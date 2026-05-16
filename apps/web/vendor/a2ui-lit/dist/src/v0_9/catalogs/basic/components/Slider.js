@@ -79,8 +79,8 @@ let A2uiSliderElement = (() => {
     :host {
       display: flex;
       flex-direction: column;
-      gap: var(--a2ui-spacing-xs, 0.25rem);
-      margin: var(--a2ui-slider-margin, var(--a2ui-spacing-m));
+      gap: 0.375rem;
+      margin: 0;
     }
     .header {
       display: flex;
@@ -88,16 +88,25 @@ let A2uiSliderElement = (() => {
       align-items: center;
     }
     .header label {
-      font-size: var(
-        --a2ui-slider-label-font-size,
-        var(--a2ui-label-font-size, var(--a2ui-font-size-s))
-      );
-      font-weight: var(--a2ui-slider-label-font-weight, var(--a2ui-label-font-weight, bold));
+      font-size: 0.875rem;
+      font-weight: 500;
+      line-height: 1;
+    }
+    .header span {
+      font-size: 0.75rem;
+      color: var(--a2ui-color-muted-fg, #71717a);
+      font-variant-numeric: tabular-nums;
     }
     input[type='range'] {
       width: 100%;
-      accent-color: var(--a2ui-slider-thumb-color, var(--a2ui-color-primary, #007bff));
-      background: var(--a2ui-slider-track-color, var(--a2ui-color-secondary, #e9ecef));
+      height: 0.5rem;
+      cursor: pointer;
+      accent-color: var(--a2ui-color-primary, #5154b3);
+      border-radius: 9999px;
+    }
+    input[type='range']:focus-visible {
+      outline: 2px solid var(--a2ui-color-ring, var(--a2ui-color-primary, #5154b3));
+      outline-offset: 2px;
     }
   `; }
         createController() {

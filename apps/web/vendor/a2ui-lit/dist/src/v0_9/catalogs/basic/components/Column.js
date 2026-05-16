@@ -92,7 +92,7 @@ let A2uiBasicColumnElement = (() => {
     :host {
       display: flex;
       flex-direction: column;
-      gap: var(--a2ui-column-gap, var(--a2ui-spacing-m));
+      gap: var(--a2ui-column-gap, 0.75rem);
     }
   `; }
         createController() {

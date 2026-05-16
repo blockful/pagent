@@ -18,11 +18,11 @@
         color-scheme: light dark;
         --primary: #5154b3;
         --primary-light: #a0a3ff;
-        --bg: light-dark(#f6f7f8, #101922);
-        --fg: light-dark(#1b1b1b, #e2e2e2);
-        --muted: light-dark(#666, #999);
-        --error: #ba1a1a;
-        --error-bg: light-dark(#ffedea, #2b1413);
+        --bg: light-dark(#f6f7f8, #0a0a0a);
+        --fg: light-dark(#0a0a0a, #fafafa);
+        --muted: light-dark(#737373, #a3a3a3);
+        --error: #ef4444;
+        --error-bg: light-dark(#fef2f2, #2b1413);
         --bb-grid-size: 4px;
         --bb-grid-size-3: calc(var(--bb-grid-size) * 3);
         --bb-grid-size-4: calc(var(--bb-grid-size) * 4);
@@ -39,6 +39,39 @@
             light-dark(rgba(162, 210, 255, 0.3), rgba(20, 184, 166, 0.15)) 0px,
             transparent 50%
           );
+
+        --a2ui-color-primary: var(--primary);
+        --a2ui-color-primary-hover: light-dark(#4345a0, #6668c9);
+        --a2ui-color-on-primary: #fff;
+        --a2ui-color-secondary: light-dark(#f4f4f5, #27272a);
+        --a2ui-color-secondary-hover: light-dark(#e4e4e7, #3f3f46);
+        --a2ui-color-on-secondary: light-dark(#18181b, #fafafa);
+        --a2ui-color-surface: light-dark(#ffffff, #0a0a0a);
+        --a2ui-color-on-surface: light-dark(#0a0a0a, #fafafa);
+        --a2ui-color-border: light-dark(#e4e4e7, #27272a);
+        --a2ui-color-input: light-dark(#ffffff, #0a0a0a);
+        --a2ui-color-on-input: light-dark(#0a0a0a, #fafafa);
+        --a2ui-color-on-background: var(--fg);
+        --a2ui-color-ring: var(--primary);
+        --a2ui-color-muted: light-dark(#f4f4f5, #27272a);
+        --a2ui-color-muted-fg: light-dark(#71717a, #a1a1aa);
+        --a2ui-border-width: 1px;
+        --a2ui-border: 1px solid var(--a2ui-color-border);
+        --a2ui-border-radius: 0.375rem;
+        --a2ui-spacing-xs: 0.25rem;
+        --a2ui-spacing-s: 0.5rem;
+        --a2ui-spacing-m: 0.75rem;
+        --a2ui-spacing-l: 1rem;
+        --a2ui-font-size-xs: 0.75rem;
+        --a2ui-font-size-s: 0.875rem;
+        --a2ui-font-size-m: 1rem;
+        --a2ui-font-size-l: 1.125rem;
+        --a2ui-font-size-xl: 1.25rem;
+        --a2ui-font-size-2xl: 1.875rem;
+        --a2ui-label-font-size: 0.875rem;
+        --a2ui-label-font-weight: 500;
+        --a2ui-line-height-headings: 1.2;
+        --a2ui-line-height-body: 1.5;
       }
       html,
       body {

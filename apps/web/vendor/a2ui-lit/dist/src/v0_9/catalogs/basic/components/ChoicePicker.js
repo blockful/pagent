@@ -88,63 +88,83 @@ let A2uiChoicePickerElement = (() => {
     :host {
       display: flex;
       flex-direction: column;
-      gap: var(--a2ui-choicepicker-gap, var(--a2ui-spacing-xs, 0.25rem));
-      padding: var(--a2ui-choicepicker-padding, 0);
+      gap: 0.5rem;
+      padding: 0;
     }
     .options {
       display: flex;
       flex-direction: column;
-      gap: var(--a2ui-choicepicker-gap, var(--a2ui-spacing-xs, 0.25rem));
+      gap: 0.5rem;
     }
     label {
-      color: var(--a2ui-choicepicker-label-color, inherit);
-      font-size: var(--a2ui-choicepicker-label-font-size, inherit);
+      color: var(--a2ui-color-on-surface, #0a0a0a);
+      font-size: 0.875rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+    }
+    label input[type="radio"],
+    label input[type="checkbox"] {
+      accent-color: var(--a2ui-color-primary, #5154b3);
+      cursor: pointer;
     }
     :host > label {
-      font-size: var(
-        --a2ui-choicepicker-label-font-size,
-        var(--a2ui-label-font-size, var(--a2ui-font-size-s))
-      );
-      font-weight: var(--a2ui-choicepicker-label-font-weight, var(--a2ui-label-font-weight, bold));
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: default;
     }
     .filter-input {
-      background-color: var(--a2ui-color-input, #fff);
-      color: var(--a2ui-color-on-input, #333);
-      border: var(--a2ui-textfield-border, var(--a2ui-border));
-      border-radius: var(--a2ui-textfield-border-radius, var(--a2ui-spacing-m));
-      padding: var(
-        --a2ui-choicepicker-filter-padding,
-        var(--a2ui-spacing-xs, 4px) var(--a2ui-spacing-s, 8px)
-      );
+      background-color: transparent;
+      color: var(--a2ui-color-on-input, #0a0a0a);
+      border: 1px solid var(--a2ui-color-border, #e4e4e7);
+      border-radius: var(--a2ui-border-radius, 0.375rem);
+      padding: 0.5rem 0.75rem;
       font-family: inherit;
+      font-size: 0.875rem;
+      transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .filter-input::placeholder {
+      color: var(--a2ui-color-muted-fg, #71717a);
     }
     .filter-input:focus {
-      outline: none;
-      border-color: var(--a2ui-textfield-color-border-focus, var(--a2ui-color-primary, #17e));
+      outline: 2px solid var(--a2ui-color-ring, var(--a2ui-color-primary, #5154b3));
+      outline-offset: 2px;
+      border-color: var(--a2ui-color-border, #e4e4e7);
     }
     .chips {
       display: flex;
       flex-direction: row;
       flex-wrap: wrap;
-      gap: var(--a2ui-choicepicker-gap, var(--a2ui-spacing-xs, 0.25rem));
+      gap: 0.375rem;
     }
     .chip {
-      padding: var(
-        --a2ui-choicepicker-chip-padding,
-        var(--a2ui-spacing-s, 4px) var(--a2ui-spacing-m, 8px)
-      );
-      border-radius: var(--a2ui-choicepicker-chip-border-radius, 999px);
-      border: 1px solid var(--a2ui-color-border, #ccc);
-      background-color: var(--a2ui-color-surface, #fff);
-      color: var(--a2ui-color-on-surface, inherit);
+      padding: 0.375rem 0.875rem;
+      border-radius: 9999px;
+      border: 1px solid var(--a2ui-color-border, #e4e4e7);
+      background-color: transparent;
+      color: var(--a2ui-color-on-surface, #0a0a0a);
       cursor: pointer;
-      font-size: var(--a2ui-font-size-xs, 0.75rem);
+      font-size: 0.8125rem;
+      font-weight: 500;
       font-family: inherit;
+      line-height: 1.25rem;
+      transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), border-color 150ms cubic-bezier(0.4, 0, 0.2, 1), color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .chip:hover {
+      background-color: var(--a2ui-color-secondary, #f4f4f5);
+    }
+    .chip:focus-visible {
+      outline: 2px solid var(--a2ui-color-ring, var(--a2ui-color-primary, #5154b3));
+      outline-offset: 2px;
     }
     .chip.selected {
-      background-color: var(--a2ui-color-primary, #007bff);
+      background-color: var(--a2ui-color-primary, #5154b3);
       color: var(--a2ui-color-on-primary, #fff);
-      border-color: var(--a2ui-color-primary, #007bff);
+      border-color: var(--a2ui-color-primary, #5154b3);
+    }
+    .chip.selected:hover {
+      background-color: var(--a2ui-color-primary-hover, #4345a0);
     }
   `; }
         #filter_accessor_storage = __runInitializers(this, _filter_initializers, '');

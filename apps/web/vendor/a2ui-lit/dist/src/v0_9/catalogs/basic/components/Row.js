@@ -92,7 +92,8 @@ let A2uiBasicRowElement = (() => {
     :host {
       display: flex;
       flex-direction: row;
-      gap: var(--a2ui-row-gap, var(--a2ui-spacing-m));
+      gap: var(--a2ui-row-gap, 0.75rem);
+      flex-wrap: wrap;
     }
   `; }
         createController() {

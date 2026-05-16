@@ -81,14 +81,14 @@ let A2uiCardElement = (() => {
       display: block;
       border: var(
         --a2ui-card-border,
-        var(--a2ui-border-width, 1px) solid var(--a2ui-color-border, #ccc)
+        1px solid var(--a2ui-color-border, #e4e4e7)
       );
-      border-radius: var(--a2ui-card-border-radius, var(--a2ui-border-radius, 8px));
-      padding: var(--a2ui-card-padding, var(--a2ui-spacing-m, 16px));
+      border-radius: var(--a2ui-card-border-radius, 0.5rem);
+      padding: var(--a2ui-card-padding, 1.5rem);
       background: var(--a2ui-card-background, var(--a2ui-color-surface, #fff));
-      color: var(--a2ui-color-on-surface, #333);
-      box-shadow: var(--a2ui-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1));
-      margin: var(--a2ui-card-margin, var(--a2ui-spacing-m));
+      color: var(--a2ui-color-on-surface, #0a0a0a);
+      box-shadow: var(--a2ui-card-box-shadow, 0 1px 3px 0 rgba(0,0,0,0.06), 0 1px 2px -1px rgba(0,0,0,0.06));
+      margin: var(--a2ui-card-margin, 0);
     }
   `; }
         createController() {

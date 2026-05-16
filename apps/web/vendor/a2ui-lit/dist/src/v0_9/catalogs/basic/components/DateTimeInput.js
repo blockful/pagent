@@ -77,21 +77,30 @@ let A2uiDateTimeInputElement = (() => {
     :host {
       display: flex;
       flex-direction: column;
-      gap: var(--a2ui-spacing-xs, 0.25rem);
+      gap: 0.25rem;
     }
     input {
-      background-color: var(--a2ui-datetimeinput-background, var(--a2ui-color-input, #fff));
-      color: var(--a2ui-datetimeinput-color, var(--a2ui-color-on-input, #333));
-      border: var(--a2ui-datetimeinput-border, var(--a2ui-border));
-      border-radius: var(--a2ui-datetimeinput-border-radius, var(--a2ui-border-radius));
-      padding: var(--a2ui-datetimeinput-padding, var(--a2ui-spacing-s));
+      display: flex;
+      width: 100%;
+      background-color: transparent;
+      color: var(--a2ui-color-on-input, #0a0a0a);
+      border: 1px solid var(--a2ui-color-border, #e4e4e7);
+      border-radius: var(--a2ui-border-radius, 0.375rem);
+      padding: 0.5rem 0.75rem;
+      font-family: inherit;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+      transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+      box-sizing: border-box;
+    }
+    input:focus {
+      outline: 2px solid var(--a2ui-color-ring, var(--a2ui-color-primary, #5154b3));
+      outline-offset: 2px;
+      border-color: var(--a2ui-color-border, #e4e4e7);
     }
     label {
-      font-size: var(
-        --a2ui-datetimeinput-label-font-size,
-        var(--a2ui-label-font-size, var(--a2ui-font-size-s))
-      );
-      font-weight: var(--a2ui-datetimeinput-label-font-weight, var(--a2ui-label-font-weight, bold));
+      font-size: 0.875rem;
+      font-weight: 500;
     }
   `; }
         createController() {
