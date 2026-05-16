@@ -88,27 +88,29 @@ let A2uiBasicButtonElement = (() => {
         static { this.styles = css `
     :host {
       display: inline-block;
-      margin: var(--a2ui-button-margin, var(--a2ui-spacing-m));
+      margin: var(--a2ui-button-margin, 0);
     }
     :where(:host) {
-      --_color-primary: var(--a2ui-color-primary, #17e);
-      --_button-border-radius: var(--a2ui-button-border-radius, var(--a2ui-spacing-s, 0.25rem));
+      --_color-primary: var(--a2ui-color-primary, #18181b);
+      --_button-border-radius: var(--a2ui-button-border-radius, var(--a2ui-border-radius, 0.375rem));
       --_button-padding: var(
         --a2ui-button-padding,
-        var(--a2ui-spacing-m, 0.5rem) var(--a2ui-spacing-l, 1rem)
+        0.5rem 1rem
       );
       --_button-border: var(
         --a2ui-button-border,
-        var(--a2ui-border-width, 1px) solid var(--a2ui-color-border, #ccc)
+        1px solid var(--a2ui-color-border, #e4e4e7)
       );
     }
     .a2ui-button {
       --_a2ui-text-margin: 0;
-      --_a2ui-text-color: var(--a2ui-color-on-secondary, #333);
+      --_a2ui-text-color: var(--a2ui-color-on-secondary, #18181b);
       padding: var(--_button-padding);
       background: var(--a2ui-button-background, var(--a2ui-color-surface, #fff));
-      box-shadow: var(--a2ui-button-box-shadow, none);
-      font-weight: var(--a2ui-button-font-weight, normal);
+      box-shadow: var(--a2ui-button-box-shadow, 0 1px 2px 0 rgba(0,0,0,0.05));
+      font-weight: var(--a2ui-button-font-weight, 500);
+      font-size: 0.875rem;
+      line-height: 1.25rem;
       color: var(--_a2ui-text-color);
       border: var(--_button-border);
       border-radius: var(--_button-border-radius);
@@ -116,22 +118,41 @@ let A2uiBasicButtonElement = (() => {
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      gap: 0.5rem;
+      font-family: inherit;
+      transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), color 150ms cubic-bezier(0.4, 0, 0.2, 1), border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+      white-space: nowrap;
+    }
+    .a2ui-button:focus-visible {
+      outline: 2px solid var(--a2ui-color-ring, var(--_color-primary));
+      outline-offset: 2px;
+    }
+    .a2ui-button:disabled {
+      pointer-events: none;
+      opacity: 0.5;
     }
     .a2ui-button.a2ui-button-primary {
       --_a2ui-text-color: var(--a2ui-color-on-primary, #fff);
       background-color: var(--_color-primary);
       color: var(--_a2ui-text-color);
+      border-color: var(--_color-primary);
+      box-shadow: none;
     }
     .a2ui-button:hover {
-      background-color: var(--a2ui-color-secondary-hover, #ddd);
+      background-color: var(--a2ui-color-secondary-hover, var(--a2ui-color-secondary, #f4f4f5));
     }
     .a2ui-button.a2ui-button-primary:hover {
-      background-color: var(--a2ui-color-primary-hover, #fbd);
+      background-color: var(--a2ui-color-primary-hover, #4345a0);
     }
     .a2ui-button.a2ui-button-borderless {
       background: none;
-      padding: 0;
-      color: var(--_color-primary);
+      border-color: transparent;
+      box-shadow: none;
+      padding: var(--_button-padding);
+      color: var(--a2ui-color-on-surface, #18181b);
+    }
+    .a2ui-button.a2ui-button-borderless:hover {
+      background-color: var(--a2ui-color-secondary, #f4f4f5);
     }
   `; }
         createController() {

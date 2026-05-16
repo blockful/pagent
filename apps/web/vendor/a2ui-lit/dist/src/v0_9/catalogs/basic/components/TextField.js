@@ -90,30 +90,52 @@ let A2uiBasicTextFieldElement = (() => {
       gap: var(--a2ui-spacing-xs, 0.25rem);
     }
     .a2ui-textfield {
-      background-color: var(--a2ui-color-input, #fff);
-      color: var(--a2ui-color-on-input, #333);
-      border: var(--a2ui-textfield-border, var(--a2ui-border));
-      border-radius: var(--a2ui-textfield-border-radius, var(--a2ui-spacing-m));
-      padding: var(--a2ui-textfield-padding, var(--a2ui-spacing-m));
+      display: flex;
+      width: 100%;
+      background-color: transparent;
+      color: var(--a2ui-color-on-input, #0a0a0a);
+      border: 1px solid var(--a2ui-color-border, #e4e4e7);
+      border-radius: var(--a2ui-textfield-border-radius, var(--a2ui-border-radius, 0.375rem));
+      padding: var(--a2ui-textfield-padding, 0.5rem 0.75rem);
       font-family: inherit;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+      transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
+      box-sizing: border-box;
+    }
+    .a2ui-textfield::placeholder {
+      color: var(--a2ui-color-muted-fg, #71717a);
     }
     .a2ui-textfield:focus {
-      outline: none;
-      border-color: var(--a2ui-textfield-color-border-focus, var(--a2ui-color-primary, #17e));
+      outline: 2px solid var(--a2ui-color-ring, var(--a2ui-color-primary, #5154b3));
+      outline-offset: 2px;
+      border-color: var(--a2ui-color-border, #e4e4e7);
     }
     .a2ui-textfield.invalid {
-      border-color: var(--a2ui-textfield-color-error, red);
+      border-color: var(--a2ui-textfield-color-error, var(--error, #ef4444));
+    }
+    .a2ui-textfield.invalid:focus {
+      outline-color: var(--a2ui-textfield-color-error, var(--error, #ef4444));
+    }
+    .a2ui-textfield:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+    textarea.a2ui-textfield {
+      min-height: 5rem;
+      resize: vertical;
     }
     label {
       font-size: var(
         --a2ui-textfield-label-font-size,
-        var(--a2ui-label-font-size, var(--a2ui-font-size-s))
+        var(--a2ui-label-font-size, 0.875rem)
       );
-      font-weight: var(--a2ui-textfield-label-font-weight, var(--a2ui-label-font-weight, bold));
+      font-weight: var(--a2ui-textfield-label-font-weight, var(--a2ui-label-font-weight, 500));
     }
     .error {
-      color: var(--a2ui-textfield-color-error, red);
-      font-size: var(--a2ui-font-size-xs, 0.75rem);
+      color: var(--a2ui-textfield-color-error, var(--error, #ef4444));
+      font-size: 0.75rem;
+      line-height: 1rem;
     }
   `; }
         createController() {

@@ -85,18 +85,17 @@ let A2uiDividerElement = (() => {
       font-size: 0.1px;
       line-height: 0;
       border: 0;
-      border-top: var(
-        --a2ui-divider-border,
-        var(--a2ui-border-width, 1px) solid var(--a2ui-color-border, #ccc)
-      );
-      margin: var(--a2ui-divider-spacing, var(--a2ui-spacing-m, 0.5rem)) 0;
+      border-top: 1px solid var(--a2ui-color-border, #e4e4e7);
+      margin: 0;
       width: 100%;
+      flex-shrink: 0;
     }
     .a2ui-divider.vertical {
-      width: var(--a2ui-border-width, 1px);
-      background-color: var(--a2ui-color-border, #ccc);
+      width: 1px;
+      background-color: var(--a2ui-color-border, #e4e4e7);
       height: 100%;
-      margin: 0 var(--a2ui-divider-spacing, var(--a2ui-spacing-m, 0.5rem));
+      margin: 0;
+      flex-shrink: 0;
     }
   `; }
         createController() {

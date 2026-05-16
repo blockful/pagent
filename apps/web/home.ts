@@ -1,9 +1,9 @@
 import { LitElement, html, css } from 'lit';
 
-const AGENT_PROMPT = `Add this MCP and follow the skill so you can render real UI forms for me instead of asking in chat.
+const AGENT_PROMPT = `Add this MCP and install the Skill at the user level so it auto-loads in every session.
 
 MCP:    https://api.pagent.link/mcp
-Skill:  https://pagent.link/SKILL.md`;
+Skill:  download https://pagent.link/SKILL.md using curl and write it to ~/.claude/skills/pagent/SKILL.md`;
 
 class HomePage extends LitElement {
   static properties = {

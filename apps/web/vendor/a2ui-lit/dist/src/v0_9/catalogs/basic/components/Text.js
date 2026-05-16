@@ -107,23 +107,29 @@ let A2uiBasicTextElement = (() => {
     h4,
     h5 {
       font-family: var(--a2ui-font-family-title, inherit);
-      line-height: var(--a2ui-line-height-headings, 1.2);
+      line-height: 1.2;
+      font-weight: 600;
+      letter-spacing: -0.025em;
     }
     h1 {
-      font-size: var(--a2ui-font-size-2xl);
+      font-size: 1.875rem;
     }
     h2 {
-      font-size: var(--a2ui-font-size-xl);
+      font-size: 1.5rem;
     }
     h3 {
-      font-size: var(--a2ui-font-size-l);
+      font-size: 1.25rem;
     }
     p,
     h4 {
-      font-size: var(--a2ui-font-size-m);
+      font-size: 1rem;
+    }
+    h4 {
+      font-weight: 600;
+      letter-spacing: -0.025em;
     }
     h5 {
-      font-size: var(--a2ui-font-size-s);
+      font-size: 0.875rem;
     }
     p,
     ol,
@@ -131,17 +137,43 @@ let A2uiBasicTextElement = (() => {
     li,
     blockquote,
     .a2ui-caption {
-      line-height: var(--a2ui-line-height-body, 1.5);
+      line-height: 1.625;
+    }
+    p {
+      color: var(--a2ui-color-on-surface, #0a0a0a);
     }
     .a2ui-caption,
     .a2ui-caption > *,
     .a2ui-caption ::slotted(*) {
-      font-size: var(--a2ui-font-size-xs);
-      color: var(--a2ui-text-caption-color, light-dark(#666, #aaa));
+      font-size: 0.75rem;
+      line-height: 1rem;
+      color: var(--a2ui-color-muted-fg, light-dark(#71717a, #a1a1aa));
     }
     a {
-      color: var(--a2ui-text-a-color, inherit);
-      font-weight: var(--a2ui-text-a-font-weight, inherit);
+      color: var(--a2ui-color-primary, #5154b3);
+      font-weight: 500;
+      text-decoration: underline;
+      text-underline-offset: 4px;
+    }
+    a:hover {
+      text-decoration-color: currentColor;
+    }
+    pre {
+      background: var(--a2ui-color-muted, #f4f4f5);
+      border-radius: 0.375rem;
+      padding: 0.75rem 1rem;
+      font-size: 0.875rem;
+      overflow-x: auto;
+    }
+    code {
+      font-size: 0.875rem;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+    }
+    blockquote {
+      border-left: 2px solid var(--a2ui-color-border, #e4e4e7);
+      padding-left: 1rem;
+      color: var(--a2ui-color-muted-fg, #71717a);
+      font-style: italic;
     }
   `; }
         #markdownRenderer_accessor_storage = __runInitializers(this, _markdownRenderer_initializers, void 0);

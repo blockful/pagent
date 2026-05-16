@@ -88,29 +88,47 @@ let A2uiLitTabs = (() => {
       display: block;
     }
     .a2ui-tabs-headers {
-      display: flex;
-      gap: var(--a2ui-spacing-xs, 0.25rem);
-      border-bottom: var(
-        --a2ui-tabs-border,
-        var(--a2ui-border-width, 1px) solid var(--a2ui-color-border, #ccc)
-      );
-      margin-bottom: var(--a2ui-spacing-m, 0.5rem);
+      display: inline-flex;
+      height: 2.5rem;
+      align-items: center;
+      justify-content: center;
+      gap: 0.25rem;
+      border-radius: 0.375rem;
+      background: var(--a2ui-color-muted, #f4f4f5);
+      padding: 0.25rem;
+      margin-bottom: 0.75rem;
     }
     .a2ui-tabs-header {
-      padding: var(--a2ui-spacing-m, 0.5rem) var(--a2ui-spacing-l, 1rem);
-      background: var(--a2ui-tabs-header-background, transparent);
-      color: var(--a2ui-tabs-header-color, var(--a2ui-color-on-surface));
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      white-space: nowrap;
+      padding: 0.375rem 0.75rem;
+      background: transparent;
+      color: var(--a2ui-color-muted-fg, #71717a);
       border: none;
-      border-radius: var(--a2ui-border-radius, 0.25rem) var(--a2ui-border-radius, 0.25rem) 0 0;
+      border-radius: 0.25rem;
       cursor: pointer;
       font-family: inherit;
+      font-size: 0.875rem;
+      font-weight: 500;
+      line-height: 1.25rem;
+      transition: color 150ms cubic-bezier(0.4, 0, 0.2, 1), background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .a2ui-tabs-header:hover {
+      color: var(--a2ui-color-on-surface, #0a0a0a);
+    }
+    .a2ui-tabs-header:focus-visible {
+      outline: 2px solid var(--a2ui-color-ring, var(--a2ui-color-primary, #5154b3));
+      outline-offset: 2px;
     }
     .a2ui-tabs-header.active {
-      background: var(--a2ui-tabs-header-background-active, var(--a2ui-color-secondary, #eee));
-      color: var(--a2ui-tabs-header-color-active, var(--a2ui-color-on-secondary, #333));
+      background: var(--a2ui-color-surface, #fff);
+      color: var(--a2ui-color-on-surface, #0a0a0a);
+      box-shadow: 0 1px 3px 0 rgba(0,0,0,0.06), 0 1px 2px -1px rgba(0,0,0,0.06);
     }
     .a2ui-tabs-content {
-      padding: var(--a2ui-tabs-content-padding, 0 var(--a2ui-spacing-m, 0.5rem));
+      padding: var(--a2ui-tabs-content-padding, 0);
     }
   `; }
         createController() {

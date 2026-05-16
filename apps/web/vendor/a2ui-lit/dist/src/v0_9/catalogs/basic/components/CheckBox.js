@@ -86,36 +86,42 @@ let A2uiCheckBoxElement = (() => {
     .container {
       display: flex;
       flex-direction: column;
-      margin: var(--a2ui-checkbox-margin, var(--a2ui-spacing-m));
+      margin: 0;
     }
     label.a2ui-checkbox {
       display: inline-flex;
       align-items: center;
-      gap: var(--a2ui-checkbox-gap, var(--a2ui-spacing-s, 0.5rem));
-      font-size: var(
-        --a2ui-checkbox-label-font-size,
-        var(--a2ui-label-font-size, var(--a2ui-font-size-s))
-      );
-      font-weight: var(--a2ui-checkbox-label-font-weight, var(--a2ui-label-font-weight, bold));
+      gap: 0.5rem;
+      font-size: 0.875rem;
+      font-weight: var(--a2ui-label-font-weight, 500);
+      line-height: 1;
       cursor: pointer;
+      color: var(--a2ui-color-on-surface, #0a0a0a);
     }
     label.invalid {
-      color: var(--a2ui-checkbox-color-error, red);
+      color: var(--error, #ef4444);
     }
     input {
-      width: var(--a2ui-checkbox-size, 1rem);
-      height: var(--a2ui-checkbox-size, 1rem);
-      background: var(--a2ui-checkbox-background, inherit);
-      border: var(--a2ui-checkbox-border, var(--a2ui-border));
-      border-radius: var(--a2ui-checkbox-border-radius, 4px);
+      width: 1rem;
+      height: 1rem;
+      accent-color: var(--a2ui-color-primary, #5154b3);
+      border: 1px solid var(--a2ui-color-primary, #5154b3);
+      border-radius: 0.25rem;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    input:focus-visible {
+      outline: 2px solid var(--a2ui-color-ring, var(--a2ui-color-primary, #5154b3));
+      outline-offset: 2px;
     }
     input.invalid {
-      outline: 1px solid var(--a2ui-checkbox-color-error, red);
+      outline: 1px solid var(--error, #ef4444);
     }
     .error {
-      color: var(--a2ui-checkbox-color-error, red);
-      font-size: var(--a2ui-font-size-xs, 0.75rem);
-      margin-top: 4px;
+      color: var(--error, #ef4444);
+      font-size: 0.75rem;
+      line-height: 1rem;
+      margin-top: 0.25rem;
     }
   `; }
         createController() {
