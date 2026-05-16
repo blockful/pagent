@@ -93,10 +93,7 @@ let A2uiBasicButtonElement = (() => {
     :where(:host) {
       --_color-primary: var(--a2ui-color-primary, #18181b);
       --_button-border-radius: var(--a2ui-button-border-radius, var(--a2ui-border-radius, 0.375rem));
-      --_button-padding: var(
-        --a2ui-button-padding,
-        0.5rem 1rem
-      );
+      --_button-padding: var(--a2ui-button-padding, 0 1rem);
       --_button-border: var(
         --a2ui-button-border,
         1px solid var(--a2ui-color-border, #e4e4e7)
@@ -105,6 +102,7 @@ let A2uiBasicButtonElement = (() => {
     .a2ui-button {
       --_a2ui-text-margin: 0;
       --_a2ui-text-color: var(--a2ui-color-on-secondary, #18181b);
+      height: 2.25rem;
       padding: var(--_button-padding);
       background: var(--a2ui-button-background, var(--a2ui-color-surface, #fff));
       box-shadow: var(--a2ui-button-box-shadow, 0 1px 2px 0 rgba(0,0,0,0.05));
@@ -120,12 +118,16 @@ let A2uiBasicButtonElement = (() => {
       justify-content: center;
       gap: 0.5rem;
       font-family: inherit;
-      transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), color 150ms cubic-bezier(0.4, 0, 0.2, 1), border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+      transition: background-color 150ms, color 150ms, border-color 150ms, opacity 150ms;
       white-space: nowrap;
+      user-select: none;
     }
     .a2ui-button:focus-visible {
       outline: 2px solid var(--a2ui-color-ring, var(--_color-primary));
       outline-offset: 2px;
+    }
+    .a2ui-button:active {
+      opacity: 0.9;
     }
     .a2ui-button:disabled {
       pointer-events: none;
@@ -135,20 +137,29 @@ let A2uiBasicButtonElement = (() => {
       --_a2ui-text-color: var(--a2ui-color-on-primary, #fff);
       background-color: var(--_color-primary);
       color: var(--_a2ui-text-color);
-      border-color: var(--_color-primary);
-      box-shadow: none;
-    }
-    .a2ui-button:hover {
-      background-color: var(--a2ui-color-secondary-hover, var(--a2ui-color-secondary, #f4f4f5));
-    }
-    .a2ui-button.a2ui-button-primary:hover {
-      background-color: var(--a2ui-color-primary-hover, #4345a0);
-    }
-    .a2ui-button.a2ui-button-borderless {
-      background: none;
       border-color: transparent;
       box-shadow: none;
-      padding: var(--_button-padding);
+    }
+    .a2ui-button.a2ui-button-primary:hover {
+      opacity: 0.9;
+    }
+    .a2ui-button.a2ui-button-default {
+      background: var(--a2ui-color-surface, #fff);
+      border: 1px solid var(--a2ui-color-border, #e4e4e7);
+      color: var(--a2ui-color-on-surface, #18181b);
+      box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
+    }
+    .a2ui-button.a2ui-button-default:hover {
+      background-color: var(--a2ui-color-secondary, #f4f4f5);
+      color: var(--a2ui-color-on-secondary, #18181b);
+    }
+    .a2ui-button:hover {
+      background-color: var(--a2ui-color-secondary, #f4f4f5);
+    }
+    .a2ui-button.a2ui-button-borderless {
+      background: transparent;
+      border-color: transparent;
+      box-shadow: none;
       color: var(--a2ui-color-on-surface, #18181b);
     }
     .a2ui-button.a2ui-button-borderless:hover {

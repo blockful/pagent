@@ -5,6 +5,7 @@ import * as v0_9 from '@a2ui/web_core/v0_9';
 import { basicCatalog } from '@a2ui/lit/v0_9';
 import '@a2ui/lit/v0_9'; // registers <a2ui-surface>
 import './home'; // registers <home-page>
+import './components-showcase'; // registers <components-showcase>
 import { assertCatalogsAllowed } from './spec-guard.js';
 import { nextPollDelay, pollTimeoutMessage } from './poll-backoff.js';
 import { createSandboxedIframe } from './html-renderer.js';
@@ -433,7 +434,10 @@ class AgentUIApp extends SignalWatcher(LitElement) {
 customElements.define('agent-ui-app', AgentUIApp);
 
 const root = document.getElementById('app')!;
-if (!pageId) {
+if (location.pathname === '/_components') {
+  root.classList.add('is-home');
+  root.appendChild(document.createElement('components-showcase'));
+} else if (!pageId) {
   root.classList.add('is-home');
   root.appendChild(document.createElement('home-page'));
 } else {
