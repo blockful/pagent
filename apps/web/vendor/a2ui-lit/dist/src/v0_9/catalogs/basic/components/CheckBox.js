@@ -97,25 +97,58 @@ let A2uiCheckBoxElement = (() => {
       line-height: 1;
       cursor: pointer;
       color: var(--a2ui-color-on-surface, #0a0a0a);
+      user-select: none;
     }
     label.invalid {
       color: var(--error, #ef4444);
     }
     input {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+      pointer-events: none;
+    }
+    .box {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       width: 1rem;
       height: 1rem;
-      accent-color: var(--a2ui-color-primary, #5154b3);
-      border: 1px solid var(--a2ui-color-primary, #5154b3);
-      border-radius: 0.25rem;
-      cursor: pointer;
       flex-shrink: 0;
+      border-radius: 0.25rem;
+      border: 1px solid var(--a2ui-color-primary, #18181b);
+      background: transparent;
+      transition: background-color 150ms, border-color 150ms;
     }
-    input:focus-visible {
+    .box svg {
+      width: 0.875rem;
+      height: 0.875rem;
+      color: var(--a2ui-color-on-primary, #fff);
+      opacity: 0;
+      transition: opacity 100ms;
+    }
+    .box.checked {
+      background-color: var(--a2ui-color-primary, #18181b);
+      border-color: var(--a2ui-color-primary, #18181b);
+    }
+    .box.checked svg {
+      opacity: 1;
+    }
+    input:focus-visible + .box {
       outline: 2px solid var(--a2ui-color-ring, var(--a2ui-color-primary, #5154b3));
       outline-offset: 2px;
     }
-    input.invalid {
-      outline: 1px solid var(--error, #ef4444);
+    .box.invalid {
+      border-color: var(--error, #ef4444);
+    }
+    .box.checked.invalid {
+      background-color: var(--error, #ef4444);
+      border-color: var(--error, #ef4444);
+    }
+    label.a2ui-checkbox:hover .box:not(.checked) {
+      border-color: var(--a2ui-color-primary, #18181b);
+      background-color: light-dark(rgba(0,0,0,0.04), rgba(255,255,255,0.06));
     }
     .error {
       color: var(--error, #ef4444);
@@ -132,17 +165,20 @@ let A2uiCheckBoxElement = (() => {
             if (!props)
                 return nothing;
             const isInvalid = props.isValid === false;
+            const checked = props.value || false;
             const labelClasses = { 'a2ui-checkbox': true, invalid: isInvalid };
-            const inputClasses = { invalid: isInvalid };
+            const boxClasses = { box: true, checked, invalid: isInvalid };
             return html `
       <div class="container">
         <label class=${classMap(labelClasses)}>
           <input
             type="checkbox"
-            class=${classMap(inputClasses)}
-            .checked=${props.value || false}
+            .checked=${checked}
             @change=${(e) => props.setValue?.(e.target.checked)}
           />
+          <span class=${classMap(boxClasses)} aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+          </span>
           ${props.label}
         </label>
         ${isInvalid && props.validationErrors?.length

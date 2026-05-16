@@ -98,13 +98,55 @@ let A2uiSliderElement = (() => {
       font-variant-numeric: tabular-nums;
     }
     input[type='range'] {
+      -webkit-appearance: none;
+      appearance: none;
       width: 100%;
       height: 0.5rem;
       cursor: pointer;
-      accent-color: var(--a2ui-color-primary, #5154b3);
-      border-radius: 9999px;
+      background: transparent;
+      margin: 0.375rem 0;
     }
     input[type='range']:focus-visible {
+      outline: none;
+    }
+    input[type='range']::-webkit-slider-runnable-track {
+      height: 0.5rem;
+      border-radius: 9999px;
+      background: transparent;
+    }
+    input[type='range']::-moz-range-track {
+      height: 0.5rem;
+      border-radius: 9999px;
+      background: var(--a2ui-color-secondary, #f4f4f5);
+    }
+    input[type='range']::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 1.25rem;
+      height: 1.25rem;
+      border-radius: 9999px;
+      background: var(--a2ui-color-surface, #fff);
+      border: 2px solid var(--a2ui-color-primary, #18181b);
+      margin-top: -0.375rem;
+      transition: box-shadow 150ms;
+    }
+    input[type='range']::-moz-range-thumb {
+      width: 1.25rem;
+      height: 1.25rem;
+      border-radius: 9999px;
+      background: var(--a2ui-color-surface, #fff);
+      border: 2px solid var(--a2ui-color-primary, #18181b);
+      transition: box-shadow 150ms;
+    }
+    input[type='range']::-moz-range-progress {
+      height: 0.5rem;
+      border-radius: 9999px;
+      background: var(--a2ui-color-primary, #18181b);
+    }
+    input[type='range']:focus-visible::-webkit-slider-thumb {
+      outline: 2px solid var(--a2ui-color-ring, var(--a2ui-color-primary, #5154b3));
+      outline-offset: 2px;
+    }
+    input[type='range']:focus-visible::-moz-range-thumb {
       outline: 2px solid var(--a2ui-color-ring, var(--a2ui-color-primary, #5154b3));
       outline-offset: 2px;
     }
@@ -116,6 +158,11 @@ let A2uiSliderElement = (() => {
             const props = this.controller.props;
             if (!props)
                 return nothing;
+            const min = props.min ?? 0;
+            const max = props.max ?? 100;
+            const val = props.value ?? 0;
+            const pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
+            const trackStyle = `background: linear-gradient(to right, var(--a2ui-color-primary, #18181b) ${pct}%, var(--a2ui-color-secondary, #f4f4f5) ${pct}%); border-radius: 9999px;`;
             return html `
       <div class="header">
         ${props.label ? html `<label>${props.label}</label>` : nothing}
@@ -123,9 +170,10 @@ let A2uiSliderElement = (() => {
       </div>
       <input
         type="range"
-        min=${props.min ?? 0}
-        max=${props.max ?? 100}
-        .value=${props.value?.toString() || '0'}
+        min=${min}
+        max=${max}
+        .value=${val.toString()}
+        style=${trackStyle}
         @input=${(e) => props.setValue?.(Number(e.target.value))}
       />
     `;

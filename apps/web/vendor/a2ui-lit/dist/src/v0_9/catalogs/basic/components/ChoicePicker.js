@@ -103,11 +103,76 @@ let A2uiChoicePickerElement = (() => {
       align-items: center;
       gap: 0.5rem;
       cursor: pointer;
+      user-select: none;
     }
     label input[type="radio"],
     label input[type="checkbox"] {
-      accent-color: var(--a2ui-color-primary, #5154b3);
-      cursor: pointer;
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+      pointer-events: none;
+    }
+    .radio-dot {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1rem;
+      height: 1rem;
+      flex-shrink: 0;
+      border-radius: 9999px;
+      border: 1px solid var(--a2ui-color-primary, #18181b);
+      background: transparent;
+      transition: border-color 150ms;
+    }
+    .radio-dot::after {
+      content: '';
+      display: block;
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 9999px;
+      background: transparent;
+      transition: background-color 150ms;
+    }
+    .radio-dot.selected {
+      border-color: var(--a2ui-color-primary, #18181b);
+    }
+    .radio-dot.selected::after {
+      background-color: var(--a2ui-color-primary, #18181b);
+    }
+    label:hover .radio-dot:not(.selected) {
+      background-color: light-dark(rgba(0,0,0,0.04), rgba(255,255,255,0.06));
+    }
+    .check-box {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1rem;
+      height: 1rem;
+      flex-shrink: 0;
+      border-radius: 0.25rem;
+      border: 1px solid var(--a2ui-color-primary, #18181b);
+      background: transparent;
+      transition: background-color 150ms, border-color 150ms;
+    }
+    .check-box svg {
+      width: 0.75rem;
+      height: 0.75rem;
+      color: var(--a2ui-color-on-primary, #fff);
+      opacity: 0;
+      transition: opacity 100ms;
+    }
+    .check-box.selected {
+      background-color: var(--a2ui-color-primary, #18181b);
+      border-color: var(--a2ui-color-primary, #18181b);
+    }
+    .check-box.selected svg {
+      opacity: 1;
+    }
+    input:focus-visible + .radio-dot,
+    input:focus-visible + .check-box {
+      outline: 2px solid var(--a2ui-color-ring, var(--a2ui-color-primary, #5154b3));
+      outline-offset: 2px;
     }
     :host > label {
       font-size: 0.875rem;
@@ -226,13 +291,26 @@ let A2uiChoicePickerElement = (() => {
                   ${opt.label}
                 </button>
               `
-                : html `
+                : isMulti ? html `
                 <label>
                   <input
-                    type=${isMulti ? 'checkbox' : 'radio'}
+                    type="checkbox"
                     .checked=${selected.includes(opt.value)}
                     @change=${() => toggle(opt.value)}
                   />
+                  <span class=${classMap({ 'check-box': true, selected: selected.includes(opt.value) })} aria-hidden="true">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                  </span>
+                  ${opt.label}
+                </label>
+              ` : html `
+                <label>
+                  <input
+                    type="radio"
+                    .checked=${selected.includes(opt.value)}
+                    @change=${() => toggle(opt.value)}
+                  />
+                  <span class=${classMap({ 'radio-dot': true, selected: selected.includes(opt.value) })} aria-hidden="true"></span>
                   ${opt.label}
                 </label>
               `)}
