@@ -283,6 +283,13 @@ class AgentUIApp extends SignalWatcher(LitElement) {
         // HTML pages are pre-sanitized server-side. We trust the byte-string
         // and wrap it in a sandboxed iframe. The iframe is opaque-origin and
         // JS-free; nothing it does can reach back into this shell.
+        //
+        // The shell's #app container has a 640px max-width cap (set in
+        // index.html for A2UI/landing layouts). HTML pages are meant to fill
+        // the full viewport like a normal webpage, so we flip the `is-html`
+        // class on #app to clear the cap — same escape hatch the home page
+        // uses via `is-home`.
+        document.getElementById('app')?.classList.add('is-html');
         this.htmlBody = typeof page.spec === 'string' ? page.spec : '';
         this.status = 'live';
         return;
