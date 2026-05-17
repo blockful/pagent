@@ -18,6 +18,7 @@ import { logger } from './logger.ts';
 import { metrics, statusClassFor } from './metrics.ts';
 import type { RequestIdVariables } from './request-id.ts';
 import { requestId, getLog, getRequestId } from './request-id.ts';
+import { authRoutes } from './auth/routes.ts';
 
 // --- OpenAPI spec (loaded once at boot, served from memory) ------------------
 
@@ -200,6 +201,13 @@ app.get(
     theme: 'default',
   }),
 );
+
+// --- Auth / OAuth discovery --------------------------------------------------
+// Mounts the three .well-known endpoints (AS metadata, protected resource
+// metadata, JWKS). Mounted at root so the literal RFC-defined paths land
+// where MCP clients expect them. No auth required.
+
+app.route('/', authRoutes);
 
 // --- Route handlers ----------------------------------------------------------
 
