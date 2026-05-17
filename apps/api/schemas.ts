@@ -54,6 +54,21 @@ const stripEmptyStrings = (raw: unknown): unknown => {
   return out;
 };
 
+// Crypto/SMTP env vars that must be present when REQUIRE_AUTH=true. The auth
+// implementation depends on every one of these; missing any would only crash
+// later at request time. Validate up front so boot fails loudly instead.
+const AUTH_REQUIRED_VARS = [
+  'JWT_SIGNING_KEY',
+  'JWT_PUBLIC_KEY',
+  'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET',
+  'MAGIC_LINK_SECRET',
+  'AUTH_STATE_SECRET',
+  'SMTP_HOST',
+  'SMTP_USER',
+  'SMTP_PASS',
+] as const;
+
 export const envSchema = z.preprocess(
   stripEmptyStrings,
   z
@@ -80,6 +95,27 @@ export const envSchema = z.preprocess(
       LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).optional(),
       RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
       RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+
+      // --- Auth ---------------------------------------------------------------
+      // Boots without these during the grace period; auth endpoints return 503
+      // until configured. When REQUIRE_AUTH=true the superRefine below enforces
+      // every crypto/SMTP var (see AUTH_REQUIRED_VARS).
+      REQUIRE_AUTH: z.coerce.boolean().optional().default(false),
+      JWT_SIGNING_KEY: z.string().optional(),
+      JWT_PUBLIC_KEY: z.string().optional(),
+      GOOGLE_CLIENT_ID: z.string().optional(),
+      GOOGLE_CLIENT_SECRET: z.string().optional(),
+      GOOGLE_REDIRECT_URI: z.string().url().optional(),
+      MAGIC_LINK_SECRET: z.string().optional(),
+      AUTH_STATE_SECRET: z.string().optional(),
+      SESSION_MAX_AGE_DAYS: z.coerce.number().int().positive().optional().default(30),
+      REFRESH_TOKEN_MAX_DAYS: z.coerce.number().int().positive().optional().default(90),
+      ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().optional().default(3600),
+      SMTP_HOST: z.string().optional(),
+      SMTP_PORT: z.coerce.number().int().optional().default(587),
+      SMTP_USER: z.string().optional(),
+      SMTP_PASS: z.string().optional(),
+      SMTP_FROM: z.string().email().optional().default('noreply@pagent.link'),
     })
     .superRefine((cfg, ctx) => {
       if (
@@ -100,6 +136,17 @@ export const envSchema = z.preprocess(
           message:
             'PUBLIC_URL is required in production. Set it to the renderer URL (e.g. https://pagent.link).',
         });
+      }
+      if (cfg.REQUIRE_AUTH) {
+        for (const key of AUTH_REQUIRED_VARS) {
+          if (!cfg[key]) {
+            ctx.addIssue({
+              code: 'custom',
+              path: [key],
+              message: `${key} is required when REQUIRE_AUTH=true. See docs/superpowers/specs/2026-05-17-auth-design.md §9.`,
+            });
+          }
+        }
       }
     }),
 );
