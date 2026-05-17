@@ -100,7 +100,18 @@ export const envSchema = z.preprocess(
       // Boots without these during the grace period; auth endpoints return 503
       // until configured. When REQUIRE_AUTH=true the superRefine below enforces
       // every crypto/SMTP var (see AUTH_REQUIRED_VARS).
-      REQUIRE_AUTH: z.coerce.boolean().optional().default(false),
+      //
+      // NB: process.env values are always strings, so `z.coerce.boolean()` is a
+      // trap — it coerces every non-empty string (including 'false') to true.
+      // Explicit string handling matches the rest of the env layer.
+      REQUIRE_AUTH: z
+        .union([z.boolean(), z.string()])
+        .optional()
+        .transform((v) => {
+          if (typeof v === 'boolean') return v;
+          if (v === undefined) return false;
+          return v === 'true' || v === '1';
+        }),
       JWT_SIGNING_KEY: z.string().optional(),
       JWT_PUBLIC_KEY: z.string().optional(),
       GOOGLE_CLIENT_ID: z.string().optional(),

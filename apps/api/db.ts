@@ -105,6 +105,10 @@ export async function init(connectionString: string): Promise<void> {
   `;
   await sql`create index if not exists sessions_user_id_idx on sessions (user_id)`;
   await sql`create index if not exists sessions_expires_at_idx on sessions (expires_at)`;
+  // Every authenticated request looks up by token_hash; without this index
+  // each request does a sequential scan. UNIQUE also defends against
+  // hash-collision inserts at the storage layer.
+  await sql`create unique index if not exists sessions_token_hash_idx on sessions (token_hash)`;
 
   // OAuth clients — RFC 7591 dynamic registration. MCP clients are public
   // (`token_endpoint_auth_method = 'none'`), so `client_secret` is null.

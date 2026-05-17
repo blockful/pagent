@@ -308,6 +308,14 @@ describe('init() — auth tables', () => {
     );
   });
 
+  it('creates a unique token_hash index on sessions (lookup-path)', () => {
+    // Every authenticated request looks up by token_hash. Without this index
+    // each request does a sequential scan on sessions.
+    expect(flat).toMatch(
+      /create unique index if not exists sessions_token_hash_idx on sessions \(token_hash\)/i,
+    );
+  });
+
   it('creates the oauth_clients table with array columns and defaults', () => {
     expect(flat).toMatch(/create table if not exists oauth_clients \(/i);
     expect(flat).toMatch(/client_id\s+text\s+primary key/i);

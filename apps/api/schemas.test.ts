@@ -307,6 +307,44 @@ describe('envSchema (auth)', () => {
     if (r.success) expect(r.data.REQUIRE_AUTH).toBe(false);
   });
 
+  it('treats REQUIRE_AUTH="false" (string) as false (process.env is always strings)', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'x', REQUIRE_AUTH: 'false' });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.REQUIRE_AUTH).toBe(false);
+  });
+
+  it('treats REQUIRE_AUTH="true" (string) as true and gates auth vars', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'x', REQUIRE_AUTH: 'true' });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.some((i) => i.path.includes('JWT_SIGNING_KEY'))).toBe(true);
+    }
+  });
+
+  it('treats REQUIRE_AUTH="1" (string) as true', () => {
+    const r = envSchema.safeParse({
+      DATABASE_URL: 'x',
+      REQUIRE_AUTH: '1',
+      JWT_SIGNING_KEY: 'k',
+      JWT_PUBLIC_KEY: 'k',
+      GOOGLE_CLIENT_ID: 'k',
+      GOOGLE_CLIENT_SECRET: 'k',
+      MAGIC_LINK_SECRET: 'k',
+      AUTH_STATE_SECRET: 'k',
+      SMTP_HOST: 'k',
+      SMTP_USER: 'k',
+      SMTP_PASS: 'k',
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.REQUIRE_AUTH).toBe(true);
+  });
+
+  it('treats REQUIRE_AUTH="0" (string) as false', () => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'x', REQUIRE_AUTH: '0' });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.REQUIRE_AUTH).toBe(false);
+  });
+
   it('applies session/token/SMTP defaults when unset', () => {
     const r = envSchema.safeParse({ DATABASE_URL: 'x' });
     expect(r.success).toBe(true);
