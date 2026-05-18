@@ -23,13 +23,12 @@ import { env } from '../schemas.ts';
 const STATE_TTL_SECONDS = 15 * 60;
 
 // HS256 is the standard symmetric JWT alg. AUTH_STATE_SECRET is a shared
-// random value (e.g. `openssl rand -base64 32`) — distinct from the magic
-// link secret so a leak of one doesn't compromise the other.
+// random value (e.g. `openssl rand -base64 32`).
 const ALG = 'HS256';
 
-// jose's verify rejects iss/aud mismatches; pinning them ensures a magic-link
-// HMAC token can't be cross-used here even if MAGIC_LINK_SECRET were ever
-// (incorrectly) set to the same value as AUTH_STATE_SECRET.
+// jose's verify rejects iss/aud mismatches; pinning them ensures a token
+// signed under AUTH_STATE_SECRET but intended for a different purpose can't
+// be replayed at the callback endpoint.
 const ISS = 'pagent:oauth:state';
 const AUD = 'pagent:oauth:callback';
 

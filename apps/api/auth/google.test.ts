@@ -12,8 +12,9 @@
  * db layer is mocked the same way clients-store.test.ts does so we can run
  * without a live Postgres.
  */
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, type KeyObject } from 'node:crypto';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { exportJWK, SignJWT } from 'jose';
 
 // Mocking db.ts has to happen BEFORE we import anything that transitively
 // pulls it in (app.ts, routes.ts). Every function the routes touch is
@@ -72,6 +73,17 @@ beforeAll(async () => {
     'http://localhost/oauth/callback/google';
   (env as { AUTH_STATE_SECRET: string | undefined }).AUTH_STATE_SECRET =
     'test-auth-state-secret-very-long-random-value-32-bytes';
+
+  // RSA-2048 key pair used to sign mock Google ID tokens. The matching
+  // public JWK is served by the fetch spy in `mockGoogleTokenResponse`
+  // when the SUT calls Google's JWKS endpoint.
+  googleKeyPair = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+  });
+  const publicJwk = await exportJWK(googleKeyPair.publicKey);
+  googleJwks = {
+    keys: [{ ...publicJwk, alg: 'RS256', use: 'sig', kid: GOOGLE_KID }],
+  };
 });
 
 beforeEach(() => {
@@ -425,31 +437,67 @@ describe('GET /oauth/authorize', () => {
 // ---------------------------------------------------------------------------
 // GET /oauth/callback/google
 // ---------------------------------------------------------------------------
-// Mocks the Google token endpoint via vi.spyOn(global, 'fetch'). The ID
-// token is unsigned (decoded with jose.decodeJwt) so we just need a valid
-// JWT structure — header.payload.signature, all base64url, with the email
-// claim populated.
+// Mocks both the Google token endpoint and the Google JWKS endpoint via
+// vi.spyOn(global, 'fetch'). The ID token is signed with a real RSA key
+// (generated per test run) and the JWKS endpoint serves the matching
+// public key so `jose.jwtVerify` accepts the signature.
 
-function makeFakeIdToken(claims: Record<string, unknown>): string {
-  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
-  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
-  // Signature segment can be anything — decodeJwt doesn't verify.
-  return `${header}.${payload}.fake-signature`;
+const GOOGLE_KID = 'test-google-kid';
+
+// RSA key pair + matching JWKS, populated in the top-level beforeAll. RS256
+// is what Google actually uses for ID tokens; staying on the same alg means
+// the verification path here mirrors production.
+let googleKeyPair: { publicKey: KeyObject; privateKey: KeyObject };
+let googleJwks: { keys: unknown[] };
+
+async function makeSignedIdToken(
+  claims: Record<string, unknown>,
+  overrides: { iss?: string; aud?: string; expSeconds?: number } = {},
+): Promise<string> {
+  const issuer = overrides.iss ?? 'https://accounts.google.com';
+  const audience = overrides.aud ?? 'test-google-client-id';
+  const ttl = overrides.expSeconds ?? 600;
+  return await new SignJWT(claims)
+    .setProtectedHeader({ alg: 'RS256', kid: GOOGLE_KID, typ: 'JWT' })
+    .setIssuer(issuer)
+    .setAudience(audience)
+    .setIssuedAt()
+    .setExpirationTime(`${ttl}s`)
+    .sign(googleKeyPair.privateKey);
 }
 
-function mockGoogleTokenResponse(idTokenClaims: Record<string, unknown>) {
-  const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async () => {
-    return new Response(
-      JSON.stringify({ id_token: makeFakeIdToken(idTokenClaims), access_token: 'g-at' }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } },
-    );
+/**
+ * Install a fetch spy that serves Google's token endpoint (returns the
+ * supplied id_token claims) and Google's JWKS endpoint (returns the public
+ * key matching makeSignedIdToken). Caller MUST restore the spy.
+ */
+async function mockGoogleTokenResponse(
+  idTokenClaims: Record<string, unknown>,
+  options: { iss?: string; aud?: string; expSeconds?: number } = {},
+) {
+  const idToken = await makeSignedIdToken(idTokenClaims, options);
+  const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
+    if (url.includes('oauth2.googleapis.com/token')) {
+      return new Response(
+        JSON.stringify({ id_token: idToken, access_token: 'g-at' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (url.includes('googleapis.com/oauth2/v3/certs')) {
+      return new Response(JSON.stringify(googleJwks), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    throw new Error(`unexpected fetch in test: ${url}`);
   });
   return fetchSpy;
 }
 
 describe('GET /oauth/callback/google', () => {
   it('exchanges the code, upserts the user, and redirects with code+state', async () => {
-    const fetchSpy = mockGoogleTokenResponse({
+    const fetchSpy = await mockGoogleTokenResponse({
       sub: 'google-sub-123',
       email: 'alex@blockful.io',
       name: 'Alex Netto',
@@ -487,11 +535,16 @@ describe('GET /oauth/callback/google', () => {
     expect(parsed.searchParams.get('code')).toBeTruthy();
     expect(parsed.searchParams.get('state')).toBe(VALID_AUTHORIZE.state);
 
-    // Verify the call shape into Google's token endpoint.
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const fetchArgs = fetchSpy.mock.calls[0]!;
-    expect(fetchArgs[0]).toBe('https://oauth2.googleapis.com/token');
-    expect(fetchArgs[1]?.method).toBe('POST');
+    // Verify the call shape into Google's token endpoint. The fetch spy also
+    // serves /oauth2/v3/certs for the JWKS lookup, so we filter calls by URL
+    // rather than asserting an exact total — `createRemoteJWKSet` may or may
+    // not hit the network depending on whether its in-memory cache is warm.
+    const tokenCall = fetchSpy.mock.calls.find((call) => {
+      const url = typeof call[0] === 'string' ? call[0] : (call[0] as URL | Request).toString();
+      return url.includes('oauth2.googleapis.com/token');
+    });
+    expect(tokenCall).toBeDefined();
+    expect(tokenCall![1]?.method).toBe('POST');
 
     // Verify the user upsert was called with Google's profile data.
     expect(db.upsertUser).toHaveBeenCalledWith(
@@ -546,7 +599,7 @@ describe('GET /oauth/callback/google', () => {
   });
 
   it('handle collision: appends numeric suffix when base handle is taken', async () => {
-    mockGoogleTokenResponse({
+    await mockGoogleTokenResponse({
       sub: 'google-sub-456',
       email: 'alex@another.example',
       name: 'Alex Second',

@@ -11,9 +11,10 @@
  * in-process. The DB mock matches app.test.ts so importing app.ts doesn't
  * try to open a real Postgres connection.
  */
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, type KeyObject } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { vi } from 'vitest';
+import { SignJWT, exportJWK } from 'jose';
 
 // Mock db.ts before importing app.ts (which imports it transitively).
 vi.mock('../db.ts', () => ({
@@ -994,25 +995,50 @@ describe('Browser session login flow', () => {
     // Build a state JWT that carries browser_session=true.
     const browserState = await signStateJwt({ browserSession: true });
 
-    // Mock Google's token endpoint to return a usable id_token.
-    const fakeIdToken = (() => {
-      const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString(
-        'base64url',
-      );
-      const payload = Buffer.from(
-        JSON.stringify({
-          sub: 'google-sub-browser',
-          email: 'alex@blockful.io',
-          name: 'Alex Netto',
-        }),
-      ).toString('base64url');
-      return `${header}.${payload}.fake-signature`;
-    })();
-    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async () => {
-      return new Response(JSON.stringify({ id_token: fakeIdToken, access_token: 'g-at' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+    // Sign an ID token with a fresh RSA key, and serve the matching JWKS
+    // from the same fetch spy. provider's exchangeGoogleCode now does real
+    // signature verification (createRemoteJWKSet + jwtVerify), so an
+    // unsigned `header.payload.fake-sig` triple no longer passes.
+    const rsaPair = generateKeyPairSync('rsa', { modulusLength: 2048 }) as {
+      publicKey: KeyObject;
+      privateKey: KeyObject;
+    };
+    const publicJwk = await exportJWK(rsaPair.publicKey);
+    const jwksDoc = {
+      keys: [{ ...publicJwk, alg: 'RS256', use: 'sig', kid: 'browser-test-kid' }],
+    };
+    const signedIdToken = await new SignJWT({
+      sub: 'google-sub-browser',
+      email: 'alex@blockful.io',
+      name: 'Alex Netto',
+    })
+      .setProtectedHeader({ alg: 'RS256', kid: 'browser-test-kid', typ: 'JWT' })
+      .setIssuer('https://accounts.google.com')
+      .setAudience('test-google-client-id')
+      .setIssuedAt()
+      .setExpirationTime('600s')
+      .sign(rsaPair.privateKey);
+
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      if (url.includes('oauth2.googleapis.com/token')) {
+        return new Response(JSON.stringify({ id_token: signedIdToken, access_token: 'g-at' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('googleapis.com/oauth2/v3/certs')) {
+        return new Response(JSON.stringify(jwksDoc), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
     });
 
     vi.mocked(db.getUserByHandle).mockResolvedValue(null);

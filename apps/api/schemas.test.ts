@@ -329,7 +329,6 @@ describe('envSchema (auth)', () => {
       JWT_PUBLIC_KEY: 'k',
       GOOGLE_CLIENT_ID: 'k',
       GOOGLE_CLIENT_SECRET: 'k',
-      MAGIC_LINK_SECRET: 'k',
       AUTH_STATE_SECRET: 'k',
       SMTP_HOST: 'k',
       SMTP_USER: 'k',
@@ -432,13 +431,12 @@ describe('envSchema (auth)', () => {
     expect(r.success).toBe(false);
     if (!r.success) {
       const missingPaths = r.error.issues.map((i) => i.path[0]);
-      // All nine crypto/SMTP vars listed in the spec must appear as issues.
+      // All crypto/SMTP vars listed in the spec must appear as issues.
       for (const key of [
         'JWT_SIGNING_KEY',
         'JWT_PUBLIC_KEY',
         'GOOGLE_CLIENT_ID',
         'GOOGLE_CLIENT_SECRET',
-        'MAGIC_LINK_SECRET',
         'AUTH_STATE_SECRET',
         'SMTP_HOST',
         'SMTP_USER',
@@ -457,7 +455,6 @@ describe('envSchema (auth)', () => {
       JWT_PUBLIC_KEY: 'k2',
       GOOGLE_CLIENT_ID: 'g-id',
       GOOGLE_CLIENT_SECRET: 'g-secret',
-      MAGIC_LINK_SECRET: 'mls',
       AUTH_STATE_SECRET: 'ass',
       SMTP_HOST: 'smtp.example.com',
       SMTP_USER: 'u',
@@ -477,7 +474,6 @@ describe('envSchema (auth)', () => {
       JWT_PUBLIC_KEY: '',
       GOOGLE_CLIENT_ID: '',
       GOOGLE_CLIENT_SECRET: '',
-      MAGIC_LINK_SECRET: '',
       AUTH_STATE_SECRET: '',
       SMTP_HOST: '',
       SMTP_USER: '',

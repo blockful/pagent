@@ -4,6 +4,7 @@ import { getRequestListener } from '@hono/node-server';
 import * as db from './db.ts';
 import { env } from './schemas.ts';
 import { app, PORT, PUBLIC_URL, PAGE_TTL_MS } from './app.ts';
+import { initKeys } from './auth/jwt.ts';
 import { makeMcpHttpHandler } from './mcp/http.ts';
 import { logger } from './logger.ts';
 import { metrics } from './metrics.ts';
@@ -12,6 +13,19 @@ import { shutdownTracing } from './tracing.ts';
 // --- Boot --------------------------------------------------------------------
 
 await db.init(env.DATABASE_URL);
+
+// Initialize the Ed25519 JWT signing keys once at startup, so /oauth/token
+// (signAccessToken) and /.well-known/jwks.json (getJwks) don't throw on
+// first request. The env schema's superRefine guarantees both vars are
+// present when REQUIRE_AUTH=true; the explicit error branch below is
+// defense-in-depth against a future schema refactor that drops the check.
+if (env.JWT_SIGNING_KEY && env.JWT_PUBLIC_KEY) {
+  await initKeys(env.JWT_SIGNING_KEY, env.JWT_PUBLIC_KEY);
+  logger.info('JWT signing keys initialized');
+} else if (env.REQUIRE_AUTH) {
+  logger.error('REQUIRE_AUTH=true but JWT keys missing — refusing to start');
+  process.exit(1);
+}
 
 // Periodically reclaim expired DB rows. Correctness is enforced by
 // WHERE expires_at > now() on every read — this sweep is only for space.

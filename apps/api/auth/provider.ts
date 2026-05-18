@@ -10,7 +10,7 @@
  * Spec: docs/superpowers/specs/2026-05-17-auth-design.md §3.4–§3.6, §5.1–§5.2,
  * §7.1.
  */
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import * as db from '../db.ts';
 import { logger } from '../logger.ts';
 import { env } from '../schemas.ts';
@@ -228,14 +228,17 @@ function generateRefreshToken(): { raw: string; hash: string } {
  *
  * S256 only: pagent advertises S256 as the sole supported method (see AS
  * metadata), so a non-S256 method here is an internal contract violation.
- * The check is constant-time-ish — strict string equality on hex strings is
- * fine because the inputs are not user-secret material (the verifier was
- * delivered over the wire alongside the request).
+ * Uses `crypto.timingSafeEqual` for defense-in-depth — timing leakage on
+ * base64url SHA-256 comparison is largely academic, but the cost is zero
+ * and it keeps every hash comparison on the auth surface constant-time.
  */
 function pkceVerify(codeVerifier: string, codeChallenge: string, method: string): boolean {
   if (method !== 'S256') return false;
   const expected = createHash('sha256').update(codeVerifier).digest('base64url');
-  return expected === codeChallenge;
+  // timingSafeEqual throws when buffer lengths differ — pre-check so we
+  // return false instead of crashing on a malformed challenge.
+  if (expected.length !== codeChallenge.length) return false;
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(codeChallenge));
 }
 
 /**

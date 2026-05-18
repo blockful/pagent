@@ -10,7 +10,7 @@
  * Spec: docs/superpowers/specs/2026-05-17-auth-design.md §4.2 (Google OAuth
  * flow), §3.7 (callback endpoint).
  */
-import { decodeJwt } from 'jose';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { env } from '../schemas.ts';
 
 // Google's documented OAuth 2.0 endpoints. v2/auth is the modern consent
@@ -18,6 +18,24 @@ import { env } from '../schemas.ts';
 // are stable URLs published in Google's OIDC discovery document.
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+// Google's published JWKS for ID-token verification. createRemoteJWKSet
+// caches the keys internally and refreshes on rotation.
+const GOOGLE_JWKS_URL = 'https://www.googleapis.com/oauth2/v3/certs';
+
+// Both spellings are valid `iss` values per Google's OIDC discovery doc.
+// Library-level verification rejects any other issuer.
+const GOOGLE_ISSUERS = ['https://accounts.google.com', 'accounts.google.com'];
+
+// Module-scoped JWKS handle. Lazily initialized on first verify so the test
+// harness can override the fetch boundary before the cache is built — and
+// so module import doesn't perform network I/O.
+let googleJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+function getGoogleJwks(): ReturnType<typeof createRemoteJWKSet> {
+  if (!googleJwks) {
+    googleJwks = createRemoteJWKSet(new URL(GOOGLE_JWKS_URL));
+  }
+  return googleJwks;
+}
 
 // The three OIDC scopes Pagent needs: `openid` makes Google emit an ID token
 // (without it the response is bare oauth without identity claims); `email`
@@ -89,15 +107,16 @@ export function buildGoogleAuthUrl(state: string): string {
 }
 
 /**
- * Exchange Google's authorization code for an ID token, then decode the ID
- * token's claims.
+ * Exchange Google's authorization code for an ID token, then verify it
+ * against Google's JWKS and return the OIDC profile claims.
  *
- * Note on signature verification: in production we'd verify the ID token's
- * signature against Google's JWKS (https://www.googleapis.com/oauth2/v3/certs)
- * via `createRemoteJWKSet`. Here we use `decodeJwt` (unsafe decode, no
- * signature check) because we trust the TLS connection to oauth2.googleapis.com
- * — the token came directly from Google over HTTPS, not via a third party.
- * Production hardening (full JWKS verification) is a follow-up.
+ * Signature verification (not just `decodeJwt`) is required because TLS to
+ * `oauth2.googleapis.com` only attests that *some* JSON came from Google's
+ * token endpoint — not that the embedded ID token wasn't replaced or
+ * tampered with by a misbehaving intermediary. `jwtVerify` against
+ * `createRemoteJWKSet(googleapis.com/oauth2/v3/certs)` enforces signature,
+ * issuer, audience, and `exp`; the JWKS is cached internally so we pay one
+ * remote fetch per key rotation.
  */
 export async function exchangeGoogleCode(code: string): Promise<GoogleProfile> {
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
@@ -134,25 +153,28 @@ export async function exchangeGoogleCode(code: string): Promise<GoogleProfile> {
   if (typeof json.id_token !== 'string' || json.id_token.length === 0) {
     throw new Error('google token response missing id_token');
   }
-  // decodeJwt skips signature verification — see the note above. Returns
-  // the payload as a generic JWTPayload; we narrow it to the OIDC claims we
-  // expect from the `openid email profile` scope set.
-  const claims = decodeJwt(json.id_token);
-  if (typeof claims.sub !== 'string' || claims.sub.length === 0) {
+  // Verify signature against Google's JWKS + issuer/audience. jose rejects
+  // a bad signature, expired token, or wrong iss/aud with a thrown error;
+  // we let it propagate to the route layer where it's serialized as a 400.
+  const { payload } = await jwtVerify(json.id_token, getGoogleJwks(), {
+    issuer: GOOGLE_ISSUERS,
+    audience: env.GOOGLE_CLIENT_ID,
+  });
+  if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
     throw new Error('google id_token missing sub claim');
   }
-  if (typeof claims.email !== 'string' || claims.email.length === 0) {
+  if (typeof payload.email !== 'string' || payload.email.length === 0) {
     throw new Error('google id_token missing email claim');
   }
   const profile: GoogleProfile = {
-    sub: claims.sub,
-    email: claims.email,
+    sub: payload.sub,
+    email: payload.email,
   };
-  if (typeof claims.name === 'string' && claims.name.length > 0) {
-    profile.name = claims.name;
+  if (typeof payload.name === 'string' && payload.name.length > 0) {
+    profile.name = payload.name;
   }
-  if (typeof claims.picture === 'string' && claims.picture.length > 0) {
-    profile.picture = claims.picture;
+  if (typeof payload.picture === 'string' && payload.picture.length > 0) {
+    profile.picture = payload.picture;
   }
   return profile;
 }
