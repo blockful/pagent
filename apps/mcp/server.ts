@@ -26,6 +26,12 @@ const envSchema = z.preprocess(
   },
   z.object({
     PAGENT_URL: z.string().url('PAGENT_URL must be a valid URL').optional(),
+    // Bearer token for authenticated REST calls. The stdio transport has no
+    // auth context of its own — the agent that spawns this process exports
+    // PAGENT_TOKEN, we attach it to every outbound HTTP request, and the API
+    // populates owner_id from the JWT's `sub` claim. Optional so the grace
+    // period (REQUIRE_AUTH=false) keeps working without any env changes.
+    PAGENT_TOKEN: z.string().optional(),
   }),
 );
 
@@ -39,6 +45,17 @@ try {
 
 // Read once at startup; fine for a short-lived stdio process.
 const SERVICE_URL = (env.PAGENT_URL ?? 'https://api.pagent.link').replace(/\/$/, '');
+const PAGENT_TOKEN = env.PAGENT_TOKEN;
+
+/**
+ * Returns the auth headers for every outbound REST call. Empty object when
+ * PAGENT_TOKEN is unset (grace period); a Bearer header otherwise. Computed
+ * once at startup and reused — the token doesn't rotate within a single
+ * stdio process lifetime.
+ */
+function authHeaders(): Record<string, string> {
+  return PAGENT_TOKEN ? { Authorization: `Bearer ${PAGENT_TOKEN}` } : {};
+}
 
 type ApiErrorBody = {
   message?: string;
@@ -53,20 +70,26 @@ async function readError(res: Response, fallbackVerb: string): Promise<Error> {
   return new Error(`${fallbackVerb} failed (${res.status}): ${message}${hint ? `. ${hint}` : ''}`);
 }
 
+// The PageOps `ownerId` parameter is intentionally ignored on the stdio path.
+// Stdio has no authInfo to extract from — the agent's identity flows via
+// PAGENT_TOKEN (Bearer) on every REST call, and the API's middleware turns
+// the JWT `sub` claim into the page's owner_id server-side. Forwarding the
+// header is therefore enough; we don't need to plumb a second copy through
+// the request body.
 const restOps: PageOps = {
-  async showUi(spec) {
+  async showUi(spec, _ownerId) {
     const res = await fetch(`${SERVICE_URL}/new`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ spec }),
     });
     if (!res.ok) throw await readError(res, 'show_ui');
     return (await res.json()) as { id: string; url: string; expires_at: number };
   },
-  async showHtml(html) {
+  async showHtml(html, _ownerId) {
     const res = await fetch(`${SERVICE_URL}/new`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ format: 'html', spec: html }),
     });
     if (!res.ok) throw await readError(res, 'show_html');
@@ -74,7 +97,7 @@ const restOps: PageOps = {
   },
   async checkResult(page_id) {
     const res = await fetch(`${SERVICE_URL}/${page_id}/result`, {
-      headers: { accept: 'application/json' },
+      headers: { accept: 'application/json', ...authHeaders() },
     });
     if (res.status === 404) return { kind: 'not_found' };
     if (!res.ok) throw await readError(res, 'check_result');
