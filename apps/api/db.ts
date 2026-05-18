@@ -446,3 +446,110 @@ export async function getOAuthClientById(clientId: string): Promise<OAuthClientR
     return rows[0] ?? null;
   });
 }
+
+// ---------------------------------------------------------------------------
+// Users (Google + Magic Link upsert)
+// ---------------------------------------------------------------------------
+// Backs the Google OAuth callback's user upsert. `handle` is assigned by the
+// callback after collision-checking via getUserByHandle. Email is the natural
+// key — Google guarantees uniqueness within their tenant, and the
+// `users_email_idx` unique index defends against case-variant duplicates.
+// See spec §2 (Schema) and §3.7 (Google callback flow).
+
+export type UserRow = {
+  id: string;
+  handle: string | null;
+  email: string;
+  name: string | null;
+  avatar_url: string | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+export type UserUpsertInput = {
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+  handle: string;
+};
+
+/**
+ * Insert-or-update a user by email. On first sight, the row is created with
+ * the supplied handle. On subsequent logins, name/avatar_url/updated_at are
+ * refreshed but `handle` is preserved (it's the user-visible identifier and
+ * shouldn't churn just because Google reissued a different display name).
+ *
+ * Returns the canonical row — caller can rely on `id` being the durable user
+ * UUID regardless of whether the row is brand new.
+ */
+export async function upsertUser(input: UserUpsertInput): Promise<UserRow> {
+  return withRetry(async () => {
+    const c = client();
+    const rows = await c<UserRow[]>`
+      insert into users (email, name, avatar_url, handle)
+      values (${input.email}, ${input.name}, ${input.avatarUrl}, ${input.handle})
+      on conflict (email) do update set
+        name = excluded.name,
+        avatar_url = excluded.avatar_url,
+        updated_at = now()
+      returning id, handle, email, name, avatar_url, created_at, updated_at
+    `;
+    return rows[0]!;
+  });
+}
+
+/**
+ * Lookup a user by handle. Used during handle generation to detect collisions
+ * before we attempt the upsert. Case-insensitive via the lower(handle) unique
+ * index, so we match the same comparison the DB constraint enforces.
+ */
+export async function getUserByHandle(handle: string): Promise<UserRow | null> {
+  return withRetry(async () => {
+    const c = client();
+    const rows = await c<UserRow[]>`
+      select id, handle, email, name, avatar_url, created_at, updated_at
+      from users
+      where lower(handle) = lower(${handle})
+    `;
+    return rows[0] ?? null;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Auth codes (PKCE authorization codes)
+// ---------------------------------------------------------------------------
+// 10-minute TTL per spec §3.4. The `code` itself is the PK so a second-use
+// race against `consumed_at` can be detected as a unique-violation. The
+// callback issues these after a successful Google handshake; the token
+// endpoint (Task 06) consumes them.
+
+export type AuthCodeInsert = {
+  code: string;
+  userId: string;
+  clientId: string;
+  redirectUri: string;
+  codeChallenge: string;
+  codeChallengeMethod: string;
+  scope: string | null;
+  expiresAt: Date;
+};
+
+/**
+ * Insert a fresh authorization code. `consumed_at` is left NULL — the token
+ * endpoint flips it on first use. Not wrapped in withRetry: the code is a
+ * unique random value, a retry after success would attempt to insert a
+ * duplicate PK and falsely surface a unique-violation to the caller.
+ */
+export async function insertAuthCode(input: AuthCodeInsert): Promise<void> {
+  const c = client();
+  await c`
+    insert into auth_codes (
+      code, user_id, client_id, redirect_uri,
+      code_challenge, code_challenge_method, scope, expires_at
+    ) values (
+      ${input.code}, ${input.userId}, ${input.clientId}, ${input.redirectUri},
+      ${input.codeChallenge}, ${input.codeChallengeMethod},
+      ${input.scope}, ${input.expiresAt}
+    )
+  `;
+}
