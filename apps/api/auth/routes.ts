@@ -15,10 +15,18 @@ import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { rateLimiter } from 'hono-rate-limiter';
 import { clientKey } from '../client-key.ts';
+import { RateLimiter } from '../mcp/rate-limit.ts';
+import { env } from '../schemas.ts';
 import { InvalidClientMetadataError, getClient, registerClient } from './clients-store.ts';
 import { exchangeGoogleCode } from './google.ts';
 import { getIssuer, getJwks } from './jwt.ts';
 import { renderLoginPage } from './login-page.ts';
+import {
+  InvalidMagicLinkError,
+  SmtpUnavailableError,
+  sendMagicLink,
+  verifyMagicLink,
+} from './magic-link.ts';
 import { createAuthCode, upsertUser } from './provider.ts';
 import { signStateJwt, verifyStateJwt } from './state-jwt.ts';
 
@@ -138,10 +146,7 @@ authRoutes.post('/oauth/register', registerLimiter, async (c) => {
     return c.json(client, 201);
   } catch (err) {
     if (err instanceof InvalidClientMetadataError) {
-      return c.json(
-        { error: 'invalid_client_metadata', error_description: err.description },
-        400,
-      );
+      return c.json({ error: 'invalid_client_metadata', error_description: err.description }, 400);
     }
     // Anything else (e.g. transient DB error after withRetry exhausts) bubbles
     // up to app.onError which surfaces a 500 with a request_id.
@@ -329,5 +334,249 @@ authRoutes.get('/oauth/callback/google', async (c) => {
   const target = new URL(claims.redirectUri);
   target.searchParams.set('code', pagentCode);
   if (claims.state) target.searchParams.set('state', claims.state);
+  return c.redirect(target.toString(), 302);
+});
+
+// --- POST /oauth/magic/send -------------------------------------------------
+// Magic Link send endpoint. Accepts a form-encoded or JSON body with `email`
+// and the signed state JWT from the login page, validates the email format,
+// decodes the state to extract the authorize context, then dispatches an
+// email via nodemailer.
+//
+// Returns 200 with the same response shape regardless of whether the email
+// is registered — anti-enumeration per spec §7.6. The same code path runs
+// for new and returning users (magic link doubles as sign-up).
+//
+// Rate-limited at 5 / email / 15 min per spec §7.3. We use the local
+// `RateLimiter` (not hono-rate-limiter's middleware) because we need to
+// inspect the request body to derive the key, and hono-rate-limiter's
+// keyGenerator runs before the body is parsed — re-reading it from middleware
+// would require buffering.
+
+const MAGIC_SEND_LIMIT = 5;
+const MAGIC_SEND_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+/**
+ * Per-email rate limiter for POST /oauth/magic/send. Exported so tests can
+ * `reset()` it between cases — the module-level state persists across
+ * `app.fetch` calls in the same vitest run, and a test that exhausts the
+ * bucket would leak into the next test if not cleared.
+ */
+export const magicSendLimiter = new RateLimiter(MAGIC_SEND_LIMIT, MAGIC_SEND_WINDOW_MS);
+
+/**
+ * Minimal RFC 5322 email validation — enough to reject obvious malformations
+ * without going full RFC 5322 (which allows e.g. quoted local parts that no
+ * real provider accepts). Mirrors the regex used by HTML5's <input type=
+ * "email"> validation and is good enough for "did the user typo a space in"
+ * level checks. Real validation happens at the SMTP RCPT TO step.
+ */
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Parse the magic/send request body. Accepts both
+ * application/x-www-form-urlencoded (the login-page form's default content
+ * type) and application/json (programmatic callers, tests). Both must include
+ * `email`; `state` is optional (browser-session flow has no MCP client to
+ * resume).
+ */
+async function parseMagicSendBody(
+  c: Context,
+): Promise<{ email?: unknown; state?: unknown } | null> {
+  const contentType = (c.req.header('content-type') ?? '').toLowerCase();
+  if (contentType.includes('application/json')) {
+    return c.req.json().catch(() => null);
+  }
+  // Default to form-encoded — that's what <form method="POST"> emits.
+  try {
+    const form = await c.req.parseBody();
+    return form as { email?: unknown; state?: unknown };
+  } catch {
+    return null;
+  }
+}
+
+authRoutes.post('/oauth/magic/send', async (c) => {
+  // Refuse early if SMTP isn't configured. The error shape mirrors the other
+  // 503s in this file (e.g. openapi_unavailable) so monitoring can group them.
+  if (!env.SMTP_HOST) {
+    return c.json(
+      {
+        error: 'service_unavailable',
+        message:
+          'Magic link sign-in is not configured on this deployment. Please use Google sign-in.',
+      },
+      503,
+    );
+  }
+
+  const body = await parseMagicSendBody(c);
+  if (!body || typeof body !== 'object') {
+    return c.json({ error: 'invalid_request', message: 'Request body is malformed.' }, 400);
+  }
+  const email = typeof body.email === 'string' ? body.email.trim() : '';
+  const stateInput = typeof body.state === 'string' ? body.state : '';
+
+  if (!email || !EMAIL_REGEX.test(email)) {
+    return c.json(
+      { error: 'invalid_request', message: 'Please provide a valid email address.' },
+      400,
+    );
+  }
+  const lowerEmail = email.toLowerCase();
+
+  // Rate-limit keyed on the lowercased email. Per spec §7.3 — keys by email
+  // (not IP) so a single malicious sender from many IPs still gets throttled,
+  // and so a victim's email can't be spammed from multiple IPs.
+  const rl = magicSendLimiter.check(lowerEmail);
+  if (!rl.allowed) {
+    c.header('Retry-After', String(rl.secondsUntilReset));
+    return c.json(
+      {
+        error: 'rate_limited',
+        retry_after_seconds: rl.secondsUntilReset,
+        message: `Too many magic link requests for this email; retry after ${rl.secondsUntilReset} seconds`,
+      },
+      429,
+    );
+  }
+
+  // Decode the signed state JWT to recover the authorize context. The state
+  // is the same JWT the GET /oauth/authorize page embedded in the form's
+  // hidden field. A missing / invalid state still produces a magic link, but
+  // with an empty context — the verify step will then redirect to the
+  // configured fallback (or render an error if there's no redirect_uri).
+  let authorizeContext: Parameters<typeof sendMagicLink>[1] = {};
+  if (stateInput) {
+    try {
+      const claims = await verifyStateJwt(stateInput);
+      authorizeContext = {
+        clientId: claims.clientId,
+        redirectUri: claims.redirectUri,
+        codeChallenge: claims.codeChallenge,
+        // Re-emit the method only when a challenge is present — the auth-code
+        // insert requires both or neither.
+        codeChallengeMethod: claims.codeChallenge ? 'S256' : undefined,
+        scope: claims.scope,
+        state: claims.state,
+        browserSession: claims.browserSession,
+      };
+    } catch {
+      // Invalid / expired state — proceed with empty context. The verify
+      // endpoint will surface a clear error when the user clicks the link.
+      // We deliberately don't 400 here because that would distinguish "valid
+      // state but unregistered email" from "invalid state" via response
+      // shape — small enumeration leak.
+    }
+  }
+
+  // Send. Any infrastructure failure (SMTP timeout, DB blip) bubbles up to
+  // the global error handler. We don't try/catch here because returning 200
+  // on a failed send would silently swallow the problem — the user would
+  // never get an email and have no error to show.
+  try {
+    await sendMagicLink(lowerEmail, authorizeContext);
+  } catch (err) {
+    if (err instanceof SmtpUnavailableError) {
+      // Should already have been caught by the env.SMTP_HOST check above,
+      // but defensively return 503 here too in case env mutates between
+      // checks (e.g. in tests).
+      return c.json(
+        {
+          error: 'service_unavailable',
+          message:
+            'Magic link sign-in is not configured on this deployment. Please use Google sign-in.',
+        },
+        503,
+      );
+    }
+    throw err;
+  }
+
+  return c.json({
+    ok: true,
+    message: 'Check your email for a sign-in link. The link expires in 15 minutes.',
+  });
+});
+
+// --- GET /oauth/magic -------------------------------------------------------
+// Magic Link verify endpoint. The user lands here after clicking the link in
+// their email. We:
+//   1. Look up the token (atomically consuming it).
+//   2. Upsert the user by email — creates a row on first-time login.
+//   3. Mint a Pagent auth code bound to the original PKCE challenge.
+//   4. 302 to the MCP client's redirect_uri with code + state.
+//
+// Token reuse, expiry, and tampering all surface as the same error page so
+// we don't leak verification state. This endpoint is intentionally not rate-
+// limited per IP: the 32-byte random token is already brute-force-resistant,
+// and a legitimate user clicking the link twice (e.g. via a link prefetcher)
+// should see an error, not a 429.
+
+authRoutes.get('/oauth/magic', async (c) => {
+  const token = c.req.query('token');
+  if (typeof token !== 'string' || token.length === 0) {
+    return renderError(c, 'Magic link is missing the token parameter.');
+  }
+
+  let consumed: Awaited<ReturnType<typeof verifyMagicLink>>;
+  try {
+    consumed = await verifyMagicLink(token);
+  } catch (err) {
+    if (err instanceof InvalidMagicLinkError) {
+      return renderError(
+        c,
+        'This sign-in link has expired or has already been used. Please request a new one.',
+      );
+    }
+    throw err;
+  }
+
+  // Upsert the user. The magic link flow doubles as sign-up so this is the
+  // first time we see the email for brand-new users.
+  const user = await upsertUser({ email: consumed.email });
+
+  const ctx = consumed.authorizeContext;
+
+  // Without a redirect_uri there's nowhere to send the user. The
+  // browser-session flow (introduced in Task 09) will hit this path with
+  // `browserSession: true` and set a cookie instead — for now surface a
+  // clean error so deployment doesn't silently break that path.
+  if (!ctx.redirectUri) {
+    if (ctx.browserSession) {
+      return renderError(c, 'Browser session login is not yet supported.');
+    }
+    return renderError(
+      c,
+      'This sign-in link is not bound to an OAuth flow. Please restart sign-in from your client.',
+    );
+  }
+
+  if (!ctx.clientId || !ctx.codeChallenge) {
+    return renderError(
+      c,
+      'Magic link is missing PKCE binding. Please restart sign-in from your client.',
+    );
+  }
+
+  // Re-validate the client + redirect_uri at consume time — the registration
+  // could have changed in the 15 minutes since the email was sent.
+  const client = await getClient(ctx.clientId);
+  if (!client || !client.redirect_uris.includes(ctx.redirectUri)) {
+    return renderError(c, 'Client registration changed during sign-in. Please restart.');
+  }
+
+  const pagentCode = await createAuthCode(
+    user.id,
+    ctx.clientId,
+    ctx.redirectUri,
+    ctx.codeChallenge,
+    ctx.codeChallengeMethod ?? 'S256',
+    ctx.scope ?? null,
+  );
+
+  const target = new URL(ctx.redirectUri);
+  target.searchParams.set('code', pagentCode);
+  if (ctx.state) target.searchParams.set('state', ctx.state);
   return c.redirect(target.toString(), 302);
 });
