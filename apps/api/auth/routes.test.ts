@@ -28,6 +28,19 @@ vi.mock('../db.ts', () => ({
   ping: vi.fn().mockResolvedValue(undefined),
   insertOAuthClient: vi.fn(),
   getOAuthClientById: vi.fn(),
+  // Token endpoint helpers (Task 07) — used by /oauth/token and /oauth/revoke.
+  // Stubbed here so the existing well-known / register tests don't break when
+  // the routes file imports provider's new functions.
+  upsertUser: vi.fn(),
+  getUserByHandle: vi.fn(),
+  getUserById: vi.fn(),
+  insertAuthCode: vi.fn(),
+  consumeAuthCode: vi.fn(),
+  getAuthCodeForReplay: vi.fn(),
+  insertRefreshToken: vi.fn(),
+  getRefreshTokenByHash: vi.fn(),
+  revokeRefreshToken: vi.fn(),
+  revokeAllRefreshTokensForFamily: vi.fn(),
 }));
 
 import * as db from '../db.ts';
@@ -301,9 +314,7 @@ describe('POST /oauth/register', () => {
   });
 
   it('returns 201 with OAuthClientInformationFull on valid registration', async () => {
-    vi.mocked(db.insertOAuthClient).mockImplementation(async (input) =>
-      registerRow({ ...input }),
-    );
+    vi.mocked(db.insertOAuthClient).mockImplementation(async (input) => registerRow({ ...input }));
 
     const res = await app.fetch(
       postRegister(
@@ -351,9 +362,7 @@ describe('POST /oauth/register', () => {
   });
 
   it('returns 400 invalid_client_metadata when redirect_uris has invalid URI', async () => {
-    const res = await app.fetch(
-      postRegister({ redirect_uris: ['not a uri'] }, '10.0.0.4'),
-    );
+    const res = await app.fetch(postRegister({ redirect_uris: ['not a uri'] }, '10.0.0.4'));
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as Record<string, unknown>;
@@ -370,15 +379,10 @@ describe('POST /oauth/register', () => {
   });
 
   it('applies defaults when grant_types/response_types are omitted', async () => {
-    vi.mocked(db.insertOAuthClient).mockImplementation(async (input) =>
-      registerRow({ ...input }),
-    );
+    vi.mocked(db.insertOAuthClient).mockImplementation(async (input) => registerRow({ ...input }));
 
     const res = await app.fetch(
-      postRegister(
-        { redirect_uris: ['http://localhost:9876/callback'] },
-        '10.0.0.6',
-      ),
+      postRegister({ redirect_uris: ['http://localhost:9876/callback'] }, '10.0.0.6'),
     );
 
     expect(res.status).toBe(201);
@@ -393,16 +397,11 @@ describe('POST /oauth/register', () => {
     // IP so the bucket is empty when this test runs (other tests above used
     // different IPs).
     const ip = '203.0.113.1';
-    vi.mocked(db.insertOAuthClient).mockImplementation(async (input) =>
-      registerRow({ ...input }),
-    );
+    vi.mocked(db.insertOAuthClient).mockImplementation(async (input) => registerRow({ ...input }));
 
     for (let i = 0; i < 10; i++) {
       const res = await app.fetch(
-        postRegister(
-          { redirect_uris: ['http://localhost:9876/callback'] },
-          ip,
-        ),
+        postRegister({ redirect_uris: ['http://localhost:9876/callback'] }, ip),
       );
       expect(res.status, `request ${i + 1} of 10 should be 201`).toBe(201);
     }
@@ -414,17 +413,342 @@ describe('POST /oauth/register', () => {
     const body = (await limited.json()) as Record<string, unknown>;
     expect(body.error).toBe('rate_limited');
     expect(typeof body.retry_after_seconds).toBe('number');
-    expect(limited.headers.get('Retry-After')).toBe(
-      String(body.retry_after_seconds),
-    );
+    expect(limited.headers.get('Retry-After')).toBe(String(body.retry_after_seconds));
 
     // Different IP still works.
     const other = await app.fetch(
-      postRegister(
-        { redirect_uris: ['http://localhost:9876/callback'] },
-        '203.0.113.2',
-      ),
+      postRegister({ redirect_uris: ['http://localhost:9876/callback'] }, '203.0.113.2'),
     );
     expect(other.status).toBe(201);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /oauth/token + POST /oauth/revoke (Task 07)
+// ---------------------------------------------------------------------------
+// Integration tests through the Hono app. Validates body-parsing strictness
+// (must be form-encoded), error-response shape (OAuth 2.1 `{ error,
+// error_description }`), and the 20/IP/min rate limit. Per-grant happy paths
+// are covered exhaustively in provider.test.ts — these focus on the route
+// layer (body parsing, content-type enforcement, error mapping, rate limit).
+
+import { createHash } from 'node:crypto';
+
+const TOKEN_CLIENT_ID = 'b1c2d3e4-f5a6-7890-1234-bcdef0123456';
+const TOKEN_REDIRECT_URI = 'http://localhost:9876/cb';
+
+const TOKEN_CLIENT_ROW = {
+  client_id: TOKEN_CLIENT_ID,
+  client_secret: null,
+  client_secret_expires_at: null,
+  client_id_issued_at: NOW,
+  client_name: null,
+  client_uri: null,
+  logo_uri: null,
+  redirect_uris: [TOKEN_REDIRECT_URI],
+  grant_types: ['authorization_code', 'refresh_token'],
+  response_types: ['code'],
+  scope: null,
+  token_endpoint_auth_method: 'none',
+};
+
+const TOKEN_USER_ROW = {
+  id: '22222222-3333-4444-5555-666666666666',
+  handle: 'tester',
+  email: 'tester@example.com',
+  name: null,
+  avatar_url: null,
+  created_at: NOW,
+  updated_at: NOW,
+};
+
+/** Build a POST /oauth/token request with form-encoded body. */
+function postToken(
+  body: Record<string, string>,
+  opts: { contentType?: 'form' | 'json'; xForwardedFor?: string } = {},
+): Request {
+  const headers: Record<string, string> = {};
+  let serialized: string;
+  if (opts.contentType === 'json') {
+    headers['Content-Type'] = 'application/json';
+    serialized = JSON.stringify(body);
+  } else {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    serialized = new URLSearchParams(body).toString();
+  }
+  if (opts.xForwardedFor !== undefined) headers['x-forwarded-for'] = opts.xForwardedFor;
+  return new Request(`${BASE}/oauth/token`, {
+    method: 'POST',
+    headers,
+    body: serialized,
+  });
+}
+
+/** Same shape as postToken but for /oauth/revoke. */
+function postRevoke(
+  body: Record<string, string>,
+  opts: { contentType?: 'form' | 'json'; xForwardedFor?: string } = {},
+): Request {
+  const headers: Record<string, string> = {};
+  let serialized: string;
+  if (opts.contentType === 'json') {
+    headers['Content-Type'] = 'application/json';
+    serialized = JSON.stringify(body);
+  } else {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    serialized = new URLSearchParams(body).toString();
+  }
+  if (opts.xForwardedFor !== undefined) headers['x-forwarded-for'] = opts.xForwardedFor;
+  return new Request(`${BASE}/oauth/revoke`, {
+    method: 'POST',
+    headers,
+    body: serialized,
+  });
+}
+
+function pkceS256(verifier: string): string {
+  return createHash('sha256').update(verifier).digest('base64url');
+}
+
+describe('POST /oauth/token', () => {
+  beforeEach(() => {
+    vi.mocked(db.getOAuthClientById).mockReset();
+    vi.mocked(db.consumeAuthCode).mockReset();
+    vi.mocked(db.getAuthCodeForReplay).mockReset();
+    vi.mocked(db.getUserById).mockReset();
+    vi.mocked(db.insertRefreshToken).mockReset();
+    vi.mocked(db.getRefreshTokenByHash).mockReset();
+    vi.mocked(db.revokeRefreshToken).mockReset();
+    vi.mocked(db.revokeAllRefreshTokensForFamily).mockReset();
+  });
+
+  it('exchanges authorization_code grant for tokens (form-encoded body)', async () => {
+    const verifier = 'integration-test-verifier-with-enough-entropy';
+    const challenge = pkceS256(verifier);
+
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(TOKEN_CLIENT_ROW);
+    vi.mocked(db.consumeAuthCode).mockResolvedValueOnce({
+      userId: TOKEN_USER_ROW.id,
+      clientId: TOKEN_CLIENT_ID,
+      redirectUri: TOKEN_REDIRECT_URI,
+      codeChallenge: challenge,
+      codeChallengeMethod: 'S256',
+      scope: 'page:create',
+      resource: null,
+    });
+    vi.mocked(db.getUserById).mockResolvedValueOnce(TOKEN_USER_ROW);
+    vi.mocked(db.insertRefreshToken).mockImplementation(async (input) => ({
+      id: 'rt-id',
+      user_id: input.userId,
+      client_id: input.clientId,
+      token_hash: input.tokenHash,
+      scope: input.scope,
+      created_at: new Date(),
+      expires_at: input.expiresAt,
+      revoked_at: null,
+    }));
+
+    const res = await app.fetch(
+      postToken(
+        {
+          grant_type: 'authorization_code',
+          code: 'test-auth-code',
+          client_id: TOKEN_CLIENT_ID,
+          redirect_uri: TOKEN_REDIRECT_URI,
+          code_verifier: verifier,
+        },
+        { xForwardedFor: '10.1.0.1' },
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    // RFC 6749 §5.1 mandates no-store on token responses.
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('pragma')).toBe('no-cache');
+
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.token_type).toBe('Bearer');
+    expect(body.expires_in).toBe(3600);
+    expect(typeof body.access_token).toBe('string');
+    expect((body.access_token as string).split('.')).toHaveLength(3);
+    expect((body.refresh_token as string).startsWith('rt_')).toBe(true);
+    expect(body.scope).toBe('page:create');
+  });
+
+  it('rejects application/json body with invalid_request (400)', async () => {
+    const res = await app.fetch(
+      postToken(
+        {
+          grant_type: 'authorization_code',
+          code: 'x',
+          client_id: TOKEN_CLIENT_ID,
+          redirect_uri: TOKEN_REDIRECT_URI,
+          code_verifier: 'v',
+        },
+        { contentType: 'json', xForwardedFor: '10.1.0.2' },
+      ),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe('invalid_request');
+    expect(typeof body.error_description).toBe('string');
+    expect((body.error_description as string).toLowerCase()).toContain('x-www-form-urlencoded');
+  });
+
+  it('returns unsupported_grant_type for unknown grants (400)', async () => {
+    const res = await app.fetch(
+      postToken(
+        { grant_type: 'password', username: 'x', password: 'y' },
+        { xForwardedFor: '10.1.0.3' },
+      ),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe('unsupported_grant_type');
+    expect(typeof body.error_description).toBe('string');
+  });
+
+  it('returns invalid_request when grant_type is missing', async () => {
+    const res = await app.fetch(postToken({ code: 'x' }, { xForwardedFor: '10.1.0.4' }));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe('invalid_request');
+  });
+
+  it('returns invalid_grant for an invalid auth code (no consume row)', async () => {
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(TOKEN_CLIENT_ROW);
+    vi.mocked(db.consumeAuthCode).mockResolvedValueOnce(null);
+    vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce(null);
+
+    const res = await app.fetch(
+      postToken(
+        {
+          grant_type: 'authorization_code',
+          code: 'unknown',
+          client_id: TOKEN_CLIENT_ID,
+          redirect_uri: TOKEN_REDIRECT_URI,
+          code_verifier: 'v',
+        },
+        { xForwardedFor: '10.1.0.5' },
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe('invalid_grant');
+  });
+
+  it('returns invalid_client (401) for unknown client_id', async () => {
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(null);
+
+    const res = await app.fetch(
+      postToken(
+        {
+          grant_type: 'authorization_code',
+          code: 'x',
+          client_id: 'no-such-client',
+          redirect_uri: TOKEN_REDIRECT_URI,
+          code_verifier: 'v',
+        },
+        { xForwardedFor: '10.1.0.6' },
+      ),
+    );
+
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe('invalid_client');
+  });
+
+  it('rate-limits at 20 per IP per minute (21st request → 429)', async () => {
+    const ip = '203.0.113.50';
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(null);
+
+    for (let i = 0; i < 20; i++) {
+      const res = await app.fetch(
+        postToken(
+          {
+            grant_type: 'authorization_code',
+            code: 'x',
+            client_id: 'no-such-client',
+            redirect_uri: TOKEN_REDIRECT_URI,
+            code_verifier: 'v',
+          },
+          { xForwardedFor: ip },
+        ),
+      );
+      // 401 invalid_client is the expected response — what matters is that we
+      // didn't get 429 yet.
+      expect(res.status, `request ${i + 1} of 20 should not be rate-limited`).not.toBe(429);
+    }
+
+    const limited = await app.fetch(
+      postToken(
+        {
+          grant_type: 'authorization_code',
+          code: 'x',
+          client_id: 'no-such-client',
+          redirect_uri: TOKEN_REDIRECT_URI,
+          code_verifier: 'v',
+        },
+        { xForwardedFor: ip },
+      ),
+    );
+    expect(limited.status).toBe(429);
+    const body = (await limited.json()) as Record<string, unknown>;
+    expect(body.error).toBe('rate_limited');
+    expect(typeof body.retry_after_seconds).toBe('number');
+    expect(limited.headers.get('Retry-After')).toBe(String(body.retry_after_seconds));
+  });
+});
+
+describe('POST /oauth/revoke', () => {
+  beforeEach(() => {
+    vi.mocked(db.getRefreshTokenByHash).mockReset();
+    vi.mocked(db.revokeRefreshToken).mockReset();
+  });
+
+  it('returns 200 with no body for a successful revocation', async () => {
+    vi.mocked(db.getRefreshTokenByHash).mockResolvedValueOnce({
+      id: 'rt-row',
+      user_id: TOKEN_USER_ROW.id,
+      client_id: TOKEN_CLIENT_ID,
+      token_hash: 'irrelevant',
+      scope: null,
+      created_at: NOW,
+      expires_at: new Date(Date.now() + 86400_000),
+      revoked_at: null,
+    });
+
+    const res = await app.fetch(
+      postRevoke({ token: 'rt_abc', client_id: TOKEN_CLIENT_ID }, { xForwardedFor: '10.2.0.1' }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(db.revokeRefreshToken).toHaveBeenCalledWith('rt-row');
+  });
+
+  it('returns 200 even when the token is unknown (RFC 7009 §2.2)', async () => {
+    vi.mocked(db.getRefreshTokenByHash).mockResolvedValueOnce(null);
+
+    const res = await app.fetch(postRevoke({ token: 'rt_unknown' }, { xForwardedFor: '10.2.0.2' }));
+
+    expect(res.status).toBe(200);
+    expect(db.revokeRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('returns 200 when the body is empty (no token field)', async () => {
+    const res = await app.fetch(postRevoke({}, { xForwardedFor: '10.2.0.3' }));
+    expect(res.status).toBe(200);
+    expect(db.getRefreshTokenByHash).not.toHaveBeenCalled();
+  });
+
+  it('returns 200 even for a malformed JSON body (degrades to no-op)', async () => {
+    const res = await app.fetch(
+      postRevoke({ token: 'rt_anything' }, { contentType: 'json', xForwardedFor: '10.2.0.4' }),
+    );
+    expect(res.status).toBe(200);
+    // JSON content-type isn't form-encoded; provider sees no body, no work
+    // gets done — but the response status is still 200 per RFC 7009.
+    expect(db.revokeRefreshToken).not.toHaveBeenCalled();
   });
 });

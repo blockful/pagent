@@ -526,6 +526,25 @@ export async function getUserByHandle(handle: string): Promise<UserRow | null> {
   });
 }
 
+/**
+ * Lookup a user by primary key. Used by the token endpoint to populate JWT
+ * claims (email/handle) when exchanging an auth code or refresh token. Cascade
+ * delete keeps auth_codes / refresh_tokens in sync with users, so a missing
+ * row here means the user was deleted between issuing and exchanging — which
+ * the caller surfaces as `invalid_grant`.
+ */
+export async function getUserById(id: string): Promise<UserRow | null> {
+  return withRetry(async () => {
+    const c = client();
+    const rows = await c<UserRow[]>`
+      select id, handle, email, name, avatar_url, created_at, updated_at
+      from users
+      where id = ${id}
+    `;
+    return rows[0] ?? null;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Auth codes (PKCE authorization codes)
 // ---------------------------------------------------------------------------
@@ -562,6 +581,202 @@ export async function insertAuthCode(input: AuthCodeInsert): Promise<void> {
       ${input.codeChallenge}, ${input.codeChallengeMethod},
       ${input.scope}, ${input.expiresAt}
     )
+  `;
+}
+
+/**
+ * Row returned by `consumeAuthCode` and `getAuthCodeForReplay`. Mirrors the
+ * `auth_codes` column layout but the caller usually only needs the fields the
+ * token endpoint compares against (user_id, client_id, redirect_uri, PKCE
+ * bits, scope/resource).
+ */
+export type AuthCodeRow = {
+  code: string;
+  user_id: string;
+  client_id: string;
+  redirect_uri: string;
+  code_challenge: string;
+  code_challenge_method: string;
+  scope: string | null;
+  resource: string | null;
+  created_at: Date;
+  expires_at: Date;
+  consumed_at: Date | null;
+};
+
+/**
+ * Atomically consume an authorization code: set `consumed_at = now()` and
+ * return the row's binding fields, but only if the row exists, hasn't expired,
+ * and hasn't already been consumed. The single-statement UPDATE ... WHERE
+ * consumed_at IS NULL is what gives us the single-use guarantee — concurrent
+ * token requests race on this filter and at most one wins.
+ *
+ * Returns null when the code is unknown / expired / already consumed. The
+ * token endpoint then disambiguates via `getAuthCodeForReplay` to decide
+ * whether to treat the failure as a replay (which triggers family revocation
+ * per RFC 6749 §4.1.2).
+ */
+export async function consumeAuthCode(code: string): Promise<{
+  userId: string;
+  clientId: string;
+  redirectUri: string;
+  codeChallenge: string;
+  codeChallengeMethod: string;
+  scope: string | null;
+  resource: string | null;
+} | null> {
+  const c = client();
+  const rows = await c<
+    {
+      user_id: string;
+      client_id: string;
+      redirect_uri: string;
+      code_challenge: string;
+      code_challenge_method: string;
+      scope: string | null;
+      resource: string | null;
+    }[]
+  >`
+    update auth_codes
+    set consumed_at = now()
+    where code = ${code}
+      and consumed_at is null
+      and expires_at > now()
+    returning user_id, client_id, redirect_uri, code_challenge,
+             code_challenge_method, scope, resource
+  `;
+  if (rows.length === 0) return null;
+  const r = rows[0]!;
+  return {
+    userId: r.user_id,
+    clientId: r.client_id,
+    redirectUri: r.redirect_uri,
+    codeChallenge: r.code_challenge,
+    codeChallengeMethod: r.code_challenge_method,
+    scope: r.scope,
+    resource: r.resource,
+  };
+}
+
+/**
+ * Look up an auth code without consuming it. Used by the token endpoint after
+ * `consumeAuthCode` returns null to disambiguate "unknown / expired" from
+ * "already consumed" — RFC 6749 §4.1.2 suggests revoking any tokens issued
+ * from a replayed code, which we can only do if we know the row exists.
+ *
+ * Returns null when the row doesn't exist. Expiry and prior consumption are
+ * NOT filtered here — the caller decides what to do with each state.
+ */
+export async function getAuthCodeForReplay(code: string): Promise<AuthCodeRow | null> {
+  const c = client();
+  const rows = await c<AuthCodeRow[]>`
+    select code, user_id, client_id, redirect_uri,
+           code_challenge, code_challenge_method, scope, resource,
+           created_at, expires_at, consumed_at
+    from auth_codes
+    where code = ${code}
+  `;
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Refresh tokens (opaque, rotated on each use)
+// ---------------------------------------------------------------------------
+// `token_hash` is SHA-256(raw refresh token). Raw values are only ever held
+// by the caller (memory + their HTTPS request). On rotation we insert a new
+// row and revoke the old one; on detected replay (presenting a row already
+// `revoked_at IS NOT NULL`) we revoke every row in the same (user_id,
+// client_id) family per OAuth 2.1 §6.1.
+
+export type RefreshTokenRow = {
+  id: string;
+  user_id: string;
+  client_id: string;
+  token_hash: string;
+  scope: string | null;
+  created_at: Date;
+  expires_at: Date;
+  revoked_at: Date | null;
+};
+
+export type RefreshTokenInsert = {
+  userId: string;
+  clientId: string;
+  tokenHash: string;
+  scope: string | null;
+  expiresAt: Date;
+};
+
+/**
+ * Insert a fresh refresh token row. `revoked_at` is left NULL — the rotation
+ * path flips it on the old row before inserting the new one. Not wrapped in
+ * withRetry: a retry after a successful insert would race against the
+ * unique(token_hash) constraint and surface a spurious failure even though
+ * the original write succeeded.
+ */
+export async function insertRefreshToken(input: RefreshTokenInsert): Promise<RefreshTokenRow> {
+  const c = client();
+  const rows = await c<RefreshTokenRow[]>`
+    insert into refresh_tokens (user_id, client_id, token_hash, scope, expires_at)
+    values (
+      ${input.userId}, ${input.clientId}, ${input.tokenHash},
+      ${input.scope}, ${input.expiresAt}
+    )
+    returning id, user_id, client_id, token_hash, scope,
+             created_at, expires_at, revoked_at
+  `;
+  return rows[0]!;
+}
+
+/**
+ * Look up a refresh token row by its SHA-256 hash. Returns null when the hash
+ * is unknown. Expiry and revoked state are NOT filtered here — the caller
+ * decides what to do with each state. In particular, the rotation path
+ * inspects `revoked_at` to detect replays and trigger family revocation.
+ */
+export async function getRefreshTokenByHash(tokenHash: string): Promise<RefreshTokenRow | null> {
+  const c = client();
+  const rows = await c<RefreshTokenRow[]>`
+    select id, user_id, client_id, token_hash, scope,
+           created_at, expires_at, revoked_at
+    from refresh_tokens
+    where token_hash = ${tokenHash}
+  `;
+  return rows[0] ?? null;
+}
+
+/**
+ * Mark a single refresh token revoked. Idempotent: a second call against the
+ * same id is a no-op. Used by both the rotation path (revoke old before
+ * issuing new) and the explicit /oauth/revoke endpoint.
+ */
+export async function revokeRefreshToken(id: string): Promise<void> {
+  const c = client();
+  await c`
+    update refresh_tokens
+    set revoked_at = now()
+    where id = ${id} and revoked_at is null
+  `;
+}
+
+/**
+ * Revoke every still-active refresh token for a (user_id, client_id) pair.
+ * This is the "token family revocation" path triggered when a revoked token
+ * is replayed — per OAuth 2.1 §6.1, the safe response is to assume the whole
+ * family has been compromised and invalidate every outstanding refresh
+ * token for that client session.
+ */
+export async function revokeAllRefreshTokensForFamily(
+  userId: string,
+  clientId: string,
+): Promise<void> {
+  const c = client();
+  await c`
+    update refresh_tokens
+    set revoked_at = now()
+    where user_id = ${userId}
+      and client_id = ${clientId}
+      and revoked_at is null
   `;
 }
 

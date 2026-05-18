@@ -1,18 +1,21 @@
 /**
- * OAuthServerProvider — partial implementation for Task 05.
+ * OAuthServerProvider — owns the application-side OAuth flow.
  *
- * Owns the "post-Google-callback" half of the authorize flow: turn the
- * Google profile into a Pagent user (creating one on first sight) and
- * mint the authorization code the MCP client will redeem at the token
- * endpoint.
+ * Task 05 introduced the "post-Google-callback" half (turn a Google profile
+ * into a Pagent user + mint the authorization code). Task 07 fills in the
+ * token endpoint operations: exchange an authorization code for an
+ * access+refresh token pair, rotate refresh tokens, and revoke either kind
+ * on request.
  *
- * The remaining provider methods (token exchange, refresh, revocation) are
- * implemented in Task 06 alongside the token endpoint.
- *
- * Spec: docs/superpowers/specs/2026-05-17-auth-design.md §3.4, §3.7, §5.
+ * Spec: docs/superpowers/specs/2026-05-17-auth-design.md §3.4–§3.6, §5.1–§5.2,
+ * §7.1.
  */
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import * as db from '../db.ts';
+import { logger } from '../logger.ts';
+import { env } from '../schemas.ts';
+import { getClient } from './clients-store.ts';
+import { signAccessToken } from './jwt.ts';
 
 // Handles are user-visible (URL slugs, display) so they share the
 // constraints we'd apply to any short identifier: lowercase alphanumeric +
@@ -149,4 +152,319 @@ export async function createAuthCode(
     expiresAt,
   });
   return code;
+}
+
+// ---------------------------------------------------------------------------
+// Token endpoint operations
+// ---------------------------------------------------------------------------
+
+// 32-byte (256-bit) refresh tokens. Hex doubles the length to 64 chars so the
+// raw value is ~67 chars including the `rt_` prefix — small enough to fit in
+// a JSON response without bloat, large enough that brute force is infeasible.
+const REFRESH_TOKEN_BYTES = 32;
+const REFRESH_TOKEN_PREFIX = 'rt_';
+
+/**
+ * Token endpoint success response. Matches RFC 6749 §4.1.4 — every successful
+ * exchange returns the same shape regardless of grant type.
+ *
+ * `expires_in` is the access-token lifetime in seconds (the refresh token's
+ * own lifetime is not exposed — clients learn it implicitly by trying to
+ * refresh and observing the failure).
+ */
+export interface TokenResponse {
+  access_token: string;
+  token_type: 'Bearer';
+  expires_in: number;
+  refresh_token: string;
+  scope?: string;
+}
+
+/**
+ * Error class for the token endpoint. Each instance maps to an OAuth 2.1
+ * error response: `{ error, error_description }` plus an HTTP status (400 for
+ * client errors, 401 for invalid_client). The route layer catches these and
+ * serializes them.
+ */
+export class TokenError extends Error {
+  constructor(
+    public readonly code:
+      | 'invalid_grant'
+      | 'invalid_client'
+      | 'invalid_request'
+      | 'unsupported_grant_type'
+      | 'invalid_scope',
+    public readonly description: string,
+    public readonly status: 400 | 401 = 400,
+  ) {
+    super(description);
+    this.name = 'TokenError';
+  }
+}
+
+/**
+ * Hash a raw refresh token for DB storage. Pure SHA-256 (hex) — no salt, no
+ * HMAC: the raw token already carries 256 bits of entropy so salting buys
+ * nothing, and a leaked HMAC key would compromise every hash. Matches the
+ * `magic_links.token_hash` / `sessions.token_hash` storage strategy.
+ */
+function hashRefreshToken(raw: string): string {
+  return createHash('sha256').update(raw).digest('hex');
+}
+
+/**
+ * Generate a fresh refresh token. Returns both the raw value (to give back
+ * to the caller) and the SHA-256 hash (to persist).
+ */
+function generateRefreshToken(): { raw: string; hash: string } {
+  const random = randomBytes(REFRESH_TOKEN_BYTES).toString('hex');
+  const raw = `${REFRESH_TOKEN_PREFIX}${random}`;
+  const hash = hashRefreshToken(raw);
+  return { raw, hash };
+}
+
+/**
+ * Verify a PKCE challenge against the supplied verifier (RFC 7636).
+ *
+ * S256 only: pagent advertises S256 as the sole supported method (see AS
+ * metadata), so a non-S256 method here is an internal contract violation.
+ * The check is constant-time-ish — strict string equality on hex strings is
+ * fine because the inputs are not user-secret material (the verifier was
+ * delivered over the wire alongside the request).
+ */
+function pkceVerify(codeVerifier: string, codeChallenge: string, method: string): boolean {
+  if (method !== 'S256') return false;
+  const expected = createHash('sha256').update(codeVerifier).digest('base64url');
+  return expected === codeChallenge;
+}
+
+/**
+ * Mint the access+refresh pair given a verified context (user, client,
+ * scope). Shared between the authorization_code and refresh_token grants so
+ * the JWT claim shape and refresh-token persistence stay in lockstep.
+ *
+ * `user` is the pagent user row — we need `id`, `email`, and `handle` for
+ * the JWT claims. The handle must be non-null at this point (we generate one
+ * at upsertUser time), but we defensively fall back to the email local part
+ * if it's somehow missing.
+ */
+async function mintTokens(
+  user: db.UserRow,
+  clientId: string,
+  scope: string | null,
+): Promise<TokenResponse> {
+  const handle = user.handle ?? user.email.split('@')[0] ?? 'user';
+  const accessToken = await signAccessToken({
+    sub: user.id,
+    email: user.email,
+    handle,
+    clientId,
+    // Scope on the JWT is the empty string when none was negotiated — the
+    // claim shape from spec §5.1 requires a string, not null/undefined.
+    scope: scope ?? '',
+  });
+
+  const { raw: refreshToken, hash: refreshHash } = generateRefreshToken();
+  const refreshExpiresAt = new Date(Date.now() + env.REFRESH_TOKEN_MAX_DAYS * 24 * 60 * 60 * 1000);
+  await db.insertRefreshToken({
+    userId: user.id,
+    clientId,
+    tokenHash: refreshHash,
+    scope,
+    expiresAt: refreshExpiresAt,
+  });
+
+  const response: TokenResponse = {
+    access_token: accessToken,
+    token_type: 'Bearer',
+    expires_in: env.ACCESS_TOKEN_TTL_SECONDS,
+    refresh_token: refreshToken,
+  };
+  if (scope !== null) response.scope = scope;
+  return response;
+}
+
+/**
+ * Exchange an authorization code (+ PKCE verifier) for an access+refresh
+ * pair. Implements the authorization_code grant from RFC 6749 §4.1.3 with
+ * PKCE per RFC 7636.
+ *
+ * Sequence:
+ *   1. Atomically consume the code (UPDATE ... WHERE consumed_at IS NULL).
+ *   2. If the code was unknown / expired / already consumed → invalid_grant.
+ *      For the "already consumed" case (detectable via a second SELECT) we
+ *      also revoke any refresh tokens issued from that code's user/client —
+ *      RFC 6749 §4.1.2 SHOULD.
+ *   3. Verify the PKCE challenge → invalid_grant on mismatch.
+ *   4. Verify client_id and redirect_uri match the bound values → invalid_grant.
+ *   5. Mint access + refresh tokens.
+ */
+export async function exchangeAuthCode(
+  code: string,
+  clientId: string,
+  redirectUri: string,
+  codeVerifier: string,
+): Promise<TokenResponse> {
+  if (!code || !clientId || !redirectUri || !codeVerifier) {
+    throw new TokenError('invalid_request', 'Missing required parameter');
+  }
+
+  // Verify the client exists. We don't authenticate it (public client, no
+  // secret) but we do require the client_id to resolve — otherwise the
+  // attacker could forge any client_id and we'd happily mint a token bound
+  // to it.
+  const client = await getClient(clientId);
+  if (!client) {
+    throw new TokenError('invalid_client', 'Unknown client_id', 401);
+  }
+
+  // Atomic single-use consume. Returns null for "unknown / expired / already
+  // consumed" — we then SELECT to disambiguate the "already consumed" case
+  // and react accordingly.
+  const consumed = await db.consumeAuthCode(code);
+  if (!consumed) {
+    const replay = await db.getAuthCodeForReplay(code);
+    if (replay && replay.consumed_at !== null) {
+      // Replay attempt — revoke any refresh tokens already issued from this
+      // code's user/client pair. RFC 6749 §4.1.2 SHOULD; aligns with the
+      // refresh-token family revocation in `refreshToken` below.
+      logger.warn(
+        {
+          code: code.slice(0, 8) + '…',
+          user_id: replay.user_id,
+          client_id: replay.client_id,
+        },
+        'auth code replay attempt — revoking refresh token family',
+      );
+      await db.revokeAllRefreshTokensForFamily(replay.user_id, replay.client_id);
+    }
+    throw new TokenError('invalid_grant', 'Authorization code is invalid or expired');
+  }
+
+  // PKCE first (cheaper than DB calls, catches the most common attacker
+  // case — forged code from another browser without the verifier).
+  if (!pkceVerify(codeVerifier, consumed.codeChallenge, consumed.codeChallengeMethod)) {
+    throw new TokenError('invalid_grant', 'PKCE verification failed');
+  }
+
+  // Binding checks: the code is single-use and bound to a specific
+  // client_id/redirect_uri at issue time. A request that doesn't match must
+  // fail invalid_grant — a mismatched redirect_uri is the canonical
+  // open-redirect / code-injection signal.
+  if (consumed.clientId !== clientId) {
+    throw new TokenError('invalid_grant', 'client_id does not match authorization code');
+  }
+  if (consumed.redirectUri !== redirectUri) {
+    throw new TokenError('invalid_grant', 'redirect_uri does not match authorization code');
+  }
+
+  // Resolve the user so we can populate JWT claims. cascade delete would have
+  // purged the auth_code if the user disappeared, so this should always
+  // succeed — but a defensive null check keeps a missing row from crashing
+  // the request.
+  const user = await db.getUserById(consumed.userId);
+  if (!user) {
+    throw new TokenError('invalid_grant', 'User no longer exists');
+  }
+
+  return mintTokens(user, clientId, consumed.scope);
+}
+
+/**
+ * Refresh an access token using a refresh token (RFC 6749 §6 + RFC 6749 §6
+ * + OAuth 2.1 §6.1 rotation).
+ *
+ * Sequence:
+ *   1. Look up the refresh token by SHA-256(raw).
+ *   2. If unknown → invalid_grant.
+ *   3. If revoked → token family revocation: revoke every active refresh
+ *      token for (user_id, client_id) and return invalid_grant.
+ *   4. If expired → invalid_grant.
+ *   5. If client_id doesn't match the bound client → invalid_grant.
+ *   6. Mint a new access+refresh pair, then revoke the old refresh token.
+ */
+export async function refreshToken(
+  rawRefreshToken: string,
+  clientId: string,
+): Promise<TokenResponse> {
+  if (!rawRefreshToken || !clientId) {
+    throw new TokenError('invalid_request', 'Missing required parameter');
+  }
+
+  const client = await getClient(clientId);
+  if (!client) {
+    throw new TokenError('invalid_client', 'Unknown client_id', 401);
+  }
+
+  const tokenHash = hashRefreshToken(rawRefreshToken);
+  const row = await db.getRefreshTokenByHash(tokenHash);
+  if (!row) {
+    throw new TokenError('invalid_grant', 'Refresh token is invalid');
+  }
+
+  // Replay of a revoked token → revoke entire family. Per OAuth 2.1 §6.1:
+  // the safe assumption is that the token leaked, so every still-active
+  // refresh for that user+client gets revoked.
+  if (row.revoked_at !== null) {
+    logger.warn(
+      {
+        refresh_token_id: row.id,
+        user_id: row.user_id,
+        client_id: row.client_id,
+      },
+      'revoked refresh token replay — revoking entire token family',
+    );
+    await db.revokeAllRefreshTokensForFamily(row.user_id, row.client_id);
+    throw new TokenError('invalid_grant', 'Refresh token has been revoked');
+  }
+
+  if (row.expires_at.getTime() <= Date.now()) {
+    throw new TokenError('invalid_grant', 'Refresh token has expired');
+  }
+
+  if (row.client_id !== clientId) {
+    throw new TokenError('invalid_grant', 'client_id does not match refresh token');
+  }
+
+  const user = await db.getUserById(row.user_id);
+  if (!user) {
+    throw new TokenError('invalid_grant', 'User no longer exists');
+  }
+
+  // Mint the new pair first; only revoke the old token after the insert
+  // succeeds. If minting fails halfway through, the original token stays
+  // valid so the caller can retry rather than getting locked out.
+  const response = await mintTokens(user, clientId, row.scope);
+  await db.revokeRefreshToken(row.id);
+  return response;
+}
+
+/**
+ * Revoke a refresh token (RFC 7009). The endpoint always returns success
+ * regardless of whether the token existed — distinguishing would leak token
+ * validity to an attacker probing.
+ *
+ * `tokenTypeHint` is informational (per RFC 7009 §2.1) — we ignore it because
+ * we only issue refresh tokens by opaque format and access tokens by JWT;
+ * the `rt_` prefix on refresh tokens disambiguates without needing the hint.
+ */
+export async function revokeToken(
+  token: string,
+  _tokenTypeHint: string | undefined,
+  _clientId: string | undefined,
+): Promise<void> {
+  if (!token) return;
+  // Refresh token: opaque, identified by the `rt_` prefix. Hash and look up.
+  if (token.startsWith(REFRESH_TOKEN_PREFIX)) {
+    const row = await db.getRefreshTokenByHash(hashRefreshToken(token));
+    if (row && row.revoked_at === null) {
+      await db.revokeRefreshToken(row.id);
+    }
+    return;
+  }
+  // Access tokens (JWTs) aren't revocable in V1 — they're short-lived (1h)
+  // and verification is purely cryptographic. RFC 7009 §2.2 says the server
+  // SHOULD revoke the access token if revoking a refresh token; we have no
+  // index from access-token jti to refresh-token row, so this is a no-op
+  // until V2 introduces an explicit denylist.
 }

@@ -27,7 +27,14 @@ import {
   sendMagicLink,
   verifyMagicLink,
 } from './magic-link.ts';
-import { createAuthCode, upsertUser } from './provider.ts';
+import {
+  TokenError,
+  createAuthCode,
+  exchangeAuthCode,
+  refreshToken as providerRefreshToken,
+  revokeToken,
+  upsertUser,
+} from './provider.ts';
 import { signStateJwt, verifyStateJwt } from './state-jwt.ts';
 
 // Pagent ships exactly three OAuth scopes. Listed in both metadata documents
@@ -579,4 +586,178 @@ authRoutes.get('/oauth/magic', async (c) => {
   target.searchParams.set('code', pagentCode);
   if (ctx.state) target.searchParams.set('state', ctx.state);
   return c.redirect(target.toString(), 302);
+});
+
+// --- POST /oauth/token ------------------------------------------------------
+// OAuth 2.1 token endpoint. Dispatches on `grant_type`:
+//   - authorization_code: exchange auth code + PKCE verifier for tokens
+//   - refresh_token: rotate refresh token, mint new access token
+// Body must be application/x-www-form-urlencoded (RFC 6749 §3.2). JSON bodies
+// are rejected with invalid_request — that's not the wire format the OAuth
+// spec mandates and accepting both would invite confusion.
+//
+// Rate-limited 20/IP/min per spec §7.3. Same per-IP bucket pattern as the
+// other auth endpoints (last-hop X-Forwarded-For via clientKey).
+
+const TOKEN_WINDOW_MS = 60 * 1000; // 1 minute
+const TOKEN_LIMIT = 20;
+const TOKEN_RETRY_AFTER_SECONDS = Math.ceil(TOKEN_WINDOW_MS / 1000);
+
+const tokenLimiter = rateLimiter({
+  windowMs: TOKEN_WINDOW_MS,
+  limit: TOKEN_LIMIT,
+  standardHeaders: 'draft-7',
+  keyGenerator: (c: Context) => clientKey(c.req.header('x-forwarded-for')),
+  handler: (c) => {
+    c.header('Retry-After', String(TOKEN_RETRY_AFTER_SECONDS));
+    return c.json(
+      {
+        error: 'rate_limited',
+        retry_after_seconds: TOKEN_RETRY_AFTER_SECONDS,
+        message: `Too many token requests from this IP; retry after ${TOKEN_RETRY_AFTER_SECONDS} seconds`,
+      },
+      429,
+    );
+  },
+});
+
+/**
+ * Serialize a TokenError into the OAuth 2.1 error response shape. Status
+ * comes from the error (401 for invalid_client, 400 for the rest). Body is
+ * always `{ error, error_description }` per RFC 6749 §5.2.
+ */
+function tokenErrorResponse(c: Context, err: TokenError) {
+  return c.json({ error: err.code, error_description: err.description }, err.status);
+}
+
+/**
+ * Parse the body of a token-endpoint request. Strictly form-encoded —
+ * application/json is rejected with invalid_request because the OAuth spec
+ * mandates form encoding and accepting JSON would invite client confusion.
+ *
+ * Returns the parsed body as a string-keyed map (form values are always
+ * strings; multipart-uploaded files would be File objects but we don't
+ * accept multipart here).
+ */
+async function parseTokenBody(c: Context): Promise<Record<string, string> | null> {
+  const contentType = (c.req.header('content-type') ?? '').toLowerCase();
+  // Strict form-encoded check. We accept the canonical and the variant with
+  // a charset suffix (e.g. `application/x-www-form-urlencoded; charset=UTF-8`).
+  if (!contentType.includes('application/x-www-form-urlencoded')) {
+    return null;
+  }
+  try {
+    const form = await c.req.parseBody();
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(form)) {
+      if (typeof v === 'string') out[k] = v;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+authRoutes.post('/oauth/token', tokenLimiter, async (c) => {
+  const body = await parseTokenBody(c);
+  if (!body) {
+    return c.json(
+      {
+        error: 'invalid_request',
+        error_description: 'Content-Type must be application/x-www-form-urlencoded',
+      },
+      400,
+    );
+  }
+
+  const grantType = body.grant_type;
+  if (!grantType) {
+    return c.json(
+      { error: 'invalid_request', error_description: 'Missing grant_type parameter' },
+      400,
+    );
+  }
+
+  try {
+    if (grantType === 'authorization_code') {
+      const { code, client_id, redirect_uri, code_verifier } = body;
+      const response = await exchangeAuthCode(
+        code ?? '',
+        client_id ?? '',
+        redirect_uri ?? '',
+        code_verifier ?? '',
+      );
+      // RFC 6749 §5.1 — token responses MUST set Cache-Control: no-store and
+      // Pragma: no-cache so intermediaries don't cache the bearer credential.
+      c.header('Cache-Control', 'no-store');
+      c.header('Pragma', 'no-cache');
+      return c.json(response, 200);
+    }
+    if (grantType === 'refresh_token') {
+      const { refresh_token, client_id } = body;
+      const response = await providerRefreshToken(refresh_token ?? '', client_id ?? '');
+      c.header('Cache-Control', 'no-store');
+      c.header('Pragma', 'no-cache');
+      return c.json(response, 200);
+    }
+    return c.json(
+      {
+        error: 'unsupported_grant_type',
+        error_description: `Grant type '${grantType}' is not supported`,
+      },
+      400,
+    );
+  } catch (err) {
+    if (err instanceof TokenError) {
+      return tokenErrorResponse(c, err);
+    }
+    throw err;
+  }
+});
+
+// --- POST /oauth/revoke -----------------------------------------------------
+// RFC 7009 token revocation endpoint. Always returns 200 — distinguishing
+// "token revoked" from "token unknown" would let an attacker probe which
+// tokens are valid. Same form-encoded body shape as /oauth/token; we don't
+// even reject non-form content types here (RFC 7009 §2.1 doesn't require it)
+// — a misshapen body just means we have nothing to revoke and return 200.
+//
+// Rate-limited 20/IP/min mirroring the token endpoint. The two share an
+// abuse profile (cheap to call, valuable to an attacker enumerating tokens),
+// so a single per-endpoint budget is the right granularity.
+
+const revokeLimiter = rateLimiter({
+  windowMs: TOKEN_WINDOW_MS,
+  limit: TOKEN_LIMIT,
+  standardHeaders: 'draft-7',
+  keyGenerator: (c: Context) => clientKey(c.req.header('x-forwarded-for')),
+  handler: (c) => {
+    c.header('Retry-After', String(TOKEN_RETRY_AFTER_SECONDS));
+    return c.json(
+      {
+        error: 'rate_limited',
+        retry_after_seconds: TOKEN_RETRY_AFTER_SECONDS,
+        message: `Too many revoke requests from this IP; retry after ${TOKEN_RETRY_AFTER_SECONDS} seconds`,
+      },
+      429,
+    );
+  },
+});
+
+authRoutes.post('/oauth/revoke', revokeLimiter, async (c) => {
+  // Best-effort parse. RFC 7009 §2.2 says invalid requests still return 200
+  // (with the exception of unsupported_token_type, which we don't surface
+  // since we accept the prefix-based discriminator instead of relying on
+  // token_type_hint). A malformed body means there's nothing to revoke.
+  const body = await parseTokenBody(c);
+  if (body && typeof body.token === 'string' && body.token.length > 0) {
+    try {
+      await revokeToken(body.token, body.token_type_hint, body.client_id);
+    } catch {
+      // Swallow — RFC 7009 mandates 200 regardless of failure. The error is
+      // logged via the global error handler if it propagates from a deeper
+      // bug, but we don't want a transient DB blip to surface as 500.
+    }
+  }
+  return c.body(null, 200);
 });
