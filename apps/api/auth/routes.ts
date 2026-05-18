@@ -1,13 +1,21 @@
 /**
- * OAuth discovery / metadata endpoints.
+ * OAuth discovery / metadata endpoints + dynamic client registration.
  *
  * The three .well-known routes MCP clients and OAuth tools probe to find
  * the authorization server. All public — no auth middleware, no rate limit.
  *
- * Spec: docs/superpowers/specs/2026-05-17-auth-design.md §3.1, §3.2, §5.3.
- * RFCs: 8414 (AS metadata), 9728 (Protected Resource metadata), 7517 (JWKS).
+ * POST /oauth/register implements RFC 7591 dynamic client registration so
+ * MCP clients can self-register before the authorization code flow.
+ *
+ * Spec: docs/superpowers/specs/2026-05-17-auth-design.md §3.1, §3.2, §3.3, §5.3.
+ * RFCs: 7591 (Dynamic Client Registration), 8414 (AS metadata), 9728
+ * (Protected Resource metadata), 7517 (JWKS).
  */
+import type { Context } from 'hono';
 import { Hono } from 'hono';
+import { rateLimiter } from 'hono-rate-limiter';
+import { clientKey } from '../client-key.ts';
+import { InvalidClientMetadataError, registerClient } from './clients-store.ts';
 import { getIssuer, getJwks } from './jwt.ts';
 
 // Pagent ships exactly three OAuth scopes. Listed in both metadata documents
@@ -72,4 +80,67 @@ authRoutes.get('/.well-known/oauth-protected-resource', (c) => {
 
 authRoutes.get('/.well-known/jwks.json', (c) => {
   return c.json(getJwks());
+});
+
+// --- Dynamic client registration (RFC 7591) ---------------------------------
+// MCP clients self-register before starting the authorization code flow.
+// Rate-limited per IP (10/hour) — registration is cheap but unbounded growth
+// would let an attacker fill oauth_clients with junk rows. The cap mirrors
+// auth-design spec §7.3 (Rate limiting table) and is intentionally distinct
+// from the POST /new bucket so heavy MCP traffic can't lock out
+// registrations.
+
+const REGISTER_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const REGISTER_LIMIT = 10;
+const REGISTER_RETRY_AFTER_SECONDS = Math.ceil(REGISTER_WINDOW_MS / 1000);
+
+const registerLimiter = rateLimiter({
+  windowMs: REGISTER_WINDOW_MS,
+  limit: REGISTER_LIMIT,
+  // IETF draft-7 RateLimit-* headers (same as POST /new) so clients can
+  // discover the budget without hard-coding it.
+  standardHeaders: 'draft-7',
+  // Same last-hop trust model as POST /new — see apps/api/client-key.ts.
+  keyGenerator: (c: Context) => clientKey(c.req.header('x-forwarded-for')),
+  handler: (c) => {
+    c.header('Retry-After', String(REGISTER_RETRY_AFTER_SECONDS));
+    return c.json(
+      {
+        error: 'rate_limited',
+        retry_after_seconds: REGISTER_RETRY_AFTER_SECONDS,
+        message: `Too many client registrations from this IP; retry after ${REGISTER_RETRY_AFTER_SECONDS} seconds`,
+      },
+      429,
+    );
+  },
+});
+
+authRoutes.post('/oauth/register', registerLimiter, async (c) => {
+  // Parse-or-null is the same pattern as POST /new — gives us a single
+  // explicit branch for malformed JSON before zod / validation runs.
+  const raw = await c.req.json().catch(() => null);
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return c.json(
+      {
+        error: 'invalid_client_metadata',
+        error_description: 'request body must be a JSON object',
+      },
+      400,
+    );
+  }
+  try {
+    const client = await registerClient(raw);
+    // RFC 7591 §3.2.1 — 201 Created with the client information document.
+    return c.json(client, 201);
+  } catch (err) {
+    if (err instanceof InvalidClientMetadataError) {
+      return c.json(
+        { error: 'invalid_client_metadata', error_description: err.description },
+        400,
+      );
+    }
+    // Anything else (e.g. transient DB error after withRetry exhausts) bubbles
+    // up to app.onError which surfaces a 500 with a request_id.
+    throw err;
+  }
 });
