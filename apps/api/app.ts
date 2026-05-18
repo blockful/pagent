@@ -19,6 +19,8 @@ import { metrics, statusClassFor } from './metrics.ts';
 import type { RequestIdVariables } from './request-id.ts';
 import { requestId, getLog, getRequestId } from './request-id.ts';
 import { authRoutes } from './auth/routes.ts';
+import type { AuthVariables } from './auth/middleware.ts';
+import { resolveAuth, requireAuth } from './auth/middleware.ts';
 
 // --- OpenAPI spec (loaded once at boot, served from memory) ------------------
 
@@ -69,7 +71,7 @@ const newPageLimiter = rateLimiter({
 
 // --- App ---------------------------------------------------------------------
 
-export const app = new Hono<{ Variables: RequestIdVariables }>();
+export const app = new Hono<{ Variables: RequestIdVariables & AuthVariables }>();
 app.use('*', requestId());
 app.use(
   '*',
@@ -202,12 +204,38 @@ app.get(
   }),
 );
 
+// --- Auth resolution ---------------------------------------------------------
+// Populate c.var.user from the session cookie or Bearer JWT on EVERY route.
+// Never short-circuits — `requireAuth()` is the gatekeeper for protected
+// endpoints. Mounted before any route handler so subsequent middlewares
+// (e.g. requireAuth on POST /new) can read c.var.user.
+
+app.use('*', resolveAuth());
+
 // --- Auth / OAuth discovery --------------------------------------------------
 // Mounts the three .well-known endpoints (AS metadata, protected resource
 // metadata, JWKS). Mounted at root so the literal RFC-defined paths land
 // where MCP clients expect them. No auth required.
 
 app.route('/', authRoutes);
+
+/**
+ * No-op or 401-gating middleware, chosen at module load based on the
+ * REQUIRE_AUTH env var. Centralizing the branch here means route declarations
+ * stay clean and the grace-period behavior (REQUIRE_AUTH=false → no rejection)
+ * is the boring path.
+ *
+ * When REQUIRE_AUTH=false: passes through. POST /new still gets c.var.user
+ * populated by resolveAuth, but anonymous requests succeed (matches the spec's
+ * phased rollout — see §8.2 "Grace period").
+ * When REQUIRE_AUTH=true: returns 401 for anonymous requests on protected
+ * routes (§8.3).
+ */
+const requireAuthIfEnabled: ReturnType<typeof requireAuth> = env.REQUIRE_AUTH
+  ? requireAuth()
+  : async (_c, next) => {
+      await next();
+    };
 
 // --- Route handlers ----------------------------------------------------------
 
@@ -359,7 +387,9 @@ const getResultHandler = async (c: Context) => {
 
 // --- Routes ------------------------------------------------------------------
 
-app.post('/new', newPageLimiter, newPageHandler);
+// POST /new — gated by requireAuth when REQUIRE_AUTH=true; otherwise the
+// requireAuthIfEnabled middleware is a no-op pass-through.
+app.post('/new', requireAuthIfEnabled, newPageLimiter, newPageHandler);
 app.get('/:id', getPageHandler);
 app.post('/:id/result', submitResultHandler);
 app.get('/:id/result', getResultHandler);

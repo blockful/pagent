@@ -21,6 +21,7 @@ import { clientKey } from '../client-key.ts';
 import { env } from '../schemas.ts';
 import * as store from '../store.ts';
 import { logger } from '../logger.ts';
+import { verifyAccessToken } from '../auth/jwt.ts';
 import { RateLimiter } from './rate-limit.ts';
 import { registerPagentTools, type PageOps } from './tools.ts';
 
@@ -152,6 +153,52 @@ export function makeMcpHttpHandler(cfg: McpHttpConfig) {
           error: 'rate_limited',
           retry_after_seconds: result.secondsUntilReset,
           message: `Too many requests; retry after ${result.secondsUntilReset} seconds`,
+          request_id: requestId,
+        });
+        return;
+      }
+    }
+
+    // Bearer auth — gated on REQUIRE_AUTH. On a 401 we surface the
+    // resource_metadata URL via WWW-Authenticate per RFC 9728 so MCP clients
+    // can discover the AS without an out-of-band config step. The check sits
+    // after rate-limit (no point validating tokens we'd throttle anyway) but
+    // before body parse (a 401 should be cheap and not trigger body reads).
+    if (env.REQUIRE_AUTH && req.method === 'POST') {
+      const authHeader = req.headers.authorization;
+      const resourceMetadataUrl = `${cfg.publicUrl}/.well-known/oauth-protected-resource`;
+      if (!authHeader?.startsWith('Bearer ')) {
+        res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl}"`);
+        respondJson(res, 401, {
+          error: 'unauthorized',
+          message: 'Bearer token required',
+          request_id: requestId,
+        });
+        return;
+      }
+      const token = authHeader.slice('Bearer '.length).trim();
+      try {
+        const claims = await verifyAccessToken(token);
+        // Attach auth info onto the request so the SDK transport can forward
+        // it to tool handlers (the StreamableHTTPServerTransport reads
+        // `req.auth` per the SDK's contract). We carry the verified claims
+        // plus the raw bearer so downstream code can re-mint scoped requests
+        // without re-decoding the JWT.
+        (req as unknown as { auth: unknown }).auth = {
+          token,
+          clientId: claims.client_id,
+          scopes: claims.scope.split(/\s+/).filter(Boolean),
+          expiresAt: claims.exp,
+          extra: { sub: claims.sub, email: claims.email, handle: claims.handle },
+        };
+      } catch {
+        res.setHeader(
+          'WWW-Authenticate',
+          `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`,
+        );
+        respondJson(res, 401, {
+          error: 'invalid_token',
+          message: 'Invalid or expired access token',
           request_id: requestId,
         });
         return;

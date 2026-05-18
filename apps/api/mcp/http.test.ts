@@ -27,6 +27,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { makeMcpHttpHandler } from './http.ts';
 import { RateLimiter } from './rate-limit.ts';
+import { env } from '../schemas.ts';
+import * as jwt from '../auth/jwt.ts';
 
 // --- Test fixture -----------------------------------------------------------
 
@@ -396,5 +398,131 @@ describe('rate limiting', () => {
     } finally {
       await close();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bearer auth gating (REQUIRE_AUTH=true)
+// ---------------------------------------------------------------------------
+// These tests flip env.REQUIRE_AUTH in-process and use a per-test server so
+// the toggle doesn't leak. Bearer validation calls verifyAccessToken; we
+// vi.spyOn it to control the outcome without booting the full JWT keys.
+
+describe('Bearer auth gating', () => {
+  async function startProtectedServer() {
+    const handler = makeMcpHttpHandler({
+      publicUrl: 'http://test.local',
+      pageTtlMs: 60_000,
+      rateLimiter: new RateLimiter(1000, 60_000),
+    });
+    return startServer(handler);
+  }
+
+  function withRequireAuth<T>(fn: () => Promise<T>): Promise<T> {
+    const original = env.REQUIRE_AUTH;
+    (env as { REQUIRE_AUTH: boolean }).REQUIRE_AUTH = true;
+    return fn().finally(() => {
+      (env as { REQUIRE_AUTH: boolean }).REQUIRE_AUTH = original;
+    });
+  }
+
+  it('returns 401 with WWW-Authenticate when REQUIRE_AUTH=true and no Bearer', async () => {
+    await withRequireAuth(async () => {
+      const { url, close } = await startProtectedServer();
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { Accept: MCP_ACCEPT, 'Content-Type': 'application/json' },
+          body: INITIALIZE_BODY,
+        });
+        expect(res.status).toBe(401);
+        const wwwAuth = res.headers.get('WWW-Authenticate');
+        expect(wwwAuth).toContain('Bearer');
+        expect(wwwAuth).toContain(
+          'resource_metadata="http://test.local/.well-known/oauth-protected-resource"',
+        );
+        const body = await res.json();
+        expect(body.error).toBe('unauthorized');
+        expect(body.message).toMatch(/bearer/i);
+        expect(typeof body.request_id).toBe('string');
+      } finally {
+        await close();
+      }
+    });
+  });
+
+  it('returns 401 with invalid_token when REQUIRE_AUTH=true and Bearer fails verification', async () => {
+    await withRequireAuth(async () => {
+      const spy = vi.spyOn(jwt, 'verifyAccessToken').mockRejectedValue(new Error('expired'));
+      const { url, close } = await startProtectedServer();
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Accept: MCP_ACCEPT,
+            'Content-Type': 'application/json',
+            authorization: 'Bearer expired.jwt.token',
+          },
+          body: INITIALIZE_BODY,
+        });
+        expect(res.status).toBe(401);
+        const wwwAuth = res.headers.get('WWW-Authenticate');
+        expect(wwwAuth).toContain('error="invalid_token"');
+        const body = await res.json();
+        expect(body.error).toBe('invalid_token');
+      } finally {
+        spy.mockRestore();
+        await close();
+      }
+    });
+  });
+
+  it('passes through when REQUIRE_AUTH=true and a valid Bearer is presented', async () => {
+    await withRequireAuth(async () => {
+      const spy = vi.spyOn(jwt, 'verifyAccessToken').mockResolvedValue({
+        sub: 'user-uuid',
+        email: 'a@b.co',
+        handle: 'a',
+        client_id: 'mcp-cli',
+        scope: 'page:create page:read',
+        iss: 'http://test.local',
+        aud: 'http://test.local',
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        iat: Math.floor(Date.now() / 1000),
+        jti: 'jti-1',
+      });
+      const { url, close } = await startProtectedServer();
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Accept: MCP_ACCEPT,
+            'Content-Type': 'application/json',
+            authorization: 'Bearer valid.jwt',
+          },
+          body: INITIALIZE_BODY,
+        });
+        // 200 with the MCP initialize response — auth succeeded and the
+        // transport processed the body.
+        expect(res.status).toBe(200);
+        expect(res.headers.get('WWW-Authenticate')).toBeNull();
+        await res.body?.cancel();
+      } finally {
+        spy.mockRestore();
+        await close();
+      }
+    });
+  });
+
+  it('does not require Bearer when REQUIRE_AUTH=false (existing behavior preserved)', async () => {
+    // env.REQUIRE_AUTH defaults to false in the vitest env.
+    const res = await fetch(mcpUrl, {
+      method: 'POST',
+      headers: { Accept: MCP_ACCEPT, 'Content-Type': 'application/json' },
+      body: INITIALIZE_BODY,
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('WWW-Authenticate')).toBeNull();
+    await res.body?.cancel();
   });
 });
