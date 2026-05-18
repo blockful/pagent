@@ -21105,6 +21105,12 @@ import { pathToFileURL } from "node:url";
 var HTML_MAX_BYTES = 1e6;
 
 // apps/api/mcp/tools.ts
+function ownerIdFromExtra(extra) {
+  if (!extra || typeof extra !== "object") return void 0;
+  const authInfo = extra.authInfo;
+  const sub = authInfo?.extra?.sub;
+  return typeof sub === "string" ? sub : void 0;
+}
 var SHOW_UI_DESCRIPTION = [
   "Ask the user a question that needs a structured answer back. Forms, pickers, confirmations, multi-step wizards, surveys, dashboards-as-input.",
   "Returns { page_id, url, expires_at }. PRINT the URL so the user can open it. The agent never sees the user typing \u2014 only the final submitted result.",
@@ -21151,8 +21157,8 @@ function registerPagentTools(server2, ops) {
         spec: external_exports.array(external_exports.record(external_exports.unknown())).describe(SHOW_UI_INPUT_DESCRIPTION)
       }
     },
-    async ({ spec }) => {
-      const created = await ops.showUi(spec);
+    async ({ spec }, extra) => {
+      const created = await ops.showUi(spec, ownerIdFromExtra(extra));
       return {
         content: [
           {
@@ -21181,8 +21187,8 @@ expires_at: ${created.expires_at}`
         html: external_exports.string().min(1).max(HTML_MAX_BYTES).describe(SHOW_HTML_INPUT_DESCRIPTION)
       }
     },
-    async ({ html }) => {
-      const created = await ops.showHtml(html);
+    async ({ html }, extra) => {
+      const created = await ops.showHtml(html, ownerIdFromExtra(extra));
       return {
         content: [
           {
@@ -21263,7 +21269,13 @@ var envSchema = external_exports.preprocess(
     return out;
   },
   external_exports.object({
-    PAGENT_URL: external_exports.string().url("PAGENT_URL must be a valid URL").optional()
+    PAGENT_URL: external_exports.string().url("PAGENT_URL must be a valid URL").optional(),
+    // Bearer token for authenticated REST calls. The stdio transport has no
+    // auth context of its own — the agent that spawns this process exports
+    // PAGENT_TOKEN, we attach it to every outbound HTTP request, and the API
+    // populates owner_id from the JWT's `sub` claim. Optional so the grace
+    // period (REQUIRE_AUTH=false) keeps working without any env changes.
+    PAGENT_TOKEN: external_exports.string().optional()
   })
 );
 var env;
@@ -21274,6 +21286,10 @@ try {
   process.exit(1);
 }
 var SERVICE_URL = (env.PAGENT_URL ?? "https://api.pagent.link").replace(/\/$/, "");
+var PAGENT_TOKEN = env.PAGENT_TOKEN;
+function authHeaders() {
+  return PAGENT_TOKEN ? { Authorization: `Bearer ${PAGENT_TOKEN}` } : {};
+}
 async function readError(res, fallbackVerb) {
   const body = await res.json().catch(() => ({}));
   const hint = formatRetryHint(body);
@@ -21281,19 +21297,19 @@ async function readError(res, fallbackVerb) {
   return new Error(`${fallbackVerb} failed (${res.status}): ${message}${hint ? `. ${hint}` : ""}`);
 }
 var restOps = {
-  async showUi(spec) {
+  async showUi(spec, _ownerId) {
     const res = await fetch(`${SERVICE_URL}/new`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify({ spec })
     });
     if (!res.ok) throw await readError(res, "show_ui");
     return await res.json();
   },
-  async showHtml(html) {
+  async showHtml(html, _ownerId) {
     const res = await fetch(`${SERVICE_URL}/new`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify({ format: "html", spec: html })
     });
     if (!res.ok) throw await readError(res, "show_html");
@@ -21301,7 +21317,7 @@ var restOps = {
   },
   async checkResult(page_id) {
     const res = await fetch(`${SERVICE_URL}/${page_id}/result`, {
-      headers: { accept: "application/json" }
+      headers: { accept: "application/json", ...authHeaders() }
     });
     if (res.status === 404) return { kind: "not_found" };
     if (!res.ok) throw await readError(res, "check_result");
