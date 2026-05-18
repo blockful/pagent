@@ -171,7 +171,11 @@ export async function registerClient(metadata: unknown): Promise<OAuthClientInfo
   // RFC 7591 §2 — redirect_uris is required for our grants. The other fields
   // are optional with sensible defaults applied below.
   const redirect_uris = validateRedirectUris(m.redirect_uris);
-  const grant_types = validateOptionalStringArray(m.grant_types, 'grant_types', DEFAULT_GRANT_TYPES);
+  const grant_types = validateOptionalStringArray(
+    m.grant_types,
+    'grant_types',
+    DEFAULT_GRANT_TYPES,
+  );
   const response_types = validateOptionalStringArray(
     m.response_types,
     'response_types',
@@ -210,9 +214,7 @@ export async function registerClient(metadata: unknown): Promise<OAuthClientInfo
  * absent — that's the contract `OAuthRegisteredClientsStore.getClient`
  * expects, and `mcpAuthRouter` treats undefined as "unknown client" → 401.
  */
-export async function getClient(
-  clientId: string,
-): Promise<OAuthClientInformationFull | undefined> {
+export async function getClient(clientId: string): Promise<OAuthClientInformationFull | undefined> {
   const row = await db.getOAuthClientById(clientId);
   if (!row) return undefined;
   return rowToClientInformation(row);

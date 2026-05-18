@@ -23,10 +23,12 @@ touch page rows. This is the foundation every other webhook task builds on.
 
 3. **`init()`** -- add two idempotent `ALTER TABLE` migrations after the
    existing `format` migration:
+
    ```sql
    ALTER TABLE pages ADD COLUMN IF NOT EXISTS webhook_url    text;
    ALTER TABLE pages ADD COLUMN IF NOT EXISTS webhook_secret text;
    ```
+
    Also add both columns to the `CREATE TABLE IF NOT EXISTS` statement
    for fresh deployments.
 

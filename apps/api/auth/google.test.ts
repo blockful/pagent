@@ -43,12 +43,7 @@ import { initKeys } from './jwt.ts';
 import { buildGoogleAuthUrl } from './google.ts';
 import { renderLoginPage } from './login-page.ts';
 import { signStateJwt, verifyStateJwt } from './state-jwt.ts';
-import {
-  sanitizeHandle,
-  generateUniqueHandle,
-  upsertUser,
-  createAuthCode,
-} from './provider.ts';
+import { sanitizeHandle, generateUniqueHandle, upsertUser, createAuthCode } from './provider.ts';
 
 const BASE = 'http://localhost';
 
@@ -68,7 +63,8 @@ beforeAll(async () => {
   // Set the auth secrets in-memory. The schema's optional() means they default
   // to undefined; tests need them populated to exercise the signing path.
   (env as { GOOGLE_CLIENT_ID: string | undefined }).GOOGLE_CLIENT_ID = 'test-google-client-id';
-  (env as { GOOGLE_CLIENT_SECRET: string | undefined }).GOOGLE_CLIENT_SECRET = 'test-google-client-secret';
+  (env as { GOOGLE_CLIENT_SECRET: string | undefined }).GOOGLE_CLIENT_SECRET =
+    'test-google-client-secret';
   (env as { GOOGLE_REDIRECT_URI: string | undefined }).GOOGLE_REDIRECT_URI =
     'http://localhost/oauth/callback/google';
   (env as { AUTH_STATE_SECRET: string | undefined }).AUTH_STATE_SECRET =
@@ -100,9 +96,7 @@ describe('buildGoogleAuthUrl', () => {
     expect(url.startsWith('https://accounts.google.com/o/oauth2/v2/auth?')).toBe(true);
     const parsed = new URL(url);
     expect(parsed.searchParams.get('client_id')).toBe('test-google-client-id');
-    expect(parsed.searchParams.get('redirect_uri')).toBe(
-      'http://localhost/oauth/callback/google',
-    );
+    expect(parsed.searchParams.get('redirect_uri')).toBe('http://localhost/oauth/callback/google');
     expect(parsed.searchParams.get('response_type')).toBe('code');
     expect(parsed.searchParams.get('scope')).toBe('openid email profile');
     expect(parsed.searchParams.get('state')).toBe('signed-state-jwt');
@@ -151,7 +145,11 @@ describe('state JWT', () => {
     // verify must reject.
     const [h, _p, s] = token.split('.');
     const evil = Buffer.from(
-      JSON.stringify({ client_id: 'mcp-cli', redirect_uri: 'http://attacker', iss: 'pagent:oauth:state' }),
+      JSON.stringify({
+        client_id: 'mcp-cli',
+        redirect_uri: 'http://attacker',
+        iss: 'pagent:oauth:state',
+      }),
     ).toString('base64url');
     const tampered = `${h}.${evil}.${s}`;
     await expect(verifyStateJwt(tampered)).rejects.toThrow();
@@ -425,9 +423,7 @@ describe('GET /oauth/authorize', () => {
   });
 
   it('renders the login page for browser_session=1 without other params', async () => {
-    const res = await app.fetch(
-      new Request(`${BASE}/oauth/authorize?browser_session=1`),
-    );
+    const res = await app.fetch(new Request(`${BASE}/oauth/authorize?browser_session=1`));
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('Continue with Google');
@@ -477,12 +473,17 @@ async function mockGoogleTokenResponse(
 ) {
   const idToken = await makeSignedIdToken(idTokenClaims, options);
   const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
+    const url =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : (input as Request).url;
     if (url.includes('oauth2.googleapis.com/token')) {
-      return new Response(
-        JSON.stringify({ id_token: idToken, access_token: 'g-at' }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      );
+      return new Response(JSON.stringify({ id_token: idToken, access_token: 'g-at' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
     if (url.includes('googleapis.com/oauth2/v3/certs')) {
       return new Response(JSON.stringify(googleJwks), {
@@ -525,7 +526,9 @@ describe('GET /oauth/callback/google', () => {
       state: VALID_AUTHORIZE.state,
     });
     const res = await app.fetch(
-      new Request(`${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(state)}`),
+      new Request(
+        `${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(state)}`,
+      ),
     );
 
     expect(res.status).toBe(302);
@@ -576,7 +579,9 @@ describe('GET /oauth/callback/google', () => {
     // Flip a character in the signature segment so HMAC verification fails.
     const tampered = state.slice(0, -3) + (state.endsWith('AAA') ? 'BBB' : 'AAA');
     const res = await app.fetch(
-      new Request(`${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(tampered)}`),
+      new Request(
+        `${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(tampered)}`,
+      ),
     );
     expect(res.status).toBe(400);
     const html = await res.text();
@@ -592,9 +597,7 @@ describe('GET /oauth/callback/google', () => {
   });
 
   it('rejects callback with missing state', async () => {
-    const res = await app.fetch(
-      new Request(`${BASE}/oauth/callback/google?code=google-code`),
-    );
+    const res = await app.fetch(new Request(`${BASE}/oauth/callback/google?code=google-code`));
     expect(res.status).toBe(400);
   });
 
@@ -634,13 +637,13 @@ describe('GET /oauth/callback/google', () => {
       codeChallenge: VALID_AUTHORIZE.code_challenge,
     });
     const res = await app.fetch(
-      new Request(`${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(state)}`),
+      new Request(
+        `${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(state)}`,
+      ),
     );
     expect(res.status).toBe(302);
     // The upsert call should have received handle="alex2"
-    expect(db.upsertUser).toHaveBeenCalledWith(
-      expect.objectContaining({ handle: 'alex2' }),
-    );
+    expect(db.upsertUser).toHaveBeenCalledWith(expect.objectContaining({ handle: 'alex2' }));
   });
 });
 

@@ -14,11 +14,7 @@ vi.mock('../db.ts', () => ({
 }));
 
 import * as db from '../db.ts';
-import {
-  registerClient,
-  getClient,
-  InvalidClientMetadataError,
-} from './clients-store.ts';
+import { registerClient, getClient, InvalidClientMetadataError } from './clients-store.ts';
 
 type Row = Awaited<ReturnType<typeof db.insertOAuthClient>>;
 
@@ -53,9 +49,7 @@ beforeEach(() => {
 
 describe('registerClient', () => {
   it('inserts the client and returns OAuthClientInformationFull', async () => {
-    vi.mocked(db.insertOAuthClient).mockResolvedValueOnce(
-      row({ client_name: 'Claude Code' }),
-    );
+    vi.mocked(db.insertOAuthClient).mockResolvedValueOnce(row({ client_name: 'Claude Code' }));
 
     const result = await registerClient({
       redirect_uris: ['http://localhost:9876/callback'],
@@ -143,9 +137,9 @@ describe('registerClient validation', () => {
   });
 
   it('rejects redirect_uris that is not an array', async () => {
-    await expect(
-      registerClient({ redirect_uris: 'http://localhost/cb' }),
-    ).rejects.toThrow(/redirect_uris/);
+    await expect(registerClient({ redirect_uris: 'http://localhost/cb' })).rejects.toThrow(
+      /redirect_uris/,
+    );
   });
 
   it('rejects empty redirect_uris array', async () => {
@@ -153,12 +147,12 @@ describe('registerClient validation', () => {
   });
 
   it('rejects redirect_uris with invalid URI', async () => {
-    await expect(
-      registerClient({ redirect_uris: ['not a uri'] }),
-    ).rejects.toBeInstanceOf(InvalidClientMetadataError);
-    await expect(
-      registerClient({ redirect_uris: ['http://ok/cb', ''] }),
-    ).rejects.toBeInstanceOf(InvalidClientMetadataError);
+    await expect(registerClient({ redirect_uris: ['not a uri'] })).rejects.toBeInstanceOf(
+      InvalidClientMetadataError,
+    );
+    await expect(registerClient({ redirect_uris: ['http://ok/cb', ''] })).rejects.toBeInstanceOf(
+      InvalidClientMetadataError,
+    );
     await expect(
       registerClient({ redirect_uris: ['http://ok/cb', null as unknown as string] }),
     ).rejects.toBeInstanceOf(InvalidClientMetadataError);
@@ -168,9 +162,7 @@ describe('registerClient validation', () => {
     vi.mocked(db.insertOAuthClient).mockResolvedValueOnce(
       row({ redirect_uris: ['myapp://callback'] }),
     );
-    await expect(
-      registerClient({ redirect_uris: ['myapp://callback'] }),
-    ).resolves.toBeDefined();
+    await expect(registerClient({ redirect_uris: ['myapp://callback'] })).resolves.toBeDefined();
   });
 
   it('rejects non-array grant_types', async () => {
@@ -207,9 +199,7 @@ describe('registerClient validation', () => {
 
 describe('getClient', () => {
   it('returns the registered client', async () => {
-    vi.mocked(db.getOAuthClientById).mockResolvedValueOnce(
-      row({ client_name: 'Claude Code' }),
-    );
+    vi.mocked(db.getOAuthClientById).mockResolvedValueOnce(row({ client_name: 'Claude Code' }));
 
     const result = await getClient('a1b2c3d4-e5f6-4321-9876-abcdef012345');
 
