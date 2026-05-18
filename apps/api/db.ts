@@ -35,6 +35,13 @@ export type Page = {
   result: unknown;
   createdAt: number;
   expiresAt: number;
+  /**
+   * Authenticated user that created this page. Optional / nullable to keep
+   * unauthenticated grace-period creation working — when REQUIRE_AUTH=true
+   * the POST /new middleware enforces a non-null user. `ON DELETE SET NULL`
+   * keeps pages live when the owning user is deleted.
+   */
+  ownerId?: string | null;
 };
 
 let sql: ReturnType<typeof postgres> | null = null;
@@ -320,13 +327,17 @@ export async function fetchAndAdvanceResult(
 export async function insertPage(p: Page): Promise<void> {
   await withRetry(async () => {
     const c = client();
-    await c`insert into pages (id, spec, format, state, expires_at)
+    // owner_id is nullable — postgres-js binds `null` as SQL NULL, which is
+    // what the grace-period path (unauthenticated POST /new) requires. When
+    // REQUIRE_AUTH=true the route middleware guarantees ownerId is set.
+    await c`insert into pages (id, spec, format, state, expires_at, owner_id)
             values (
               ${p.id},
               ${c.json(p.spec as Parameters<typeof c.json>[0])},
               ${p.format},
               'open',
-              to_timestamp(${p.expiresAt} / 1000.0)
+              to_timestamp(${p.expiresAt} / 1000.0),
+              ${p.ownerId ?? null}
             )`;
   });
 }

@@ -272,11 +272,17 @@ const newPageHandler = async (c: Context) => {
     }
   }
 
+  // Authenticated user id flows from resolveAuth() (cookie or Bearer JWT) onto
+  // c.var.user. Null during the grace period; the row goes in with
+  // owner_id = NULL. When REQUIRE_AUTH=true, requireAuthIfEnabled has already
+  // rejected anonymous requests with 401 — so this read is non-null in that path.
+  const ownerId = c.var.user?.id ?? null;
+
   if (format === 'html') {
     try {
       const created = await store.createHtmlPage(
         spec as string,
-        { publicUrl: PUBLIC_URL, pageTtlMs: PAGE_TTL_MS },
+        { publicUrl: PUBLIC_URL, pageTtlMs: PAGE_TTL_MS, ownerId },
         getLog(c),
       );
       return c.json(created, 201);
@@ -298,6 +304,7 @@ const newPageHandler = async (c: Context) => {
   const created = await store.createPage(spec, format, {
     publicUrl: PUBLIC_URL,
     pageTtlMs: PAGE_TTL_MS,
+    ownerId,
   });
   return c.json(created, 201);
 };

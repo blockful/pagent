@@ -75,13 +75,19 @@ function applyBaseHeaders(req: IncomingMessage, res: ServerResponse, requestId: 
 
 export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
   return {
-    async showUi(spec) {
+    async showUi(spec, ownerId) {
+      // ownerId arrives from the SDK's RequestHandlerExtra.authInfo.extra.sub
+      // (set by the Bearer middleware below). Forwarded unchanged into the
+      // store so pages created via authenticated MCP carry the right
+      // owner_id. Anonymous MCP calls (REQUIRE_AUTH=false) leave ownerId
+      // undefined, which createPage turns into SQL NULL.
       return store.createPage(spec, 'a2ui', {
         publicUrl: cfg.publicUrl,
         pageTtlMs: cfg.pageTtlMs,
+        ownerId,
       });
     },
-    async showHtml(html) {
+    async showHtml(html, ownerId) {
       // No request context here — log at the module logger level. The REST
       // POST /new path passes a request-scoped child logger; this is the MCP
       // path. store.createHtmlPage handles sanitize+log+store in one ritual
@@ -92,6 +98,7 @@ export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
         {
           publicUrl: cfg.publicUrl,
           pageTtlMs: cfg.pageTtlMs,
+          ownerId,
         },
         logger,
       );

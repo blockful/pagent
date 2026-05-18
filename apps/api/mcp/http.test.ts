@@ -525,4 +525,64 @@ describe('Bearer auth gating', () => {
     expect(res.headers.get('WWW-Authenticate')).toBeNull();
     await res.body?.cancel();
   });
+
+  it('show_ui via authed MCP forwards JWT sub as owner_id to db.insertPage', async () => {
+    // End-to-end pin for task 10 wiring: Bearer middleware → req.auth.extra.sub
+    //  → SDK transport authInfo → tool handler → ops.showUi(ownerId)
+    //  → store.createPage → db.insertPage with ownerId set.
+    await withRequireAuth(async () => {
+      const spy = vi.spyOn(jwt, 'verifyAccessToken').mockResolvedValue({
+        sub: 'auth-flow-user-uuid',
+        email: 'flow@example.com',
+        handle: 'flow',
+        client_id: 'mcp-cli',
+        scope: 'page:create',
+        iss: 'http://test.local',
+        aud: 'http://test.local',
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        iat: Math.floor(Date.now() / 1000),
+        jti: 'jti-flow',
+      });
+      const { url, close } = await startProtectedServer();
+      try {
+        const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+        const { StreamableHTTPClientTransport } =
+          await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+        const client = new Client({ name: 'test', version: '0.0.1' });
+        await client.connect(
+          new StreamableHTTPClientTransport(url, {
+            requestInit: { headers: { authorization: 'Bearer valid.jwt' } },
+          }),
+        );
+        await client.callTool({
+          name: 'show_ui',
+          arguments: {
+            spec: [{ createSurface: { surfaceId: 'm' } }],
+          },
+        });
+        expect(db.insertPage).toHaveBeenCalledTimes(1);
+        const [page] = (db.insertPage as ReturnType<typeof vi.fn>).mock.calls[0];
+        expect(page.ownerId).toBe('auth-flow-user-uuid');
+        await client.close();
+      } finally {
+        spy.mockRestore();
+        await close();
+      }
+    });
+  });
+
+  it('show_ui via unauthenticated MCP (REQUIRE_AUTH=false) leaves ownerId null', async () => {
+    // Grace-period contract: anonymous MCP show_ui still works, and the page
+    // row carries owner_id = NULL.
+    const client = await newSdkClient();
+    await client.callTool({
+      name: 'show_ui',
+      arguments: { spec: [{ createSurface: { surfaceId: 'm' } }] },
+    });
+    expect(db.insertPage).toHaveBeenCalledTimes(1);
+    const [page] = (db.insertPage as ReturnType<typeof vi.fn>).mock.calls[0];
+    // store.createPage normalizes a missing ownerId to null before insert.
+    expect(page.ownerId).toBeNull();
+    await client.close();
+  });
 });

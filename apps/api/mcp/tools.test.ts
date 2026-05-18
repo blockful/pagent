@@ -132,4 +132,132 @@ describe('registerPagentTools', () => {
     expect(out.structuredContent.result).toBe(null);
     expect(out.content[0]?.text).toMatch(/stop polling/i);
   });
+
+  // ---------------------------------------------------------------------------
+  // Auth context propagation
+  // ---------------------------------------------------------------------------
+  // The HTTP MCP transport stamps `req.auth.extra.sub` after Bearer verify
+  // and the SDK forwards that as `extra.authInfo.extra.sub` to tool handlers.
+  // These tests pin the contract that the handler lifts that out and passes
+  // it to ops.showUi / ops.showHtml as `ownerId`.
+
+  it('show_ui handler forwards extra.authInfo.extra.sub to ops.showUi as ownerId', async () => {
+    const { server, tools } = makeServer();
+    const captured: { spec?: unknown; ownerId?: string } = {};
+    registerPagentTools(
+      server,
+      makeOps({
+        showUi: async (spec, ownerId) => {
+          captured.spec = spec;
+          captured.ownerId = ownerId;
+          return { id: 'a'.repeat(32), url: 'http://x/a', expires_at: 0 };
+        },
+      }),
+    );
+    const handler = tools.get('show_ui')!.handler;
+    await handler(
+      { spec: [{ createSurface: { surfaceId: 'm' } }] },
+      {
+        authInfo: {
+          token: 'tok',
+          clientId: 'mcp-cli',
+          scopes: ['page:create'],
+          extra: { sub: 'user-uuid-abc', email: 'a@b.co' },
+        },
+      },
+    );
+    expect(captured.ownerId).toBe('user-uuid-abc');
+  });
+
+  it('show_ui handler passes ownerId = undefined when no authInfo is present', async () => {
+    const { server, tools } = makeServer();
+    let captured: string | undefined = 'sentinel';
+    registerPagentTools(
+      server,
+      makeOps({
+        showUi: async (_spec, ownerId) => {
+          captured = ownerId;
+          return { id: 'a'.repeat(32), url: 'http://x/a', expires_at: 0 };
+        },
+      }),
+    );
+    const handler = tools.get('show_ui')!.handler;
+    // Stdio adapter / anon HTTP MCP: extra has no authInfo.
+    await handler({ spec: [{ createSurface: { surfaceId: 'm' } }] }, {});
+    expect(captured).toBeUndefined();
+  });
+
+  it('show_html handler forwards extra.authInfo.extra.sub to ops.showHtml as ownerId', async () => {
+    const { server, tools } = makeServer();
+    let captured: string | undefined;
+    registerPagentTools(
+      server,
+      makeOps({
+        showHtml: async (_html, ownerId) => {
+          captured = ownerId;
+          return { id: 'b'.repeat(32), url: 'http://x/b', expires_at: 0 };
+        },
+      }),
+    );
+    const handler = tools.get('show_html')!.handler;
+    await handler(
+      { html: '<p>x</p>' },
+      {
+        authInfo: {
+          token: 'tok',
+          clientId: 'mcp-cli',
+          scopes: ['page:create'],
+          extra: { sub: 'user-uuid-def' },
+        },
+      },
+    );
+    expect(captured).toBe('user-uuid-def');
+  });
+
+  it('show_html handler passes ownerId = undefined when no authInfo is present', async () => {
+    const { server, tools } = makeServer();
+    let captured: string | undefined = 'sentinel';
+    registerPagentTools(
+      server,
+      makeOps({
+        showHtml: async (_html, ownerId) => {
+          captured = ownerId;
+          return { id: 'b'.repeat(32), url: 'http://x/b', expires_at: 0 };
+        },
+      }),
+    );
+    const handler = tools.get('show_html')!.handler;
+    await handler({ html: '<p>x</p>' }, {});
+    expect(captured).toBeUndefined();
+  });
+
+  it('handler tolerates non-string extra.authInfo.extra.sub (defensive)', async () => {
+    // If an upstream auth pipeline ever set `sub` to a number / object, the
+    // helper must not pass through garbage. ownerId should be undefined and
+    // the store will write owner_id = NULL.
+    const { server, tools } = makeServer();
+    let captured: string | undefined = 'sentinel';
+    registerPagentTools(
+      server,
+      makeOps({
+        showUi: async (_spec, ownerId) => {
+          captured = ownerId;
+          return { id: 'a'.repeat(32), url: 'http://x/a', expires_at: 0 };
+        },
+      }),
+    );
+    const handler = tools.get('show_ui')!.handler;
+    await handler(
+      { spec: [{ createSurface: { surfaceId: 'm' } }] },
+      {
+        authInfo: {
+          token: 'tok',
+          clientId: 'mcp-cli',
+          scopes: [],
+          extra: { sub: 42 as unknown as string },
+        },
+      },
+    );
+    expect(captured).toBeUndefined();
+  });
 });

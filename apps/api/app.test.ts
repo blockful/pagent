@@ -16,6 +16,11 @@ vi.mock('./db.ts', () => ({
   deletePage: vi.fn(() => Promise.resolve()),
   deleteExpiredPages: vi.fn(() => Promise.resolve({ total: 0, abandoned: 0 })),
   ping: vi.fn().mockResolvedValue(undefined),
+  // Session lookup powers the cookie auth path; default to "no session" so
+  // every test stays anonymous unless it opts in by overriding the mock.
+  getSessionWithUserByTokenHash: vi.fn(() => Promise.resolve(null)),
+  extendSessionExpiry: vi.fn(() => Promise.resolve()),
+  deleteSessionByTokenHash: vi.fn(() => Promise.resolve()),
 }));
 
 import * as db from './db.ts';
@@ -721,6 +726,86 @@ describe('OpenAPI surface', () => {
 // ---------------------------------------------------------------------------
 // Error message field
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// owner_id propagation on POST /new
+// ---------------------------------------------------------------------------
+// Verifies that an authenticated POST /new (via session cookie) propagates
+// the user's UUID onto db.insertPage(page.ownerId), and that an anonymous
+// POST /new (grace period) leaves ownerId = null. The Bearer path mirrors
+// the cookie path through resolveAuth() — covered by the middleware tests
+// in apps/api/auth/middleware.test.ts.
+
+describe('POST /new owner_id propagation', () => {
+  // Matches what the auth session uses internally: SHA-256(raw token) hex.
+  // We don't bother computing it here — the mock matches any token by always
+  // returning the same row.
+  const FAKE_USER_ID = '11111111-2222-3333-4444-555555555555';
+
+  function authedRequest(method: string, path: string, body?: unknown): Request {
+    return new Request(`${BASE}${path}`, {
+      method,
+      headers: {
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        // Raw cookie token — the auth session module hashes it before lookup;
+        // the mocked getSessionWithUserByTokenHash returns a hit regardless.
+        Cookie: 'pagent_session=raw-cookie-token-value',
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  it('passes ownerId = user.id to db.insertPage when authenticated via cookie', async () => {
+    (db.getSessionWithUserByTokenHash as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      session_id: 'session-uuid',
+      user_id: FAKE_USER_ID,
+      email: 'alice@example.com',
+      handle: 'alice',
+      expires_at: new Date(Date.now() + 86_400_000),
+    });
+    const res = await app.fetch(authedRequest('POST', '/new', { spec: { anything: 1 } }));
+    expect(res.status).toBe(201);
+    expect(db.insertPage).toHaveBeenCalledOnce();
+    const [calledPage] = vi.mocked(db.insertPage).mock.calls[0];
+    expect(calledPage.ownerId).toBe(FAKE_USER_ID);
+  });
+
+  it('passes ownerId = null to db.insertPage on anonymous POST /new (grace period)', async () => {
+    // Default mock returns null — no session → c.var.user is null → ownerId null.
+    const res = await app.fetch(req('POST', '/new', { spec: { anything: 1 } }));
+    expect(res.status).toBe(201);
+    expect(db.insertPage).toHaveBeenCalledOnce();
+    const [calledPage] = vi.mocked(db.insertPage).mock.calls[0];
+    expect(calledPage.ownerId).toBeNull();
+  });
+
+  it('passes ownerId on format=html pages too', async () => {
+    (db.getSessionWithUserByTokenHash as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      session_id: 'session-uuid',
+      user_id: FAKE_USER_ID,
+      email: 'alice@example.com',
+      handle: 'alice',
+      expires_at: new Date(Date.now() + 86_400_000),
+    });
+    const res = await app.fetch(
+      authedRequest('POST', '/new', { format: 'html', spec: '<p>hi</p>' }),
+    );
+    expect(res.status).toBe(201);
+    expect(db.insertPage).toHaveBeenCalledOnce();
+    const [calledPage] = vi.mocked(db.insertPage).mock.calls[0];
+    expect(calledPage.format).toBe('html');
+    expect(calledPage.ownerId).toBe(FAKE_USER_ID);
+  });
+
+  it('anonymous format=html POST /new also lands with ownerId = null', async () => {
+    const res = await app.fetch(req('POST', '/new', { format: 'html', spec: '<p>hi</p>' }));
+    expect(res.status).toBe(201);
+    expect(db.insertPage).toHaveBeenCalledOnce();
+    const [calledPage] = vi.mocked(db.insertPage).mock.calls[0];
+    expect(calledPage.format).toBe('html');
+    expect(calledPage.ownerId).toBeNull();
+  });
+});
 
 describe('error message field', () => {
   it('500 body includes non-empty message field', async () => {

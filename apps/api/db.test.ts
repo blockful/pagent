@@ -411,3 +411,68 @@ describe('init() — pages.owner_id alteration', () => {
     expect(flat).toMatch(/create index if not exists pages_owner_id_idx on pages \(owner_id\)/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// insertPage — owner_id binding (structural)
+// ---------------------------------------------------------------------------
+// Real DB writes are out of scope for the unit suite; verify the INSERT
+// statement references `owner_id` and binds `p.ownerId ?? null` so the SQL
+// NULL path is exercised when the caller omits the field. Behavioural
+// coverage (authenticated POST /new → owner_id set; anon → NULL) lives in
+// app.test.ts which mocks db.insertPage.
+
+describe('insertPage — owner_id column wiring (structural)', () => {
+  it('INSERT statement includes the owner_id column', () => {
+    expect(flat).toMatch(/insert into pages \(id, spec, format, state, expires_at, owner_id\)/i);
+  });
+
+  it('owner_id value binds p.ownerId with a nullish-coalescing fallback to null', () => {
+    // The grace-period contract (REQUIRE_AUTH=false → owner_id IS NULL) hinges
+    // on this fallback — if the bind dropped `?? null`, an `undefined` would
+    // surface as the string 'undefined' or a 23502 not-null violation.
+    expect(flat).toMatch(/\$\{p\.ownerId \?\? null\}/);
+  });
+});
+
+describe('Page type — ownerId field', () => {
+  it('Page accepts ownerId and reads it back unchanged', () => {
+    const p: Page = {
+      id: 'aabbccddeeff00112233445566778899',
+      spec: { foo: 1 },
+      format: 'a2ui',
+      state: 'open',
+      result: null,
+      createdAt: 1,
+      expiresAt: 2,
+      ownerId: '11111111-2222-3333-4444-555555555555',
+    };
+    expect(p.ownerId).toBe('11111111-2222-3333-4444-555555555555');
+  });
+
+  it('Page accepts ownerId = null (anonymous grace-period page)', () => {
+    const p: Page = {
+      id: 'aabbccddeeff00112233445566778899',
+      spec: { foo: 1 },
+      format: 'a2ui',
+      state: 'open',
+      result: null,
+      createdAt: 1,
+      expiresAt: 2,
+      ownerId: null,
+    };
+    expect(p.ownerId).toBeNull();
+  });
+
+  it('Page accepts omitted ownerId (treated as null at the DB layer)', () => {
+    const p: Page = {
+      id: 'aabbccddeeff00112233445566778899',
+      spec: { foo: 1 },
+      format: 'a2ui',
+      state: 'open',
+      result: null,
+      createdAt: 1,
+      expiresAt: 2,
+    };
+    expect(p.ownerId).toBeUndefined();
+  });
+});
