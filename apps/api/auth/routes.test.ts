@@ -41,6 +41,17 @@ vi.mock('../db.ts', () => ({
   getRefreshTokenByHash: vi.fn(),
   revokeRefreshToken: vi.fn(),
   revokeAllRefreshTokensForFamily: vi.fn(),
+  // Session helpers (Task 08) — used by resolveAuth middleware + /auth/me +
+  // /auth/logout + browser_session callback paths. Stubbed so tests can drive
+  // the cookie-session state directly without a live Postgres.
+  insertSession: vi.fn(() => Promise.resolve()),
+  getSessionWithUserByTokenHash: vi.fn(() => Promise.resolve(null)),
+  extendSessionExpiry: vi.fn(() => Promise.resolve()),
+  deleteSessionByTokenHash: vi.fn(() => Promise.resolve()),
+  // Magic link + Google callback helpers — referenced by the browser_session
+  // tests below so the verify path can succeed without a real magic link row.
+  insertMagicLink: vi.fn(() => Promise.resolve()),
+  verifyAndConsumeMagicLink: vi.fn(() => Promise.resolve(null)),
 }));
 
 import * as db from '../db.ts';
@@ -750,5 +761,296 @@ describe('POST /oauth/revoke', () => {
     // JSON content-type isn't form-encoded; provider sees no body, no work
     // gets done — but the response status is still 200 per RFC 7009.
     expect(db.revokeRefreshToken).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /auth/me + POST /auth/logout (Task 09 — browser session)
+// ---------------------------------------------------------------------------
+// /auth/me returns the cookie-authenticated user's profile. /auth/logout
+// deletes the DB row and clears the cookie. Both depend on the resolveAuth
+// middleware populating c.var.user from the pagent_session cookie — we drive
+// that here by stubbing getSessionWithUserByTokenHash to return a session row.
+
+import { SESSION_COOKIE_NAME } from './middleware.ts';
+
+const SESSION_USER_ROW = {
+  id: '33333333-4444-5555-6666-777777777777',
+  handle: 'alex',
+  email: 'alex@blockful.io',
+  name: 'Alex Netto',
+  avatar_url: 'https://example.com/avatar.png',
+  created_at: NOW,
+  updated_at: NOW,
+};
+
+const SESSION_LOOKUP_ROW = {
+  session_id: 'session-uuid-aabb',
+  user_id: SESSION_USER_ROW.id,
+  email: SESSION_USER_ROW.email,
+  handle: SESSION_USER_ROW.handle,
+  expires_at: new Date(Date.now() + 86400_000),
+};
+
+describe('GET /auth/me', () => {
+  beforeEach(() => {
+    vi.mocked(db.getSessionWithUserByTokenHash).mockReset();
+    vi.mocked(db.extendSessionExpiry).mockReset();
+    vi.mocked(db.getUserById).mockReset();
+  });
+
+  it('returns the user profile when a valid session cookie is present', async () => {
+    vi.mocked(db.getSessionWithUserByTokenHash).mockResolvedValueOnce(SESSION_LOOKUP_ROW);
+    vi.mocked(db.extendSessionExpiry).mockResolvedValueOnce(undefined);
+    vi.mocked(db.getUserById).mockResolvedValueOnce(SESSION_USER_ROW);
+
+    const res = await app.fetch(
+      new Request(`${BASE}/auth/me`, {
+        headers: { cookie: `${SESSION_COOKIE_NAME}=valid-session-token` },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({
+      id: SESSION_USER_ROW.id,
+      handle: SESSION_USER_ROW.handle,
+      email: SESSION_USER_ROW.email,
+      name: SESSION_USER_ROW.name,
+      avatar_url: SESSION_USER_ROW.avatar_url,
+    });
+  });
+
+  it('returns 401 when no session cookie is provided', async () => {
+    const res = await app.fetch(new Request(`${BASE}/auth/me`));
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe('unauthorized');
+    // No DB user lookup attempted when the request is anonymous.
+    expect(db.getUserById).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when the session cookie is unknown', async () => {
+    vi.mocked(db.getSessionWithUserByTokenHash).mockResolvedValueOnce(null);
+    const res = await app.fetch(
+      new Request(`${BASE}/auth/me`, {
+        headers: { cookie: `${SESSION_COOKIE_NAME}=stale-or-expired` },
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(db.getUserById).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when the user row vanished after the cookie was issued', async () => {
+    // Cascade-delete edge case: session row exists (lookup returns it) but the
+    // user was deleted between issuing and now. We treat that as unauthorized.
+    vi.mocked(db.getSessionWithUserByTokenHash).mockResolvedValueOnce(SESSION_LOOKUP_ROW);
+    vi.mocked(db.extendSessionExpiry).mockResolvedValueOnce(undefined);
+    vi.mocked(db.getUserById).mockResolvedValueOnce(null);
+
+    const res = await app.fetch(
+      new Request(`${BASE}/auth/me`, {
+        headers: { cookie: `${SESSION_COOKIE_NAME}=valid-but-orphaned` },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('POST /auth/logout', () => {
+  beforeEach(() => {
+    vi.mocked(db.getSessionWithUserByTokenHash).mockReset();
+    vi.mocked(db.deleteSessionByTokenHash).mockReset();
+    vi.mocked(db.extendSessionExpiry).mockReset();
+  });
+
+  it('deletes the DB session and clears the cookie when a session is present', async () => {
+    vi.mocked(db.getSessionWithUserByTokenHash).mockResolvedValueOnce(SESSION_LOOKUP_ROW);
+    vi.mocked(db.extendSessionExpiry).mockResolvedValueOnce(undefined);
+    vi.mocked(db.deleteSessionByTokenHash).mockResolvedValueOnce(undefined);
+
+    const res = await app.fetch(
+      new Request(`${BASE}/auth/logout`, {
+        method: 'POST',
+        headers: { cookie: `${SESSION_COOKIE_NAME}=raw-cookie-token-abc` },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(true);
+    expect(db.deleteSessionByTokenHash).toHaveBeenCalledTimes(1);
+
+    // Set-Cookie clears the value with Max-Age=0.
+    const setCookie = res.headers.get('set-cookie');
+    expect(setCookie).toContain(`${SESSION_COOKIE_NAME}=`);
+    expect(setCookie?.toLowerCase()).toContain('max-age=0');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie?.toLowerCase()).toContain('samesite=lax');
+    expect(setCookie).toContain('Path=/');
+  });
+
+  it('clears the cookie even when no session cookie was sent (idempotent)', async () => {
+    const res = await app.fetch(new Request(`${BASE}/auth/logout`, { method: 'POST' }));
+    expect(res.status).toBe(200);
+    expect(db.deleteSessionByTokenHash).not.toHaveBeenCalled();
+    const setCookie = res.headers.get('set-cookie');
+    expect(setCookie).toContain(`${SESSION_COOKIE_NAME}=`);
+    expect(setCookie?.toLowerCase()).toContain('max-age=0');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Browser session login flow (browser_session=1)
+// ---------------------------------------------------------------------------
+// Verifies that:
+//   1. GET /oauth/authorize?browser_session=1 renders the login page without
+//      requiring client_id / redirect_uri / code_challenge.
+//   2. Google callback with browser_session state sets a session cookie and
+//      redirects to /.
+//   3. Magic link verify with browser_session ctx sets a session cookie and
+//      redirects to /.
+
+import { signStateJwt } from './state-jwt.ts';
+import { env } from '../schemas.ts';
+
+describe('Browser session login flow', () => {
+  beforeAll(() => {
+    // The state JWT signer needs AUTH_STATE_SECRET set. Other auth tests do
+    // this in their own beforeAll; here we set it defensively (idempotent —
+    // the routes test file may run in isolation).
+    (env as { AUTH_STATE_SECRET: string | undefined }).AUTH_STATE_SECRET =
+      'test-auth-state-secret-very-long-random-value-32-bytes';
+    (env as { GOOGLE_CLIENT_ID: string | undefined }).GOOGLE_CLIENT_ID = 'test-google-client-id';
+    (env as { GOOGLE_CLIENT_SECRET: string | undefined }).GOOGLE_CLIENT_SECRET =
+      'test-google-client-secret';
+    (env as { GOOGLE_REDIRECT_URI: string | undefined }).GOOGLE_REDIRECT_URI =
+      'http://localhost/oauth/callback/google';
+  });
+
+  beforeEach(() => {
+    vi.mocked(db.insertSession).mockReset();
+    vi.mocked(db.upsertUser).mockReset();
+    vi.mocked(db.getUserByHandle).mockReset();
+    vi.mocked(db.verifyAndConsumeMagicLink).mockReset();
+  });
+
+  it('GET /oauth/authorize?browser_session=1 renders login page without other params', async () => {
+    // Use a unique IP so the per-IP rate limit doesn't interfere with tests
+    // run in the same file (the authorize bucket caps at 30/min/IP).
+    const res = await app.fetch(
+      new Request(`${BASE}/oauth/authorize?browser_session=1`, {
+        headers: { 'x-forwarded-for': '198.51.100.99' },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const html = await res.text();
+    expect(html).toContain('Continue with Google');
+    expect(html).toContain('<form method="POST" action="/oauth/magic/send"');
+  });
+
+  it('Magic link verify with browser_session=true sets cookie and redirects to /', async () => {
+    // Mock the magic link DB row's authorize_context to flag browser_session.
+    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce({
+      email: 'alex@blockful.io',
+      authorizeContext: { browserSession: true },
+    });
+    vi.mocked(db.getUserByHandle).mockResolvedValue(null);
+    vi.mocked(db.upsertUser).mockResolvedValueOnce(SESSION_USER_ROW);
+    vi.mocked(db.insertSession).mockResolvedValueOnce(undefined);
+
+    const res = await app.fetch(
+      new Request(`${BASE}/oauth/magic?token=browser-flow-token`, {
+        headers: {
+          'user-agent': 'MockBrowser/1.0',
+          'x-forwarded-for': '10.5.0.1',
+        },
+      }),
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/');
+
+    const setCookie = res.headers.get('set-cookie');
+    expect(setCookie).toContain(`${SESSION_COOKIE_NAME}=`);
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie?.toLowerCase()).toContain('samesite=lax');
+    expect(setCookie).toContain('Path=/');
+    expect(setCookie?.toLowerCase()).toContain('max-age=2592000');
+
+    // Session insert captured the IP and user-agent from the request.
+    expect(db.insertSession).toHaveBeenCalledTimes(1);
+    const insertArg = vi.mocked(db.insertSession).mock.calls[0]![0];
+    expect(insertArg.userId).toBe(SESSION_USER_ROW.id);
+    expect(insertArg.ipAddress).toBe('10.5.0.1');
+    expect(insertArg.userAgent).toBe('MockBrowser/1.0');
+
+    // No auth code minted — this is the cookie path, not the MCP-client path.
+    expect(db.insertAuthCode).not.toHaveBeenCalled();
+  });
+
+  it('Google callback with browser_session=true sets cookie and redirects to /', async () => {
+    // Build a state JWT that carries browser_session=true.
+    const browserState = await signStateJwt({ browserSession: true });
+
+    // Mock Google's token endpoint to return a usable id_token.
+    const fakeIdToken = (() => {
+      const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString(
+        'base64url',
+      );
+      const payload = Buffer.from(
+        JSON.stringify({
+          sub: 'google-sub-browser',
+          email: 'alex@blockful.io',
+          name: 'Alex Netto',
+        }),
+      ).toString('base64url');
+      return `${header}.${payload}.fake-signature`;
+    })();
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async () => {
+      return new Response(JSON.stringify({ id_token: fakeIdToken, access_token: 'g-at' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    vi.mocked(db.getUserByHandle).mockResolvedValue(null);
+    vi.mocked(db.upsertUser).mockResolvedValueOnce(SESSION_USER_ROW);
+    vi.mocked(db.insertSession).mockResolvedValueOnce(undefined);
+
+    try {
+      const res = await app.fetch(
+        new Request(
+          `${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(browserState)}`,
+          {
+            headers: {
+              'user-agent': 'MockBrowser/2.0',
+              'x-forwarded-for': '203.0.113.77',
+            },
+          },
+        ),
+      );
+
+      expect(res.status).toBe(302);
+      expect(res.headers.get('location')).toBe('/');
+
+      const setCookie = res.headers.get('set-cookie');
+      expect(setCookie).toContain(`${SESSION_COOKIE_NAME}=`);
+      expect(setCookie).toContain('HttpOnly');
+      expect(setCookie?.toLowerCase()).toContain('samesite=lax');
+
+      // Session insert captured the IP and user-agent.
+      expect(db.insertSession).toHaveBeenCalledTimes(1);
+      const insertArg = vi.mocked(db.insertSession).mock.calls[0]![0];
+      expect(insertArg.userId).toBe(SESSION_USER_ROW.id);
+      expect(insertArg.ipAddress).toBe('203.0.113.77');
+      expect(insertArg.userAgent).toBe('MockBrowser/2.0');
+
+      // No auth code minted — this is the cookie path.
+      expect(db.insertAuthCode).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });

@@ -13,8 +13,10 @@
  */
 import type { Context } from 'hono';
 import { Hono } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
 import { rateLimiter } from 'hono-rate-limiter';
 import { clientKey } from '../client-key.ts';
+import * as db from '../db.ts';
 import { RateLimiter } from '../mcp/rate-limit.ts';
 import { env } from '../schemas.ts';
 import { InvalidClientMetadataError, getClient, registerClient } from './clients-store.ts';
@@ -27,6 +29,8 @@ import {
   sendMagicLink,
   verifyMagicLink,
 } from './magic-link.ts';
+import type { AuthVariables } from './middleware.ts';
+import { SESSION_COOKIE_NAME } from './middleware.ts';
 import {
   TokenError,
   createAuthCode,
@@ -35,6 +39,7 @@ import {
   revokeToken,
   upsertUser,
 } from './provider.ts';
+import { createSession, deleteSession } from './session.ts';
 import { signStateJwt, verifyStateJwt } from './state-jwt.ts';
 
 // Pagent ships exactly three OAuth scopes. Listed in both metadata documents
@@ -45,7 +50,52 @@ const SCOPES_SUPPORTED = ['page:create', 'page:read', 'page:write'] as const;
 // `resource_documentation`. Stable URL, doesn't depend on PUBLIC_URL.
 const DOCS_URL = 'https://github.com/anthropics/agent-ui-session#readme';
 
-export const authRoutes = new Hono();
+export const authRoutes = new Hono<{ Variables: AuthVariables }>();
+
+// --- Session cookie helpers --------------------------------------------------
+// `pagent_session` cookie attributes per spec §6.2 — HttpOnly, Secure in prod,
+// SameSite=Lax, Path=/, 30-day Max-Age (mirroring SESSION_MAX_AGE_DAYS).
+//
+// We don't set `secure` in dev because the renderer at http://localhost would
+// otherwise fail to receive the cookie — modern browsers reject Secure cookies
+// over plain http even on localhost in many configurations. The production
+// codepath stays correct: when NODE_ENV=production, Secure is set.
+
+const SESSION_COOKIE_MAX_AGE_SECONDS = env.SESSION_MAX_AGE_DAYS * 24 * 60 * 60;
+
+function setSessionCookie(c: Context, token: string): void {
+  setCookie(c, SESSION_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: env.NODE_ENV === 'production',
+    sameSite: 'Lax',
+    path: '/',
+    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
+  });
+}
+
+function clearSessionCookie(c: Context): void {
+  setCookie(c, SESSION_COOKIE_NAME, '', {
+    httpOnly: true,
+    secure: env.NODE_ENV === 'production',
+    sameSite: 'Lax',
+    path: '/',
+    maxAge: 0,
+  });
+}
+
+/**
+ * Extract the client's IP from `x-forwarded-for`. Last hop wins — that's the
+ * one our load balancer added. Identical to the rate-limit key derivation
+ * (`clientKey`) but kept inline here so the cookie path doesn't depend on a
+ * helper designed for a different purpose. Returns undefined when the header
+ * is absent or empty so the DB column gets a clean NULL.
+ */
+function getClientIp(c: Context): string | undefined {
+  const xff = c.req.header('x-forwarded-for');
+  if (!xff) return undefined;
+  const last = xff.split(',').pop()?.trim();
+  return last && last.length > 0 ? last : undefined;
+}
 
 // --- AS metadata (RFC 8414) --------------------------------------------------
 // Every endpoint URL is derived from PUBLIC_URL via getIssuer() — never
@@ -256,16 +306,16 @@ authRoutes.get('/oauth/authorize', authorizeLimiter, async (c) => {
 });
 
 // --- GET /oauth/callback/google ---------------------------------------------
-// Google's redirect after the user grants/denies consent. We:
-//   1. Verify the state JWT (rejects tampering, replay, expiry).
-//   2. Exchange Google's code for an ID token, decode the claims.
-//   3. Upsert the user by email, generating a handle on first sight.
-//   4. Mint a Pagent authorization code bound to the original PKCE challenge.
-//   5. 302 to the MCP client's redirect_uri with code+state.
+// Google's redirect after the user grants/denies consent. Two flows converge
+// here:
 //
-// Browser-session callbacks (state encoded `browser_session: true`) are not
-// yet handled — Task 06 introduces session cookies. For now the
-// browser_session path falls through to an error render.
+//   MCP-client flow (default): verify state JWT → exchange Google code →
+//     upsert user → mint Pagent auth code → 302 to redirect_uri?code=&state=.
+//
+//   Browser-session flow (`browserSession: true` in state): verify state →
+//     exchange code → upsert user → createSession() → set Set-Cookie header
+//     → 302 to `/`. No auth code; the renderer reads /auth/me with the
+//     freshly-issued cookie.
 
 authRoutes.get('/oauth/callback/google', async (c) => {
   const code = c.req.query('code');
@@ -288,16 +338,42 @@ authRoutes.get('/oauth/callback/google', async (c) => {
     return renderError(c, 'Authorization session expired or invalid. Please restart sign-in.');
   }
 
+  // For the browser-session path the only state-bound check is the JWT
+  // signature (already validated). The MCP-client path additionally validates
+  // every PKCE field — those checks would reject a browser-session callback,
+  // so split the flow here before re-validating.
   if (claims.browserSession) {
-    // Task 06 will issue a session cookie here. For now, surface a clear
-    // error so deployment of this task doesn't silently break the browser
-    // flow path that Task 06 will complete.
-    return renderError(c, 'Browser session login is not yet supported.');
+    let profile: Awaited<ReturnType<typeof exchangeGoogleCode>>;
+    try {
+      profile = await exchangeGoogleCode(code);
+    } catch {
+      return renderError(c, 'Google sign-in failed. Please try again.');
+    }
+
+    const user = await upsertUser({
+      email: profile.email,
+      name: profile.name,
+      avatarUrl: profile.picture,
+    });
+
+    const sessionToken = await createSession(
+      user.id,
+      getClientIp(c),
+      c.req.header('user-agent') ?? undefined,
+    );
+    setSessionCookie(c, sessionToken);
+    // Redirect to the application root. PUBLIC_URL points at the API host,
+    // which isn't where the renderer lives — so we use a relative `/` and let
+    // the browser resolve it against the request origin. Operators who deploy
+    // the API on a separate hostname from the renderer can configure a CORS
+    // / reverse-proxy setup so this still lands on the dashboard.
+    return c.redirect('/', 302);
   }
 
-  // Validate the resumed claims — they were signed by us 15 minutes ago but
-  // the client could have been deleted in between, or the redirect_uri
-  // could have changed (we re-validate to defend against that edge case).
+  // MCP-client flow: validate the resumed claims — they were signed by us 15
+  // minutes ago but the client could have been deleted in between, or the
+  // redirect_uri could have changed (we re-validate to defend against that
+  // edge case).
   if (!claims.clientId || !claims.redirectUri || !claims.codeChallenge) {
     return renderError(c, 'Authorization state missing required fields.');
   }
@@ -545,14 +621,21 @@ authRoutes.get('/oauth/magic', async (c) => {
 
   const ctx = consumed.authorizeContext;
 
-  // Without a redirect_uri there's nowhere to send the user. The
-  // browser-session flow (introduced in Task 09) will hit this path with
-  // `browserSession: true` and set a cookie instead — for now surface a
-  // clean error so deployment doesn't silently break that path.
+  // Browser-session flow: no MCP client to redirect back to. Issue a session
+  // cookie and send the user to the application root. Checked before the
+  // redirect_uri guard because this path is *expected* not to carry one.
+  if (ctx.browserSession) {
+    const sessionToken = await createSession(
+      user.id,
+      getClientIp(c),
+      c.req.header('user-agent') ?? undefined,
+    );
+    setSessionCookie(c, sessionToken);
+    return c.redirect('/', 302);
+  }
+
+  // Without a redirect_uri there's nowhere to send the user.
   if (!ctx.redirectUri) {
-    if (ctx.browserSession) {
-      return renderError(c, 'Browser session login is not yet supported.');
-    }
     return renderError(
       c,
       'This sign-in link is not bound to an OAuth flow. Please restart sign-in from your client.',
@@ -760,4 +843,53 @@ authRoutes.post('/oauth/revoke', revokeLimiter, async (c) => {
     }
   }
   return c.body(null, 200);
+});
+
+// --- GET /auth/me -----------------------------------------------------------
+// Browser-session profile endpoint. Returns the authenticated user's full
+// profile (handle, email, name, avatar) for the renderer/dashboard to display.
+//
+// Cookie-only by design — Bearer-authenticated requests get 401 here. Bearer
+// is for MCP / API clients which already received user claims in the JWT at
+// /oauth/token time; pointing them at /auth/me would be redundant and would
+// expose this endpoint to the API attack surface. By restricting to cookie
+// auth we keep the browser path's identity model tight.
+
+authRoutes.get('/auth/me', async (c) => {
+  const user = c.var.user;
+  if (!user || user.authMethod !== 'cookie') {
+    return c.json({ error: 'unauthorized', message: 'Authentication required' }, 401);
+  }
+  // The middleware-supplied AuthUser only carries id/email/handle. /auth/me
+  // promises a fuller shape (name, avatar_url) so the dashboard can render a
+  // user card without a follow-up lookup. We re-query the user row here.
+  const row = await db.getUserById(user.id);
+  if (!row) {
+    return c.json({ error: 'unauthorized', message: 'User not found' }, 401);
+  }
+  return c.json({
+    id: row.id,
+    handle: row.handle,
+    email: row.email,
+    name: row.name,
+    avatar_url: row.avatar_url,
+  });
+});
+
+// --- POST /auth/logout ------------------------------------------------------
+// Browser-session logout. Deletes the DB row (so the cookie can't be re-used
+// even if the browser keeps it) and clears the cookie via Set-Cookie with
+// Max-Age=0. Idempotent — second logout is a no-op.
+//
+// We always clear the cookie, even if the session was already gone server-side
+// (e.g. another tab logged out). That makes the client behavior predictable:
+// after a successful POST, the browser jar no longer holds the credential.
+
+authRoutes.post('/auth/logout', async (c) => {
+  const sessionToken = getCookie(c, SESSION_COOKIE_NAME);
+  if (sessionToken) {
+    await deleteSession(sessionToken);
+  }
+  clearSessionCookie(c);
+  return c.json({ ok: true });
 });
