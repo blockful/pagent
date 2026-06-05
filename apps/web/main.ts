@@ -6,6 +6,7 @@ import { basicCatalog } from '@a2ui/lit/v0_9';
 import '@a2ui/lit/v0_9'; // registers <a2ui-surface>
 import './home'; // registers <home-page>
 import './components-showcase'; // registers <components-showcase>
+import './demo'; // registers <pagent-demo>
 import { assertCatalogsAllowed } from './spec-guard.js';
 import { nextPollDelay, pollTimeoutMessage } from './poll-backoff.js';
 import { createSandboxedIframe } from './html-renderer.js';
@@ -437,6 +438,9 @@ const root = document.getElementById('app')!;
 if (location.pathname === '/_components') {
   root.classList.add('is-home');
   root.appendChild(document.createElement('components-showcase'));
+} else if (location.pathname === '/demo' || location.pathname === '/demo/') {
+  root.classList.add('is-home');
+  root.appendChild(document.createElement('pagent-demo'));
 } else if (!pageId) {
   root.classList.add('is-home');
   root.appendChild(document.createElement('home-page'));

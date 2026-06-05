@@ -20,6 +20,7 @@ vi.mock('./db.ts', () => ({
 
 import * as db from './db.ts';
 import { app, MAX_BODY_BYTES } from './app.ts';
+import { metrics } from './metrics.ts';
 
 // A valid 32-char hex id that has never been inserted.
 const UNKNOWN_ID = 'deadbeefdeadbeefdeadbeefdeadbeef';
@@ -68,6 +69,37 @@ beforeEach(() => {
   (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(null);
   (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValue({ kind: 'not_found' });
   (db.fetchAndAdvanceResult as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+});
+
+// ---------------------------------------------------------------------------
+// GET /:id — adoption funnel "render" signal
+// ---------------------------------------------------------------------------
+
+describe('GET /:id metrics', () => {
+  // In test mode the OTel SDK isn't started, so every meter.createCounter()
+  // returns the SAME no-op instrument — spying on one observes them all
+  // (including httpRequests). Isolate the pagesViewed signal by its
+  // `{ format }` attribute, which only the render counter carries here.
+  const renderCalls = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter((a) => !!a[1] && typeof a[1] === 'object' && 'format' in a[1]);
+
+  it('records exactly one render with the page format on a successful read', async () => {
+    const spy = vi.spyOn(metrics.pagesViewed, 'add');
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(fakePage({ format: 'a2ui' }));
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
+    expect(res.status).toBe(200);
+    expect(renderCalls(spy)).toEqual([[1, { format: 'a2ui' }]]);
+    spy.mockRestore();
+  });
+
+  it('does not record a render when the page is missing/expired', async () => {
+    const spy = vi.spyOn(metrics.pagesViewed, 'add');
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
+    expect(res.status).toBe(404);
+    expect(renderCalls(spy)).toHaveLength(0);
+    spy.mockRestore();
+  });
 });
 
 // ---------------------------------------------------------------------------

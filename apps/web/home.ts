@@ -501,17 +501,22 @@ class HomePage extends LitElement {
           </nav>
 
           <header class="hero">
-            <p class="eyebrow">Generative UI · for terminal agents</p>
-            <h1>Give your agent a <em>real UI</em>—<br />not a fake form in prose.</h1>
+            <p class="eyebrow">Generative UI · for any AI agent</p>
+            <h1>Your AI agent can't show you a UI.<br /><em>Now it can.</em></h1>
             <p class="lede">
-              Your terminal agent posts a form spec, gets back a short URL, and waits. You open it,
-              fill it out, submit. The agent reads the result and keeps going.
-              <strong>One handoff. Single-shot. No host app required.</strong>
+              Pagent lets any terminal agent render real browser UI — interactive
+              <strong>forms</strong> it reads your answer back from, and rich
+              <strong>dashboards</strong> you just look at. Your agent posts a spec, prints a short
+              link, and waits. You open it, do the thing, and the conversation keeps going.
+              <strong
+                >Works in Claude Code, Cursor, Codex, Cline — any MCP client. Free, no
+                signup.</strong
+              >
             </p>
 
             <div class="install" id="install" aria-labelledby="install-label">
               <div class="install-head">
-                <span class="install-label" id="install-label">Install · Any agent</span>
+                <span class="install-label" id="install-label">Install · paste into any agent</span>
                 <button
                   type="button"
                   class="copy-btn ${this.copied ? 'is-copied' : ''}"
@@ -525,13 +530,39 @@ class HomePage extends LitElement {
               <pre class="install-body is-prompt"><code>${AGENT_PROMPT}</code></pre>
             </div>
 
+            <div class="install" aria-labelledby="install-direct-label">
+              <div class="install-head">
+                <span class="install-label" id="install-direct-label">Install · directly</span>
+              </div>
+              <pre
+                class="install-body"
+              ><code><span class="prompt">claude</span> mcp add --transport http pagent https://api.pagent.link/mcp
+
+<span class="prompt">#</span> or the Claude Code plugin:
+/plugin marketplace add blockful/pagent
+/plugin install pagent@pagent</code></pre>
+              <div class="install-foot">
+                Cursor · Codex · Cline · OpenCode: add
+                <code>{ "type": "http", "url": "https://api.pagent.link/mcp" }</code> under
+                <code>mcpServers.pagent</code> in your config.
+              </div>
+            </div>
+
             <div class="terminal" aria-hidden="true">
               <div>
                 <span class="prompt">›</span
                 ><span class="dim">"ask me my favorite color via a UI"</span>
               </div>
               <div>
-                <span class="prompt">↳</span><span class="url">https://pagent.link/4f2a…b13c</span
+                <span class="prompt">↳</span><span class="url">https://pagent.link/4f2a…b13c</span>
+              </div>
+              <div class="rule"></div>
+              <div>
+                <span class="prompt">›</span
+                ><span class="dim">"show me a dashboard of the test results"</span>
+              </div>
+              <div>
+                <span class="prompt">↳</span><span class="url">https://pagent.link/9c1d…7e2a</span
                 ><span class="caret"></span>
               </div>
             </div>

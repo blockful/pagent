@@ -272,6 +272,9 @@ const getPageHandler = async (c: Context) => {
     return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
   const p = await db.getActivePage(idResult.data);
   if (!p) return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
+  // The "render" signal for the adoption funnel: a page being fetched by the
+  // renderer is the closest server-side proxy for "the user saw the UI".
+  metrics.pagesViewed.add(1, { format: p.format });
   return c.json({
     spec: p.spec,
     format: p.format,
@@ -330,7 +333,7 @@ const submitResultHandler = async (c: Context) => {
       },
       409,
     );
-  metrics.pagesSubmitted.add(1);
+  metrics.pagesSubmitted.add(1, { format: page.format });
   metrics.pageSubmitLatency.record((Date.now() - outcome.createdAt.getTime()) / 1000);
   return c.json({ ok: true });
 };
