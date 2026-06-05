@@ -1,6 +1,6 @@
 # Pagent — GTM / Launch Campaign
 
-> 2026-06-04. Built on the [research](./03-research-agent-tool-launches.md) (adversarially verified) and the launch decisions: full-v2-then-launch, ecosystem-wide audience, adoption north-star. **Channel playbooks for Reddit/Discord and the Runway section will be enriched by research round 2 (in progress).**
+> 2026-06-04. Built on the [research](./03-research-agent-tool-launches.md) (adversarially verified) and the launch decisions: full-v2-then-launch, ecosystem-wide audience, adoption north-star. The Reddit/Discord playbook and the Runway section reflect **research round 2 (complete)**.
 
 ## 0. What the research changed about the plan
 
@@ -26,11 +26,11 @@ You already have the Grafana Product dashboard ([infra/observability](../../infr
 | Phase | When | Goal | Key moves |
 |------|------|------|-----------|
 | **0 · Foundation** | Now → during v2 build | Be launch-ready | Instrument north-star funnel; ship P0 copy + OG image; build always-on demo page + 15–20s demo video; publish to official MCP Registry; claim aggregator listings |
-| **1 · Build-in-public + beta** | Mid–late build | Proof + footage + allies | Founder posts real build progress on X (demo clips, not hype); recruit ~10–20 design partners across Claude Code / Cursor / Cline communities; collect testimonials + usage |
+| **1 · Design partners + build-in-public** | Mid–late build | Validation + footage + allies | Recruit a **~5–12 design-partner cohort** (best-evidenced runway tactic) across Claude Code / Cursor / Cline, with a lightweight commitment filter; founder posts demo clips on X (hygiene + footage, *not* the growth engine); collect testimonials + real usage |
 | **2 · Launch moment** | v2 shipped + funnel live | Concentrated attention → activation | Sequenced: **Show HN** (day A) → **Product Hunt** (day B) → **X demo thread** (launch day) → **Reddit/Discord** seeding (rolling). Founder present all day to reply |
 | **3 · Flywheel** | Post-launch | Convert attention → retained use | Publish activation milestones; ship example/template gallery; keep shipping-in-public; double down on channels that converted |
 
-> The research is **thin/unverified on runway tactics** (the one adjacent claim — a 400-person waitlist — was refuted). Phase 1 is therefore framed as cheap, high-signal *qualitative* work (feedback + footage + early adopters), not a waitlist-scale bet. Round-2 research targets this directly.
+> **Round-2 research** confirms **design partners** (~5–12 target users engaged while building) as the best-evidenced runway tactic — distinct from waitlists/betas. Adapt the enterprise "payment-as-screen" (Sierra) to a free tool via a **lightweight commitment filter** (a short call / feedback cadence) to screen for serious users. **Build-in-public is hygiene, not a proven adoption driver** — its headline ROI anecdote was refuted — so do it for relationships + footage, not as the engine. A big waitlist is explicitly **not** a prerequisite.
 
 ## 3. Channel playbooks (grounded, with what to avoid)
 
@@ -50,8 +50,10 @@ You already have the Grafana Product dashboard ([infra/observability](../../infr
 - **The demo is the pitch.** Short screen-recordings (agent→real-UI→result), weekly during the build (build-in-public), then a founder launch-day thread. Treat each clip as a *live demo, outcome first*.
 - *(X-specific tactics were lighter in the evidence; this leans on the verified demo-video findings. Round 2 may add more.)*
 
-### Reddit + Discord — native seeding *(lowest evidence — treat as participation, not "launch")*
-- No surviving verified claims yet (round-2 target). Interim judgment: participate genuinely in r/ClaudeAI, r/mcp, r/Cursor, r/LocalLLaMA and the Anthropic/MCP/Cursor Discords; lead with the demo + "free, no login"; answer questions; **never drop-and-run.** Seed where people already ask "how do I get my agent to show a UI?"
+### Reddit + Discord — native seeding *(round-2 evidence; caveated)*
+- **Discord:** **skip the official MCP Discord** — it's contributor-only and discourages product marketing. Target the **Cursor Discord (~37K)**, which explicitly sanctions "share what you're working on" / "Built with Cursor." Treat **r/ClaudeAI + the Anthropic Discord as participate-and-learn** (research couldn't validate them — absent evidence, not disproven).
+- **Reddit — format beats announcement.** Lead with a **teardown/comparison + a demo GIF** ("I made my agent render real forms instead of faking them in chat — here's how"); **be the first commenter** disclosing authorship + technical detail; **never make a Twitter/X link the primary link.** Respect each sub's promo norms — **r/SideProject** is friendliest (you'll have a shipped product); r/startups / r/Entrepreneur gate promo to designated threads.
+- **Avoid:** "Check out my tool" headlines, contextless "Feedback?" posts, copy-pasted cross-posts (removed as spam). Skip the folklore ratios (9:1 / 10:1) — just genuinely participate.
 
 ## 4. Distribution: registries (table-stakes, not adoption)
 - **Publish once to the official MCP Registry** (`registry.modelcontextprotocol.io`) — designed hub-and-spoke so listings propagate to client marketplaces. **Verify which marketplaces actually auto-ingest** as of mid-2026 (propagation was incomplete in late 2025; Smithery/PulseMCP/MCP.so/Glama/Cursor directory may need manual submission).
@@ -75,7 +77,7 @@ You already have the Grafana Product dashboard ([infra/observability](../../infr
 - Channel tactics (PH/HN/X) rest largely on practitioner blogs — directional, not gospel. Best-grounded: MCP Registry architecture + comparable-launch metrics.
 - Fast-moving + time-sensitive: re-check registry GA + ingestion before relying on "publish once."
 - Comp mismatch: Arcade's `arcade-mcp` builds servers; Pagent *is* a tool — messaging transfers, adoption mechanics may not.
-- Under-researched (round 2): Reddit/Discord seeding and pre-launch runway playbooks.
+- Round-2 caveat: Reddit tactics lean on marketing-vendor blogs (rule *descriptions* corroborated, *efficacy* folklore); design-partner evidence is all paid-enterprise and doesn't transfer cleanly to free self-serve. MCP-native venues (r/mcp, r/ClaudeAI, Anthropic Discord) remain unvalidated — participate and learn.
 
 ---
 

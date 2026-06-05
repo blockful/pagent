@@ -99,4 +99,39 @@ Sources: [Hackmamba](https://hackmamba.io/developer-marketing/how-to-launch-on-p
 
 ## Round 2 — Reddit/Discord seeding + pre-launch runway
 
-> ⏳ In progress (kicked off 2026-06-04). Findings will be appended here and folded into [doc 04](./04-gtm-launch-plan.md).
+> Completed 2026-06-04. 25 sources fetched, 114 claims, 25 verified (13 confirmed, 12 refuted). **Heavily caveated:** the Reddit tactical findings lean on marketing-vendor blogs (conflict of interest) — rule *descriptions* are corroborated, but *efficacy* and quantitative cadence numbers are folklore. The design-partner evidence is all **paid B2B/enterprise** and does not transfer cleanly to a free self-serve tool.
+
+### Confirmed findings
+
+**Discord**
+- **Skip the official MCP Discord — it's the wrong venue. `[high]`** It's explicitly "designed for MCP contributors and is not intended for general MCP support," routes users to GitHub Discussions, and discourages product/vendor marketing. No confirmed general-purpose "official MCP user" Discord exists. ([MCP community docs](https://modelcontextprotocol.io/community/communication))
+- **The Cursor Discord (~37K members, ~3.6K online) is a sanctioned show-and-tell venue. `[high]`** It explicitly invites "share what you're working on" / "Showcase your new projects," with a "Built with Cursor" track. ([Cursor Discord listing](https://discord.com/servers/cursor-1074847526655643750))
+
+**Reddit**
+- **Major subreddits have real, documented anti-self-promo rules. `[high]`** r/startups → promo only in stickied "Share Your Startup" threads; r/Entrepreneur → no primary-purpose selling (+karma min); r/webdev → engagement required, promo routed to "Showoff Saturday"; **r/SideProject → the most launch-friendly, but requires a shipped product.** Direction is solid; *specific numeric thresholds (karma gates, 80/20, 10:1) were refuted* — don't trust the numbers. ([SubredditSignals](https://www.subredditsignals.com/blog/best-subreddits-to-promote-a-tech-product-in-2026-rules-real-examples-and-outreach-tips-that-don-t-get-you-banned))
+- **Post FORMAT is the dominant lever, not the announcement. `[high]`** Comparisons, teardowns, and specific-numbers breakdowns win; "Check out my tool" headlines, contextless "Feedback?" posts, and copy-pasted cross-posts fail or get removed. (The "converts highest" superlative is unproven; the success/fail format split is corroborated.)
+- **Concrete tactics that reduce removal + improve conversion `[medium]`:** mix promo with genuine participation; **don't use a Twitter/X link as the primary link** (devs dislike it); **always include a demo video/GIF**; **be the FIRST commenter** under your own post to disclose authorship + add technical context; tailor the title per-subreddit. ([Tereza Tizkova](https://tereza-tizkova.medium.com/best-subreddits-for-sharing-your-project-517c433442f9))
+
+**Pre-launch runway**
+- **Design partners are the best-evidenced runway tactic. `[high]`** Engage a small cohort (~5–12 target users) *before/while* building — to co-create and validate, categorically different from beta-testers (who QA an existing product) or waitlists. ([Bessemer Atlas](https://www.bvp.com/atlas/design-partners-the-pre-launch-edge-most-ai-founders-ignore), a16z)
+- **Design partners can convert to real adoption — but mind the disanalogy. `[high]`** Sierra reports 100% of its (4) design partners converted to paying customers, *because* it charged them 10–20% of contract value as a seriousness screen. This is a **paid-enterprise selection artifact** — the 100% does not transfer to a free self-serve tool. Transferable insight: design partners are a *real-adoption* (not vanity) tactic, and a **commitment filter screens for serious users**. ([First Round / Sierra](https://review.firstround.com/sierra-design-partnership/))
+- **Build-in-public is hygiene, not a proven adoption driver. `[low]`** The directional advice (consistency over volume, ~45–60 min/day, ~1×/day) is real but vendor-blog folklore; the headline ROI anecdote ("4 months → 2,400 followers → $8K MRR") was **refuted**. Do it for relationships + demo footage, not as the growth engine.
+
+### Refuted in round 2 — do NOT rely on
+- ❌ A joinable "official MCP community" Discord at the circulated invite — doesn't exist (0-3).
+- ❌ "10% self-promo rule" in r/artificial / r/webdev (0-3); r/singularity / r/AskProgramming / r/LLMDevs "outright ban self-promo" (0-3) — *unconfirmed, not validated*.
+- ❌ "'I built this' framing converts 2–3×" and "OP reply within 2h converts 2–3×" (0-3) — specific multipliers unproven.
+- ❌ 500–1,000-karma AutoMod gates (0-3); mandatory 80/20 ratio (0-3); "answer questions 4–6 weeks before mentioning your product" (0-3).
+- ❌ Discord DAU 10–15% as a health threshold (0-3); "78% discover tools via peers / 52% dark social" (0-3).
+- ❌ The 9:1 / 10:1 / "one anchor post per week" rules as *enforced moderation policy* — vendor convention; Reddit retired its rigid ratio for "be a genuine participant."
+
+### Still unvalidated (evidence absent, not disproven)
+- The **MCP-native / Claude-native venues** the question targeted produced **no confirmed claims**: r/mcp, r/ClaudeAI, r/LocalLLaMA, r/ChatGPTCoding specifics, and the Anthropic Discord. Treat these as "participate and learn," not validated bets.
+- No named **free, zero-login, cross-ecosystem** MCP/agent tool with a documented pre-launch-audience playbook.
+- **Minimum-viable runway** length/content for free self-serve — unanswered with hard data.
+- Whether **changelogs / public waitlists / a runway Discord** move post-launch *active use* — unconfirmed.
+
+### What this means for Pagent
+- **Discord:** don't seed the official MCP Discord; the Cursor Discord is a real, sanctioned venue. Treat r/ClaudeAI + the Anthropic Discord as participate-and-learn.
+- **Reddit:** lead with a **teardown/comparison + demo GIF**, be the first commenter with technical context, never make a Twitter link the primary link, and respect each sub's promo thread (r/SideProject is friendliest and you'll have a shipped product). Skip the folklore ratios — just genuinely participate.
+- **Runway:** run a **design-partner cohort (~5–12)** while building, with a *lightweight* commitment filter (a 20-min call / feedback cadence — the free-tool analog of Sierra's payment screen). Treat build-in-public as footage + relationships, not the growth engine. Don't bank on a waitlist.

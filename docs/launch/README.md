@@ -31,5 +31,6 @@ This folder holds everything needed to take Pagent from "built and deployed" to 
 
 ## Status
 
-- ✅ Audit, copy list, GTM plan, research round 1 — complete.
-- ⏳ Research round 2 (Reddit/Discord seeding + pre-launch runway playbooks) — in progress; findings will be appended to [doc 03](./03-research-agent-tool-launches.md) and folded into [doc 04](./04-gtm-launch-plan.md) §Channel playbooks and §Runway.
+- ✅ Audit, copy list, GTM plan — complete.
+- ✅ Research round 1 (launch playbooks, channels, registries) — complete.
+- ✅ Research round 2 (Reddit/Discord seeding + pre-launch runway) — complete; folded into [doc 03](./03-research-agent-tool-launches.md) and [doc 04](./04-gtm-launch-plan.md).
