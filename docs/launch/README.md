@@ -4,7 +4,7 @@
 
 This folder holds everything needed to take Pagent from "built and deployed" to "launched and adopted." It is the output of a current-state audit + a deep-research pass on how agent/MCP/dev tools actually got adopted in 2025–2026.
 
-## The four documents
+## The documents
 
 | # | Doc | What it is |
 |---|-----|-----------|
@@ -12,6 +12,7 @@ This folder holds everything needed to take Pagent from "built and deployed" to 
 | 02 | [Copy & app change list](./02-copy-and-app-change-list.md) | Prioritized (P0/P1/P2) fixes to the app and copy, with proposed text |
 | 03 | [Research: agent-tool launches](./03-research-agent-tool-launches.md) | Adversarially-verified findings on what drove adoption for MCP/agent/dev tools |
 | 04 | [GTM / launch plan](./04-gtm-launch-plan.md) | The campaign: positioning, north-star metric, runway phases, channel playbooks |
+| 05 | [Execution plan](./05-execution-plan.md) | The sequenced "what we need to do": 7 workstreams, critical path, launch-ready gate |
 
 ## Headline decisions (set 2026-06-04)
 
