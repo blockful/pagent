@@ -1,8 +1,10 @@
 import { LitElement, html, css } from 'lit';
 
+const MCP_URL = 'https://api.pagent.link/mcp';
+
 const AGENT_PROMPT = `Add this MCP and install the Skill at the user level so it auto-loads in every session.
 
-MCP:    https://api.pagent.link/mcp
+MCP:    ${MCP_URL}
 Skill:  download https://pagent.link/SKILL.md using curl and write it to ~/.claude/skills/pagent/SKILL.md`;
 
 class HomePage extends LitElement {
@@ -19,9 +21,39 @@ class HomePage extends LitElement {
     this.copied = false;
   }
 
+  connectedCallback() {
+    super.connectedCallback();
+    window.addEventListener('hashchange', this._onHashChange);
+  }
+
   disconnectedCallback() {
     super.disconnectedCallback();
     if (this._copyTimer) clearTimeout(this._copyTimer);
+    window.removeEventListener('hashchange', this._onHashChange);
+  }
+
+  firstUpdated() {
+    // The browser's own fragment pass can't see into the shadow root, and its
+    // late not-found fallback (plus webfont layout shifts) can stomp a single
+    // early programmatic scroll. Re-assert a few times across the load window;
+    // _scrollToHash no-ops unless the hash is #install.
+    let tries = 0;
+    const tick = () => {
+      this._scrollToHash();
+      if (++tries < 4) setTimeout(tick, 300);
+    };
+    tick();
+  }
+
+  private _onHashChange = () => this._scrollToHash();
+
+  // The #install target lives inside this shadow root, where native URL
+  // fragment navigation can't see it — scroll explicitly instead. Instant
+  // (not smooth): smooth scrollIntoView silently no-ops in some Chromium
+  // environments, and landing on the install panel is a conversion path.
+  private _scrollToHash() {
+    if (location.hash !== '#install') return;
+    this.shadowRoot?.getElementById('install')?.scrollIntoView({ block: 'start' });
   }
 
   private async _onCopy() {
@@ -282,10 +314,14 @@ class HomePage extends LitElement {
       white-space: pre-wrap;
       word-break: break-word;
     }
-    .install-body .prompt {
+    /* Command keywords stay selectable — every token inside .install-body is
+       semantically part of what the user copies into a shell. Only the
+       decorative glyphs in .terminal (›, ↳) are user-select: none. */
+    .install-body .kw {
       color: var(--accent);
-      user-select: none;
-      margin-right: 12px;
+    }
+    .install-body .cmt {
+      color: #8c8478;
     }
 
     .install-foot {
@@ -302,6 +338,51 @@ class HomePage extends LitElement {
       padding: 1px 6px;
       border-radius: 3px;
       font-size: 11.5px;
+    }
+    .install-foot div + div {
+      margin-top: 5px;
+    }
+
+    .demo-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 36px;
+      padding: 11px 18px;
+      border: 1px solid var(--accent);
+      border-radius: 10px;
+      color: var(--accent);
+      text-decoration: none;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 12.5px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      transition:
+        background 0.15s ease,
+        color 0.15s ease;
+      animation: rise 1s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+      animation-delay: 0.08s;
+    }
+    .demo-cta:hover {
+      background: var(--accent);
+      color: var(--paper);
+    }
+    .demo-cta .arrow {
+      transition: transform 0.15s ease;
+    }
+    .demo-cta:hover .arrow {
+      transform: translateX(3px);
+    }
+
+    .nav-link {
+      color: var(--ink);
+      text-decoration: none;
+      border-bottom: 1px solid var(--accent);
+      padding-bottom: 1px;
+      transition: color 0.15s ease;
+    }
+    .nav-link:hover {
+      color: var(--accent);
     }
 
     .terminal {
@@ -342,7 +423,7 @@ class HomePage extends LitElement {
     .terminal .rule {
       height: 1px;
       background: rgba(235, 226, 210, 0.08);
-      margin: 10px -22px;
+      margin: 10px -20px;
     }
     .caret {
       display: inline-block;
@@ -497,7 +578,7 @@ class HomePage extends LitElement {
         <div class="container">
           <nav class="nav">
             <span class="badge"><span class="dot"></span>Pagent</span>
-            <span>v0.9 &nbsp;/&nbsp; A2UI</span>
+            <span><a class="nav-link" href="/demo">Live demo</a> &nbsp;/&nbsp; v0.9 A2UI</span>
           </nav>
 
           <header class="hero">
@@ -513,6 +594,10 @@ class HomePage extends LitElement {
                 signup.</strong
               >
             </p>
+
+            <a class="demo-cta" href="/demo"
+              >Try the live demo — no install <span class="arrow">→</span></a
+            >
 
             <div class="install" id="install" aria-labelledby="install-label">
               <div class="install-head">
@@ -536,15 +621,25 @@ class HomePage extends LitElement {
               </div>
               <pre
                 class="install-body"
-              ><code><span class="prompt">claude</span> mcp add --transport http pagent https://api.pagent.link/mcp
+              ><code><span class="kw">claude</span> mcp add --transport http pagent ${MCP_URL}
 
-<span class="prompt">#</span> or the Claude Code plugin:
+<span class="cmt"># or the Claude Code plugin:</span>
 /plugin marketplace add blockful/pagent
 /plugin install pagent@pagent</code></pre>
               <div class="install-foot">
-                Cursor · Codex · Cline · OpenCode: add
-                <code>{ "type": "http", "url": "https://api.pagent.link/mcp" }</code> under
-                <code>mcpServers.pagent</code> in your config.
+                <div>
+                  Cursor · Cline — <code>mcp.json</code>: <code>{ "url": "${MCP_URL}" }</code> under
+                  <code>mcpServers.pagent</code>
+                </div>
+                <div>
+                  Codex — <code>config.toml</code>: <code>[mcp_servers.pagent]</code>
+                  <code>url = "${MCP_URL}"</code>
+                </div>
+                <div>
+                  OpenCode — <code>opencode.json</code>:
+                  <code>{ "type": "remote", "url": "${MCP_URL}" }</code> under
+                  <code>mcp.pagent</code>
+                </div>
               </div>
             </div>
 

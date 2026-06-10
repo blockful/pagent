@@ -18,6 +18,26 @@ vi.mock('./db.ts', () => ({
   ping: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Mock the metrics module with a distinct vi.fn per instrument. The real
+// module hands out OTel no-op instruments, which in test mode are all the
+// SAME singleton object — spying on one counter would observe every counter
+// (httpRequests, pagesSubmitted, …) at once.
+vi.mock('./metrics.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./metrics.ts')>();
+  return {
+    ...actual,
+    metrics: {
+      httpRequests: { add: vi.fn() },
+      httpRequestDuration: { record: vi.fn() },
+      pagesCreated: { add: vi.fn() },
+      pagesViewed: { add: vi.fn() },
+      pagesSubmitted: { add: vi.fn() },
+      pagesAbandoned: { add: vi.fn() },
+      pageSubmitLatency: { record: vi.fn() },
+    },
+  };
+});
+
 import * as db from './db.ts';
 import { app, MAX_BODY_BYTES } from './app.ts';
 import { metrics } from './metrics.ts';
@@ -75,30 +95,40 @@ beforeEach(() => {
 // GET /:id — adoption funnel "render" signal
 // ---------------------------------------------------------------------------
 
-describe('GET /:id metrics', () => {
-  // In test mode the OTel SDK isn't started, so every meter.createCounter()
-  // returns the SAME no-op instrument — spying on one observes them all
-  // (including httpRequests). Isolate the pagesViewed signal by its
-  // `{ format }` attribute, which only the render counter carries here.
-  const renderCalls = (spy: { mock: { calls: unknown[][] } }) =>
-    spy.mock.calls.filter((a) => !!a[1] && typeof a[1] === 'object' && 'format' in a[1]);
-
-  it('records exactly one render with the page format on a successful read', async () => {
-    const spy = vi.spyOn(metrics.pagesViewed, 'add');
-    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(fakePage({ format: 'a2ui' }));
+describe('GET /:id render metric', () => {
+  it('counts a render once for an open a2ui page, tagged with format', async () => {
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(
+      fakePage({ format: 'a2ui', state: 'open' }),
+    );
     const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
     expect(res.status).toBe(200);
-    expect(renderCalls(spy)).toEqual([[1, { format: 'a2ui' }]]);
-    spy.mockRestore();
+    expect(metrics.pagesViewed.add).toHaveBeenCalledTimes(1);
+    expect(metrics.pagesViewed.add).toHaveBeenCalledWith(1, { format: 'a2ui' });
   });
 
-  it('does not record a render when the page is missing/expired', async () => {
-    const spy = vi.spyOn(metrics.pagesViewed, 'add');
+  it('counts html page views (view-only pages stay open)', async () => {
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(
+      fakePage({ format: 'html', spec: '<p>hi</p>', state: 'open' }),
+    );
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
+    expect(res.status).toBe(200);
+    expect(metrics.pagesViewed.add).toHaveBeenCalledWith(1, { format: 'html' });
+  });
+
+  it('does not count post-submit polling reads as renders', async () => {
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(
+      fakePage({ state: 'submitted', result: { name: 'submitted' } }),
+    );
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
+    expect(res.status).toBe(200);
+    expect(metrics.pagesViewed.add).not.toHaveBeenCalled();
+  });
+
+  it('does not count a missing/expired page as a render', async () => {
     (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
     expect(res.status).toBe(404);
-    expect(renderCalls(spy)).toHaveLength(0);
-    spy.mockRestore();
+    expect(metrics.pagesViewed.add).not.toHaveBeenCalled();
   });
 });
 

@@ -15,54 +15,58 @@ import { basicCatalog } from '@a2ui/lit/v0_9';
 import '@a2ui/lit/v0_9'; // registers <a2ui-surface>
 import { createSandboxedIframe } from './html-renderer.ts';
 
-/** A small but real A2UI surface — the kind of thing an agent emits via show_ui. */
-const DEMO_FORM_SPEC = [
-  { createSurface: { surfaceId: 'demo', catalogId: basicCatalog.id } },
-  {
-    updateComponents: {
-      surfaceId: 'demo',
-      components: [
-        {
-          id: 'root',
-          component: 'Column',
-          children: ['title', 'sub', 'name', 'project', 'subscribe', 'submit'],
-        },
-        { id: 'title', component: 'Text', text: 'Tell the agent about you' },
-        { id: 'sub', component: 'Text', text: 'A real form — fill it in and submit.' },
-        { id: 'name', component: 'TextField', label: 'Your name', value: { path: '/name' } },
-        {
-          id: 'project',
-          component: 'TextField',
-          label: 'What are you building?',
-          value: { path: '/project' },
-        },
-        {
-          id: 'subscribe',
-          component: 'Checkbox',
-          label: 'Send me Pagent launch updates',
-          value: { path: '/subscribe' },
-        },
-        { id: 'submit-label', component: 'Text', text: 'Submit' },
-        {
-          id: 'submit',
-          component: 'Button',
-          child: 'submit-label',
-          variant: 'primary',
-          action: {
-            event: {
-              name: 'submitted',
-              context: {
-                name: { path: '/name' },
-                project: { path: '/project' },
-                subscribe: { path: '/subscribe' },
-              },
-            },
+/**
+ * A small but real A2UI surface — the kind of thing an agent emits via
+ * show_ui. Built as a typed function (same shape as showcase-spec.ts) so tsc
+ * checks the literal against the A2UI message types — no `as unknown as`.
+ */
+function buildDemoFormSpec() {
+  const components = [
+    {
+      id: 'root',
+      component: 'Column',
+      children: ['title', 'sub', 'name', 'project', 'subscribe', 'submit'],
+    },
+    { id: 'title', component: 'Text', text: 'Tell the agent about you' },
+    { id: 'sub', component: 'Text', text: 'A real form — fill it in and submit.' },
+    { id: 'name', component: 'TextField', label: 'Your name', value: { path: '/name' } },
+    {
+      id: 'project',
+      component: 'TextField',
+      label: 'What are you building?',
+      value: { path: '/project' },
+    },
+    {
+      id: 'subscribe',
+      component: 'CheckBox',
+      label: 'Send me Pagent launch updates',
+      value: { path: '/subscribe' },
+    },
+    { id: 'submit-label', component: 'Text', text: 'Submit' },
+    {
+      id: 'submit',
+      component: 'Button',
+      child: 'submit-label',
+      variant: 'primary',
+      action: {
+        event: {
+          name: 'submitted',
+          context: {
+            name: { path: '/name' },
+            project: { path: '/project' },
+            subscribe: { path: '/subscribe' },
           },
         },
-      ],
+      },
     },
-  },
-];
+  ];
+
+  const V = 'v0.9' as const;
+  return [
+    { version: V, createSurface: { surfaceId: 'demo', catalogId: basicCatalog.id } },
+    { version: V, updateComponents: { surfaceId: 'demo', components } },
+  ];
+}
 
 /** A small static dashboard — the kind of thing an agent emits via show_html. */
 const DEMO_DASHBOARD_HTML = `<style>
@@ -109,7 +113,13 @@ class PagentDemo extends SignalWatcher(LitElement) {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 24px;
+      margin-bottom: 16px;
+    }
+    .demo-title {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin: 0 0 24px;
     }
     .back {
       font-weight: 600;
@@ -182,14 +192,11 @@ class PagentDemo extends SignalWatcher(LitElement) {
     }
   `;
 
-  private processor = new v0_9.MessageProcessor(
-    [basicCatalog],
-    async (action: v0_9.A2uiClientAction) => {
-      // No backend: surface the result inline so the user sees what the agent
-      // would have received.
-      this.submitted = (action.context ?? {}) as Record<string, unknown>;
-    },
-  );
+  private processor = new v0_9.MessageProcessor([basicCatalog], (action: v0_9.A2uiClientAction) => {
+    // No backend: surface the result inline so the user sees what the agent
+    // would have received.
+    this.submitted = (action.context ?? {}) as Record<string, unknown>;
+  });
 
   constructor() {
     super();
@@ -198,18 +205,20 @@ class PagentDemo extends SignalWatcher(LitElement) {
 
   connectedCallback() {
     super.connectedCallback();
-    this.processor.processMessages(DEMO_FORM_SPEC as unknown as v0_9.A2uiMessage[]);
+    // Idempotent across detach/re-attach: replaying createSurface for an
+    // existing surfaceId throws A2uiStateError inside the lifecycle callback.
+    if (this.processor.model.surfacesMap.size > 0) return;
+    this.processor.processMessages(buildDemoFormSpec());
   }
 
-  // Build the iframe once and reuse it across renders (Lit can't bind srcdoc cleanly).
-  private cachedIframe: HTMLIFrameElement | null = null;
-  private dashboardIframe() {
-    if (!this.cachedIframe) {
-      this.cachedIframe = createSandboxedIframe(DEMO_DASHBOARD_HTML);
-      this.cachedIframe.style.cssText = 'width:100%;height:300px;border:0;display:block';
-    }
-    return this.cachedIframe;
-  }
+  // One static iframe for the page's lifetime (Lit can't bind srcdoc cleanly,
+  // and the demo HTML is a constant). Only the height deviates from the
+  // lockdown defaults createSandboxedIframe sets.
+  private readonly dashboardFrame = (() => {
+    const frame = createSandboxedIframe(DEMO_DASHBOARD_HTML);
+    frame.style.height = '300px';
+    return frame;
+  })();
 
   render() {
     const surfaces = Array.from(this.processor.model.surfacesMap.entries());
@@ -218,6 +227,7 @@ class PagentDemo extends SignalWatcher(LitElement) {
         <a class="back" href="/">← Pagent</a>
         <span class="tag">Live demo · no install</span>
       </header>
+      <h1 class="demo-title">See what your agent can show you</h1>
       <div class="grid">
         <section class="panel">
           <h2><span class="k">show_ui</span> — ask, read the answer back</h2>
@@ -239,7 +249,7 @@ ${JSON.stringify(this.submitted, null, 2)}</pre
             Agents can also render rich, sandboxed visualizations you just look at — no JavaScript,
             fully isolated.
           </p>
-          <div class="dash">${this.dashboardIframe()}</div>
+          <div class="dash">${this.dashboardFrame}</div>
         </section>
       </div>
       <footer class="demo-foot">

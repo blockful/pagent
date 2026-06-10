@@ -11,6 +11,8 @@ production.env
 
 # Local test artifacts (Playwright screenshots, ad-hoc fixtures)
 *.png
+# …but shipped static assets are real source
+!apps/web/public/*.png
 /tmp-*
 
 # Vitest coverage output

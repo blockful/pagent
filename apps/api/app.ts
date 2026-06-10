@@ -274,7 +274,11 @@ const getPageHandler = async (c: Context) => {
   if (!p) return c.json({ error: 'not_found', message: 'Page not found or expired' }, 404);
   // The "render" signal for the adoption funnel: a page being fetched by the
   // renderer is the closest server-side proxy for "the user saw the UI".
-  metrics.pagesViewed.add(1, { format: p.format });
+  // Only count while state is "open" — after submit the renderer polls this
+  // same endpoint (2s→30s backoff) waiting for the "received" flip, and those
+  // reads are not renders. html pages are view-only and stay "open", so every
+  // view of them counts.
+  if (p.state === 'open') metrics.pagesViewed.add(1, { format: p.format });
   return c.json({
     spec: p.spec,
     format: p.format,

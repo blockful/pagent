@@ -133,13 +133,33 @@ Beyond the Claude Code plugin, pagent's MCP also speaks the streamable HTTP tran
 claude mcp add --scope project --transport http pagent "https://api.pagent.link/mcp"
 ```
 
-For other clients, drop this into whichever `mcp.json` / config file they read:
+**Cursor / Cline / Continue** (and most other JSON-config clients) — add to their `mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "pagent": {
       "type": "http",
+      "url": "https://api.pagent.link/mcp"
+    }
+  }
+}
+```
+
+**Codex** — its config is TOML, not JSON. Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.pagent]
+url = "https://api.pagent.link/mcp"
+```
+
+**OpenCode** — add to `opencode.json` (note `"type": "remote"`, not `"http"`):
+
+```json
+{
+  "mcp": {
+    "pagent": {
+      "type": "remote",
       "url": "https://api.pagent.link/mcp"
     }
   }

@@ -22,6 +22,7 @@ set webhooks via MCP tool calls.
 
 1. **`PageOps` interface** -- update `showUi` and `showHtml` signatures
    to accept an optional opts object:
+
    ```ts
    showUi(spec: unknown, opts?: {
      webhook_url?: string;
@@ -35,6 +36,7 @@ set webhooks via MCP tool calls.
 
 2. **`registerPagentTools`** -- add `webhook_url` and `webhook_secret`
    to the `inputSchema` for both `show_ui` and `show_html`:
+
    ```ts
    webhook_url: z.string().url().optional().describe(
      'Optional HTTPS callback URL. When set, Pagent POSTs the submission '
