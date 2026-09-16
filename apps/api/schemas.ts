@@ -60,8 +60,6 @@ const stripEmptyStrings = (raw: unknown): unknown => {
 const AUTH_REQUIRED_VARS = [
   'JWT_SIGNING_KEY',
   'JWT_PUBLIC_KEY',
-  'GOOGLE_CLIENT_ID',
-  'GOOGLE_CLIENT_SECRET',
   'AUTH_STATE_SECRET',
   'SMTP_HOST',
   'SMTP_USER',
@@ -200,6 +198,20 @@ export const envSchema = z.preprocess(
           code: 'custom',
           path: ['AUTH_STATE_SECRET'],
           message: 'AUTH_STATE_SECRET must be at least 32 UTF-8 bytes whenever configured.',
+        });
+      }
+      if (cfg.GOOGLE_CLIENT_ID && !cfg.GOOGLE_CLIENT_SECRET) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['GOOGLE_CLIENT_SECRET'],
+          message: 'GOOGLE_CLIENT_SECRET is required when GOOGLE_CLIENT_ID is configured.',
+        });
+      }
+      if (!cfg.GOOGLE_CLIENT_ID && cfg.GOOGLE_CLIENT_SECRET) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['GOOGLE_CLIENT_ID'],
+          message: 'GOOGLE_CLIENT_ID is required when GOOGLE_CLIENT_SECRET is configured.',
         });
       }
     }),

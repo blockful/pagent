@@ -57,6 +57,28 @@ describe('Browser session login flow', () => {
     expect(res.headers.get('set-cookie')).toContain(`${AUTH_TRANSACTION_COOKIE_NAME}=`);
   });
 
+  it('GET /oauth/authorize?browser_session=1 keeps email login when Google is disabled', async () => {
+    const originalClientId = env.GOOGLE_CLIENT_ID;
+    const originalClientSecret = env.GOOGLE_CLIENT_SECRET;
+    env.GOOGLE_CLIENT_ID = undefined;
+    env.GOOGLE_CLIENT_SECRET = undefined;
+    try {
+      const res = await app.fetch(
+        new Request(`${BASE}/oauth/authorize?browser_session=1`, {
+          headers: { 'x-real-ip': '198.51.100.100' },
+        }),
+      );
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain('<form method="POST" action="/oauth/magic/send"');
+      expect(html).not.toContain('Continue with Google');
+      expect(html).not.toContain('accounts.google.com');
+    } finally {
+      env.GOOGLE_CLIENT_ID = originalClientId;
+      env.GOOGLE_CLIENT_SECRET = originalClientSecret;
+    }
+  });
+
   it('Magic link verify with browser_session=true sets cookie and redirects to the renderer', async () => {
     const magicLink = {
       email: 'alex@blockful.io',

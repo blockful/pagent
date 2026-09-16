@@ -69,6 +69,76 @@ describe('POST /oauth/magic/send', () => {
     expect(db.insertMagicLink).toHaveBeenCalledTimes(1);
   });
 
+  it('returns an accessible confirmation page for a browser form submission', async () => {
+    vi.mocked(db.insertMagicLink).mockResolvedValueOnce();
+
+    const res = await app.fetch(
+      postMagicSend(
+        { email: 'alex@blockful.io' },
+        { contentType: 'form', accept: 'text/html,application/xhtml+xml' },
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const html = await res.text();
+    expect(html).toContain('<h1>Check your email</h1>');
+    expect(html).toContain('Open the sign-in link in this browser');
+    expect(html).toContain('role="status"');
+    expect(html).not.toContain('{"ok":true');
+  });
+
+  it('returns an accessible error page for an invalid browser form submission', async () => {
+    const res = await app.fetch(
+      postMagicSend(
+        { email: 'not-an-email' },
+        { contentType: 'form', accept: 'text/html,application/xhtml+xml' },
+      ),
+    );
+    expect(res.status).toBe(400);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const html = await res.text();
+    expect(html).toContain('<h1>Could not send a sign-in link</h1>');
+    expect(html).toContain('Please provide a valid email address.');
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('href="/oauth/authorize?browser_session=1"');
+    expect(html).toContain('>Try again</a>');
+  });
+
+  it.each([
+    'application/json;q=1, text/html;q=0',
+    'application/json;q=1, text/html;Q=0',
+  ])('returns JSON when the client gives HTML zero quality: %s', async (accept) => {
+    const res = await app.fetch(
+      postMagicSend(
+        { email: 'not-an-email' },
+        { contentType: 'form', accept },
+      ),
+    );
+    expect(res.status).toBe(400);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    await expect(res.json()).resolves.toMatchObject({ error: 'invalid_request' });
+  });
+
+  it('keeps browser form errors recoverable when signed state is available', async () => {
+    const res = await app.fetch(
+      postMagicSend(
+        { email: 'not-an-email', state: 'signed-retry-state' },
+        { contentType: 'form', accept: 'text/html,application/xhtml+xml' },
+      ),
+    );
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain('<h1>Sign in to Pagent</h1>');
+    expect(html).toContain('Please provide a valid email address.');
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('<label for="email">Email address</label>');
+    expect(html).toContain('value="signed-retry-state"');
+    expect(html).toContain('value="not-an-email"');
+    expect(html).toContain('aria-invalid="true"');
+    expect(html).toContain('aria-describedby="auth-error"');
+  });
+
   it('returns 503 when SMTP_HOST is not configured', async () => {
     const original = env.SMTP_HOST;
     (env as { SMTP_HOST: string | undefined }).SMTP_HOST = undefined;

@@ -165,10 +165,39 @@ describe('renderLoginPage', () => {
     expect(html).toContain('<input type="email"');
   });
 
+  it('keeps email sign-in available when Google OAuth is not configured', async () => {
+    const originalClientId = env.GOOGLE_CLIENT_ID;
+    const originalClientSecret = env.GOOGLE_CLIENT_SECRET;
+    env.GOOGLE_CLIENT_ID = undefined;
+    env.GOOGLE_CLIENT_SECRET = undefined;
+    try {
+      const state = await signStateJwt({ clientId: 'mcp-cli', redirectUri: 'http://x' });
+      const html = renderLoginPage({ signedState: state });
+      expect(html).toContain('<form method="POST" action="/oauth/magic/send"');
+      expect(html).toContain('<input type="email"');
+      expect(html).not.toContain('Continue with Google');
+      expect(html).not.toContain('accounts.google.com/o/oauth2/v2/auth');
+      expect(html).not.toContain('<div class="divider"');
+    } finally {
+      env.GOOGLE_CLIENT_ID = originalClientId;
+      env.GOOGLE_CLIENT_SECRET = originalClientSecret;
+    }
+  });
+
   it('escapes the error message to prevent XSS', () => {
     const html = renderLoginPage({ error: '<script>alert(1)</script>' });
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+  });
+
+  it('does not mark the email field invalid for a form-level error', () => {
+    const html = renderLoginPage({
+      signedState: 'retry-state',
+      defaultEmail: 'alex@blockful.io',
+      error: 'Magic link sign-in is temporarily unavailable.',
+    });
+    expect(html).toContain('value="alex@blockful.io"');
+    expect(html).not.toContain('aria-invalid="true"');
   });
 
   it('omits the buttons when no signedState is supplied (hard error)', () => {

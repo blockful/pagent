@@ -204,6 +204,16 @@ may remain literal when they do not represent a reusable spacing decision.
 - **Motion**: state change uses 200ms opacity only.
 - **Layout**: cover with readable content limiter.
 
+### Authentication page
+
+- **Structure**: Pagent overline, one clear heading, optional error notice, provider action, or email field; completion states reuse the same surface and hierarchy.
+- **Variants**: email-only, Google plus email, OAuth consent continuation, check-email confirmation, and recoverable error.
+- **Spacing**: `--pg-space-2` through `--pg-space-8` inside a 400–440px readable surface.
+- **States**: ready, provider unavailable, submitted, invalid input, rate-limited, and service unavailable.
+- **Accessibility**: explicit email label, 44px controls, visible focus, status/alert roles, no provider button when its configuration is incomplete.
+- **Motion**: button press feedback only; removed under reduced motion.
+- **Layout**: centered document-scrolling surface on the warm canvas at mobile, tablet, and desktop widths.
+
 ### Presentation frame and controls
 
 - **Structure**: presentation page identity, slide viewport, previous/next, current count, fullscreen, optional filmstrip.

@@ -1252,8 +1252,8 @@ New environment variables for the API (`apps/api`):
 | `REQUIRE_AUTH`              | No         | `false`                              | If `true`, page creation, result reads, and MCP require auth       |
 | `JWT_SIGNING_KEY`           | Yes*       | -                                    | Ed25519 private key, base64url-encoded (DER)                       |
 | `JWT_PUBLIC_KEY`            | Yes*       | -                                    | Ed25519 public key, base64url-encoded (DER)                        |
-| `GOOGLE_CLIENT_ID`          | Yes*       | -                                    | Google OAuth 2.0 client ID                                         |
-| `GOOGLE_CLIENT_SECRET`      | Yes*       | -                                    | Google OAuth 2.0 client secret                                     |
+| `GOOGLE_CLIENT_ID`          | No         | -                                    | Google OAuth 2.0 client ID; Google sign-in is hidden when unset    |
+| `GOOGLE_CLIENT_SECRET`      | No         | -                                    | Google OAuth 2.0 client secret; set together with the client ID    |
 | `GOOGLE_REDIRECT_URI`       | No         | `{API_PUBLIC_URL}/oauth/callback/google` | Google OAuth callback URI                                      |
 | `AUTH_STATE_SECRET`         | Yes*       | -                                    | OAuth state HMAC secret; at least 32 UTF-8 bytes                   |
 | `SESSION_MAX_AGE_DAYS`      | No         | `30`                                 | Session cookie lifetime in days                                    |
@@ -1265,7 +1265,8 @@ New environment variables for the API (`apps/api`):
 | `SMTP_PASS`                 | Yes*       | -                                    | SMTP password                                                      |
 | `SMTP_FROM`                 | No         | `noreply@pagent.link`                | From address for magic link emails                                 |
 
-*Required when `REQUIRE_AUTH=true`. Production additionally requires
+*Required when `REQUIRE_AUTH=true`. Google OAuth is an optional provider;
+email magic links remain available without it. Production additionally requires
 `PUBLIC_URL`, `API_PUBLIC_URL`, `ALLOWED_ORIGINS`, and
 `TRUSTED_PROXY_MODE=railway`; both public URLs must be HTTPS origins. Magic
 links are random opaque tokens stored as hashes and do not use a separate
