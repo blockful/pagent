@@ -140,6 +140,10 @@ test('stdio MCP creates a page, the browser submits it, and the agent receives i
     await expect(page.getByRole('status')).toContainText('The agent has your input', {
       timeout: 5_000,
     });
+    await expect(page.locator('.awaiting-banner .small-spinner')).toHaveCount(0);
+    await expect(
+      page.locator('.awaiting-banner .material-symbols', { hasText: 'check_circle' }),
+    ).toBeVisible();
   } finally {
     await client.close();
   }
