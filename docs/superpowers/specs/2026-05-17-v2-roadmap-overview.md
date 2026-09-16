@@ -12,7 +12,37 @@
 | 4 | Public Forms (multi-submission) | `2026-05-17-public-forms-design.md` | ~1035 | Ready |
 | 5 | Audit Log | `2026-05-17-audit-log-design.md` | ~980 | Ready |
 | 6 | Custom URLs (handle/slug) | `2026-05-17-custom-urls-design.md` | ~980 | Ready |
-| 7 | Agent Form Submission (submit_form) | `2026-05-17-agent-submit-design.md` | ~1400 | Ready |
+| 7 | Agent Form Submission (`write` variant) | `2026-05-17-agent-submit-design.md` | ~1400 | Needs alignment |
+| 8 | Presentation Page Version History | This overview | — | Planned |
+
+## Presentation Page Version History
+
+Version history is a required roadmap capability for durable presentation
+Pages. Updating a presentation must never overwrite its current content in
+place. Each update creates a new immutable revision, and earlier revisions stay
+available until the Page is deleted under its retention policy.
+
+### Required behavior
+
+- Calling `write` with an existing presentation `page_id` creates a new latest
+  revision; it does not mutate or delete an earlier revision.
+- Authorized editors can open a version history showing revision number,
+  author, creation time, and an optional change summary.
+- An authorized editor can preview the exact content of any earlier revision
+  without changing the current Page or generating viewer analytics.
+- Restoring an earlier version copies that snapshot into a **new** latest
+  revision. Restore never rewrites or removes intervening history.
+- Analytics and historical visits remain attached to the exact revision the
+  viewer saw, including after later edits or restores.
+- Active share links follow the latest revision by default. Revision pinning is
+  a separate follow-up control and must not block the core history flow.
+- Revision creation and restore operations are auditable and follow the same
+  content permissions as the presentation Page. Workspace-admin metadata
+  access alone does not grant revision-content access.
+
+This capability extends the existing two-tool Page model; it does **not** add a
+third MCP tool. Branching, revision merging, and live collaborative editing are
+out of scope for the first version-history release.
 
 ## Dependency Graph
 
@@ -44,7 +74,8 @@
 | Custom URLs | Auth | Pages need an `owner_id` to have a handle namespace |
 | Public Forms | Auth | Need identity for submitters + owner-only close |
 | Agent Submit | Auth | Agent identity comes from OAuth tokens |
-| Agent Submit | File Uploads | File support in `submit_form` depends on `POST /:id/files` |
+| Agent Submit | File Uploads | File support in the `write` submission variant depends on `POST /:id/files` |
+| Presentation Version History | Auth + durable presentation revisions | History and restore require an attributable editor and immutable snapshots |
 
 ### Soft dependencies (enriched by, but works without)
 
@@ -54,11 +85,13 @@
 | Webhooks | Auth | `submitted_by` in payload (without auth: null) |
 | Webhooks | File Uploads | `files` array in payload (without files: empty) |
 | Webhooks | Public Forms | `submission_id` + `mode` in payload |
+| Presentation Version History | Audit Log | Records who created or restored each revision |
 
 ### Independent pairs (can build in parallel)
 
 - Webhooks ∥ Custom URLs ∥ File Uploads ∥ Audit Log
 - Public Forms ∥ Audit Log ∥ Custom URLs
+- Presentation Version History ∥ Public Forms ∥ Custom URLs
 
 ## Recommended Build Order
 
@@ -75,9 +108,10 @@ Build these simultaneously after auth lands:
 These need auth to be functional:
 - **Custom URLs** — handle registration, slug routing
 - **Public Forms** — multi-submission mode, access control
+- **Presentation Version History** — revision list, preview, and non-destructive restore
 
 ### Phase 4: Capstone
-**Agent Submit** — combines auth + file uploads, adds `submit_form` MCP tool.
+**Agent Submit** — combines auth + file uploads as another `write` input variant.
 
 ## Unified Schema Changes
 
@@ -120,77 +154,64 @@ CREATE INDEX audit_log_user_idx ON audit_log (user_id, created_at DESC);
 
 ## Unified MCP Tool Interface
 
-All features extend the MCP tools. Here is the final combined interface:
+Pagent keeps exactly two MCP tools: `write` and `read`. Roadmap features extend
+their discriminated inputs and outputs or use the authenticated web/REST
+management surfaces; they do not add top-level MCP tools.
 
-### `show_ui` (extended)
+### `write` (extended)
 ```typescript
-{
-  spec: unknown[],             // A2UI components (existing)
-  slug?: string,               // Custom URLs
-  mode?: 'single' | 'public',  // Public Forms (default: 'single')
-  access_emails?: string[],    // Public Forms (email allowlist)
-  max_submissions?: number,    // Public Forms (default: 10000, only for public mode)
-  webhook_url?: string,        // Webhooks
-  webhook_secret?: string,     // Webhooks
-}
+type WriteInput =
+  | { type: 'interactive'; spec: unknown[]; mode?: 'single' | 'public' }
+  | { type: 'document'; html: string }
+  | {
+      type: 'presentation';
+      page_id?: string;
+      title: string;
+      slides: unknown[];
+      restore_revision_id?: string;
+    }
+  | {
+      type: 'submission';
+      page_id: string;
+      data: Record<string, unknown>;
+      files?: Record<string, string>;
+    };
 ```
 
-### `show_html` (extended)
+Custom URLs, access rules, limits, and webhook settings remain authenticated
+Page-management concerns unless an agent-authored Page needs them at creation.
+Updating a presentation with `page_id` creates a revision; restoring uses the
+same presentation variant and creates a new head revision.
+
+### `read` (extended)
+
 ```typescript
-{
-  html: string,                // HTML content (existing)
-  slug?: string,               // Custom URLs
-  webhook_url?: string,        // Webhooks
-  webhook_secret?: string,     // Webhooks
-}
+type ReadInput = {
+  page_id: string;
+  include?: 'response' | 'analytics' | 'versions' | 'audit';
+  revision_id?: string;
+  cursor?: string;
+  limit?: number;
+};
 ```
 
-### `check_result` (extended)
-```typescript
-// Input
-{ page_id: string, cursor?: string, limit?: number }
-
-// Output (single mode — unchanged)
-{ kind: 'state', state: string, result?: unknown, format?: string }
-
-// Output (public mode — new)
-{ kind: 'submissions', mode: 'public', page_id: string,
-  submissions: Array<{ id, result, submitted_at, submitted_by? }>,
-  total: number, cursor?: string }
-```
-
-### `submit_form` (new)
-```typescript
-// Input
-{ page_id: string, data: Record<string, unknown>, files?: Record<string, string> }
-
-// Output
-{ success: true, submission_id: string }
-| { success: false, errors: Array<{ field, message }> }
-```
-
-### `get_audit_log` (new)
-```typescript
-// Input
-{ page_id: string, limit?: number }
-
-// Output
-{ events: Array<{ action, resource_type, resource_id, metadata, created_at }> }
-```
+`read` returns the requested Page response, presentation analytics, immutable
+version metadata/content, or authorized audit records. Default selection stays
+type-aware so ordinary calls need only `page_id`.
 
 ## New Environment Variables
 
 | Variable | Feature | Required | Default |
 |----------|---------|----------|---------|
-| `GOOGLE_CLIENT_ID` | Auth | Yes (when auth enabled) | — |
-| `GOOGLE_CLIENT_SECRET` | Auth | Yes (when auth enabled) | — |
-| `JWT_PRIVATE_KEY` | Auth | Yes (when auth enabled) | — |
+| `GOOGLE_CLIENT_ID` | Auth | No (optional provider) | — |
+| `GOOGLE_CLIENT_SECRET` | Auth | No (optional provider) | — |
+| `JWT_SIGNING_KEY` | Auth | Yes (when auth enabled) | — |
 | `JWT_PUBLIC_KEY` | Auth | Yes (when auth enabled) | — |
 | `SMTP_HOST` | Auth (magic link) | Yes (when auth enabled) | — |
 | `SMTP_PORT` | Auth (magic link) | No | 587 |
 | `SMTP_USER` | Auth (magic link) | Yes (when auth enabled) | — |
 | `SMTP_PASS` | Auth (magic link) | Yes (when auth enabled) | — |
-| `SMTP_FROM` | Auth (magic link) | No | `noreply@pagent.io` |
+| `SMTP_FROM` | Auth (magic link) | No | `noreply@pagent.link` |
 | `REQUIRE_AUTH` | Auth | No | `false` |
 | `SUPABASE_URL` | File Uploads | Yes (when files enabled) | — |
 | `SUPABASE_SERVICE_ROLE_KEY` | File Uploads | Yes (when files enabled) | — |
@@ -224,4 +245,5 @@ The following inconsistencies were found during cross-spec review and have been 
 
 1. **Public form TTL** — Public-mode pages default to 7 days (`PUBLIC_PAGE_TTL_MS` env var, default `604800000`). Single-mode pages keep the existing 30-minute default.
 2. **Submission rate limiting** — 5 submissions/min per IP per page + 100 submissions/min global cap per page. Implemented as Hono middleware on `POST /:id/result` for public pages.
-3. **Submission count cap** — 10,000 max submissions per page. `POST /:id/result` returns 409 after cap reached. Stored in `pages.max_submissions` (default 10000, configurable via `show_ui`).
+3. **Submission count cap** — 10,000 max submissions per page. `POST /:id/result` returns 409 after cap reached. Stored in `pages.max_submissions` (default 10000, configured through Page management or the relevant `write` variant).
+4. **Presentation versioning** — Every update creates an immutable revision. Earlier revisions remain previewable, and restoring one creates a new head revision rather than overwriting history. This stays within the existing `write`/`read` MCP contract.

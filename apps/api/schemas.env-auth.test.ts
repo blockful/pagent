@@ -116,6 +116,17 @@ describe('envSchema (auth)', () => {
     expect(r.success).toBe(true);
   });
 
+  it.each([
+    [{ GOOGLE_CLIENT_ID: 'g-id' }, 'GOOGLE_CLIENT_SECRET'],
+    [{ GOOGLE_CLIENT_SECRET: 'g-secret' }, 'GOOGLE_CLIENT_ID'],
+  ])('rejects a partial Google OAuth configuration', (googleConfig, missingKey) => {
+    const r = envSchema.safeParse({ DATABASE_URL: 'x', ...googleConfig });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.some((issue) => issue.path.includes(missingKey))).toBe(true);
+    }
+  });
+
   it.each(['http://api.pagent.link/oauth/callback/google', 'ftp://api.pagent.link/callback'])(
     'rejects production GOOGLE_REDIRECT_URI=%s because callbacks require HTTPS',
     (redirectUri) => {
@@ -173,8 +184,6 @@ describe('envSchema (auth)', () => {
       for (const key of [
         'JWT_SIGNING_KEY',
         'JWT_PUBLIC_KEY',
-        'GOOGLE_CLIENT_ID',
-        'GOOGLE_CLIENT_SECRET',
         'AUTH_STATE_SECRET',
         'SMTP_HOST',
         'SMTP_USER',
@@ -191,8 +200,6 @@ describe('envSchema (auth)', () => {
       REQUIRE_AUTH: true,
       JWT_SIGNING_KEY: 'k1',
       JWT_PUBLIC_KEY: 'k2',
-      GOOGLE_CLIENT_ID: 'g-id',
-      GOOGLE_CLIENT_SECRET: 'g-secret',
       AUTH_STATE_SECRET: 'a'.repeat(32),
       SMTP_HOST: 'smtp.example.com',
       SMTP_USER: 'u',

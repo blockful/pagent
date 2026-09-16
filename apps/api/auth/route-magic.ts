@@ -12,6 +12,7 @@ import {
 } from './magic-link.ts';
 import type { AuthVariables } from './middleware.ts';
 import { createAuthCode, upsertUser } from './provider.ts';
+import { renderAuthMessagePage, renderLoginPage } from './login-page.ts';
 import { browserReturnTarget, getClientIp, renderError, setSessionCookie } from './route-shared.ts';
 import { clearBrowserTransaction, verifyBrowserTransaction } from './route-transaction.ts';
 import { createSession } from './session.ts';
@@ -24,6 +25,81 @@ const MAGIC_SEND_WINDOW_MS = 15 * 60 * 1000;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type AuthRouter = Hono<{ Variables: AuthVariables }>;
+type MagicSendStatus = 200 | 400 | 429 | 503;
+type MagicSendResponse = {
+  readonly ok?: true;
+  readonly error?: 'service_unavailable' | 'invalid_request' | 'rate_limited';
+  readonly retry_after_seconds?: number;
+  readonly message: string;
+};
+
+interface MagicSendFormContext {
+  readonly signedState?: string;
+  readonly email?: string;
+  readonly emailInvalid?: boolean;
+}
+
+function explicitMediaQuality(accept: string, mediaType: string): number | undefined {
+  for (const range of accept.toLowerCase().split(',')) {
+    const [type, ...parameters] = range.trim().split(';');
+    if (type !== mediaType) continue;
+    const qualityParameter = parameters.find((parameter) => parameter.trim().startsWith('q='));
+    if (!qualityParameter) return 1;
+    const quality = Number(qualityParameter.trim().slice(2));
+    return Number.isFinite(quality) && quality >= 0 && quality <= 1 ? quality : 0;
+  }
+  return undefined;
+}
+
+function prefersHtml(accept: string | undefined): boolean {
+  if (!accept) return false;
+  const htmlQuality = explicitMediaQuality(accept, 'text/html');
+  if (htmlQuality === undefined || htmlQuality === 0) return false;
+  const jsonQuality = explicitMediaQuality(accept, 'application/json');
+  return jsonQuality === undefined || htmlQuality > jsonQuality;
+}
+
+function renderMagicSendPage(
+  body: MagicSendResponse,
+  status: MagicSendStatus,
+  formContext?: MagicSendFormContext,
+): string {
+  if (status !== 200 && formContext?.signedState) {
+    return renderLoginPage({
+      signedState: formContext.signedState,
+      defaultEmail: formContext.email,
+      emailInvalid: formContext.emailInvalid,
+      error: body.message,
+    });
+  }
+
+  const title = status === 200 ? 'Check your email' : 'Could not send a sign-in link';
+  const detail =
+    status === 200
+      ? 'Open the sign-in link in this browser. It expires in 15 minutes.'
+      : body.message;
+  return renderAuthMessagePage({
+    title,
+    detail,
+    kind: status === 200 ? 'status' : 'error',
+    action:
+      status === 200
+        ? undefined
+        : { href: '/oauth/authorize?browser_session=1', label: 'Try again' },
+  });
+}
+
+function respondToMagicSend(
+  c: Context,
+  body: MagicSendResponse,
+  status: MagicSendStatus,
+  formContext?: MagicSendFormContext,
+): Response {
+  c.header('Cache-Control', 'no-store');
+  return prefersHtml(c.req.header('accept'))
+    ? c.html(renderMagicSendPage(body, status, formContext), status)
+    : c.json(body, status);
+}
 
 export const magicSendLimiter = new RateLimiter(MAGIC_SEND_LIMIT, MAGIC_SEND_WINDOW_MS);
 export const magicSendIpLimiter = new RateLimiter(MAGIC_SEND_IP_LIMIT, MAGIC_SEND_WINDOW_MS);
@@ -53,11 +129,11 @@ async function parseMagicSendBody(
 export function registerMagicRoutes(authRoutes: AuthRouter): void {
   authRoutes.post('/oauth/magic/send', async (c) => {
     if (!env.SMTP_HOST) {
-      return c.json(
+      return respondToMagicSend(
+        c,
         {
           error: 'service_unavailable',
-          message:
-            'Magic link sign-in is not configured on this deployment. Please use Google sign-in.',
+          message: 'Magic link sign-in is temporarily unavailable. Please try again later.',
         },
         503,
       );
@@ -65,14 +141,20 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
 
     const body = await parseMagicSendBody(c);
     if (!body || typeof body !== 'object') {
-      return c.json({ error: 'invalid_request', message: 'Request body is malformed.' }, 400);
+      return respondToMagicSend(
+        c,
+        { error: 'invalid_request', message: 'Request body is malformed.' },
+        400,
+      );
     }
     const email = typeof body.email === 'string' ? body.email.trim() : '';
     const stateInput = typeof body.state === 'string' ? body.state : '';
     if (!email || !EMAIL_REGEX.test(email)) {
-      return c.json(
+      return respondToMagicSend(
+        c,
         { error: 'invalid_request', message: 'Please provide a valid email address.' },
         400,
+        { signedState: stateInput || undefined, email, emailInvalid: true },
       );
     }
     const lowerEmail = email.toLowerCase();
@@ -98,13 +180,15 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
       const result = limit.limiter.peek(limit.key, now);
       if (!result.allowed) {
         c.header('Retry-After', String(result.secondsUntilReset));
-        return c.json(
+        return respondToMagicSend(
+          c,
           {
             error: 'rate_limited',
             retry_after_seconds: result.secondsUntilReset,
             message: `${limit.message}; retry after ${result.secondsUntilReset} seconds`,
           },
           429,
+          { signedState: stateInput || undefined, email },
         );
       }
     }
@@ -120,12 +204,14 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
           claims.clientId &&
           (!claims.consentGranted || !verifyBrowserTransaction(c, claims.browserTransactionHash))
         ) {
-          return c.json(
+          return respondToMagicSend(
+            c,
             {
               error: 'invalid_request',
               message: 'OAuth consent is missing, expired, or not bound to this browser.',
             },
             400,
+            { signedState: stateInput, email },
           );
         }
         authorizeContext = {
@@ -149,22 +235,27 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
       await sendMagicLink(lowerEmail, authorizeContext);
     } catch (err) {
       if (err instanceof SmtpUnavailableError) {
-        return c.json(
+        return respondToMagicSend(
+          c,
           {
             error: 'service_unavailable',
-            message:
-              'Magic link sign-in is not configured on this deployment. Please use Google sign-in.',
+            message: 'Magic link sign-in is temporarily unavailable. Please try again later.',
           },
           503,
+          { signedState: stateInput || undefined, email },
         );
       }
       throw err;
     }
 
-    return c.json({
-      ok: true,
-      message: 'Check your email for a sign-in link. The link expires in 15 minutes.',
-    });
+    return respondToMagicSend(
+      c,
+      {
+        ok: true,
+        message: 'Check your email for a sign-in link. The link expires in 15 minutes.',
+      },
+      200,
+    );
   });
 
   authRoutes.get('/oauth/magic', async (c) => {

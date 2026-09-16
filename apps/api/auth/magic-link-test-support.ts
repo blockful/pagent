@@ -18,12 +18,14 @@ export function postMagicSend(
     cookie?: string;
     realIp?: string;
     forwardedFor?: string;
+    accept?: string;
   } = {},
 ): Request {
   const headers: Record<string, string> = {};
   if (opts.cookie !== undefined) headers.cookie = opts.cookie;
   if (opts.realIp !== undefined) headers['X-Real-IP'] = opts.realIp;
   if (opts.forwardedFor !== undefined) headers['X-Forwarded-For'] = opts.forwardedFor;
+  if (opts.accept !== undefined) headers.Accept = opts.accept;
   let serialized: string;
   if (opts.contentType === 'form' || opts.contentType === undefined) {
     headers['Content-Type'] = 'application/x-www-form-urlencoded';
