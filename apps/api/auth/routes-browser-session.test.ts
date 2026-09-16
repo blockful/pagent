@@ -36,6 +36,7 @@ describe('Browser session login flow', () => {
   beforeEach(() => {
     vi.mocked(db.insertSession).mockReset();
     vi.mocked(db.upsertUser).mockReset();
+    vi.mocked(db.upsertGoogleUser).mockReset();
     vi.mocked(db.getUserByHandle).mockReset();
     vi.mocked(db.getActiveMagicLink).mockReset();
     vi.mocked(db.verifyAndConsumeMagicLink).mockReset();
@@ -72,7 +73,7 @@ describe('Browser session login flow', () => {
       new Request(`${BASE}/oauth/magic?token=browser-flow-token`, {
         headers: {
           'user-agent': 'MockBrowser/1.0',
-          'x-forwarded-for': '10.5.0.1',
+          'x-forwarded-for': '10.5.0.1, 100.64.0.2',
           cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${BROWSER_TRANSACTION_TOKEN}`,
         },
       }),
@@ -109,6 +110,7 @@ describe('Browser session login flow', () => {
     const signedIdToken = await new SignJWT({
       sub: 'google-sub-browser',
       email: 'alex@blockful.io',
+      email_verified: true,
       name: 'Alex Netto',
     })
       .setProtectedHeader({ alg: 'RS256', kid: 'browser-test-kid', typ: 'JWT' })
@@ -139,7 +141,10 @@ describe('Browser session login flow', () => {
       throw new Error(`unexpected fetch: ${url}`);
     });
     vi.mocked(db.getUserByHandle).mockResolvedValue(null);
-    vi.mocked(db.upsertUser).mockResolvedValueOnce(SESSION_USER_ROW);
+    vi.mocked(db.upsertGoogleUser).mockResolvedValueOnce({
+      kind: 'success',
+      user: SESSION_USER_ROW,
+    });
     vi.mocked(db.insertSession).mockResolvedValueOnce(undefined);
     try {
       const res = await app.fetch(
@@ -148,7 +153,7 @@ describe('Browser session login flow', () => {
           {
             headers: {
               'user-agent': 'MockBrowser/2.0',
-              'x-forwarded-for': '203.0.113.77',
+              'x-forwarded-for': '203.0.113.77, 100.64.0.3',
               cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${BROWSER_TRANSACTION_TOKEN}`,
             },
           },
@@ -161,6 +166,9 @@ describe('Browser session login flow', () => {
       expect(setCookie).toContain('HttpOnly');
       expect(setCookie?.toLowerCase()).toContain('samesite=lax');
       expect(db.insertSession).toHaveBeenCalledTimes(1);
+      expect(db.upsertGoogleUser).toHaveBeenCalledWith(
+        expect.objectContaining({ googleSubject: 'google-sub-browser' }),
+      );
       const insertArg = firstCallArgument(vi.mocked(db.insertSession).mock.calls, 'insertSession');
       expect(insertArg.userId).toBe(SESSION_USER_ROW.id);
       expect(insertArg.ipAddress).toBe('203.0.113.77');

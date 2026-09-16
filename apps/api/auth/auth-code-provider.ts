@@ -56,7 +56,7 @@ export async function createAuthCode(
  *   2. Atomically consume the validated code and insert its refresh token
  *      while holding the token-family replay lock.
  *   3. If the code was already consumed, revoke any refresh tokens issued
- *      from that code's user/client — RFC 6749 §4.1.2 SHOULD.
+ *      from that code's grant family — RFC 6749 §4.1.2 SHOULD.
  *   4. Return the prepared access + refresh pair.
  */
 export async function exchangeAuthCode(
@@ -107,20 +107,25 @@ export async function exchangeAuthCode(
   }
 
   if (stored.consumed_at !== null) {
-    await revokeForAuthCodeReplay(code, stored.user_id, stored.client_id);
+    await revokeForAuthCodeReplay(code, stored.refresh_token_family_id);
   }
 
   const user = await db.getUserById(stored.user_id);
   if (!user) {
     throw new TokenError('invalid_grant', 'User no longer exists');
   }
-  const prepared = await prepareTokenPair(user, clientId, stored.scope);
+  const prepared = await prepareTokenPair(
+    user,
+    clientId,
+    stored.scope,
+    stored.refresh_token_family_id,
+  );
 
   const consumed = await db.consumeAuthCodeAndInsertRefreshToken(code, prepared.refreshToken);
   if (!consumed) {
     const replay = await db.getAuthCodeForReplay(code);
     if (replay && replay.consumed_at !== null) {
-      await revokeForAuthCodeReplay(code, replay.user_id, replay.client_id);
+      await revokeForAuthCodeReplay(code, replay.refresh_token_family_id);
     }
     throw new TokenError('invalid_grant', 'Authorization code is invalid or expired');
   }
@@ -128,19 +133,14 @@ export async function exchangeAuthCode(
   return prepared.response;
 }
 
-async function revokeForAuthCodeReplay(
-  code: string,
-  userId: string,
-  clientId: string,
-): Promise<never> {
+async function revokeForAuthCodeReplay(code: string, refreshTokenFamilyId: string): Promise<never> {
   logger.warn(
     {
       code: code.slice(0, 8) + '…',
-      user_id: userId,
-      client_id: clientId,
+      refresh_token_family_id: refreshTokenFamilyId,
     },
     'auth code replay attempt — revoking refresh token family',
   );
-  await db.revokeAllRefreshTokensForFamily(userId, clientId);
+  await db.revokeAllRefreshTokensForFamily(refreshTokenFamilyId);
   throw new TokenError('invalid_grant', 'Authorization code is invalid or expired');
 }

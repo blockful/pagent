@@ -6,13 +6,14 @@ import { client } from './connection.ts';
 // `token_hash` is SHA-256(raw refresh token). Raw values are only ever held
 // by the caller (memory + their HTTPS request). On rotation we insert a new
 // row while revoking the old one atomically; on detected replay (presenting a row already
-// `revoked_at IS NOT NULL`) we revoke every row in the same (user_id,
-// client_id) family per OAuth 2.1 §6.1.
+// `revoked_at IS NOT NULL`) we revoke every row in the same grant family per
+// OAuth 2.1 §6.1.
 
 export type RefreshTokenRow = {
   id: string;
   user_id: string;
   client_id: string;
+  family_id: string;
   token_hash: string;
   scope: string | null;
   created_at: Date;
@@ -23,6 +24,7 @@ export type RefreshTokenRow = {
 export type RefreshTokenInsert = {
   userId: string;
   clientId: string;
+  familyId: string;
   tokenHash: string;
   scope: string | null;
   expiresAt: Date;
@@ -43,12 +45,12 @@ export type RefreshTokenSuccessor = {
 export async function insertRefreshToken(input: RefreshTokenInsert): Promise<RefreshTokenRow> {
   const c = client();
   const rows = await c<RefreshTokenRow[]>`
-    insert into refresh_tokens (user_id, client_id, token_hash, scope, expires_at)
+    insert into refresh_tokens (user_id, client_id, family_id, token_hash, scope, expires_at)
     values (
-      ${input.userId}, ${input.clientId}, ${input.tokenHash},
+      ${input.userId}, ${input.clientId}, ${input.familyId}, ${input.tokenHash},
       ${input.scope}, ${input.expiresAt}
     )
-    returning id, user_id, client_id, token_hash, scope,
+    returning id, user_id, client_id, family_id, token_hash, scope,
              created_at, expires_at, revoked_at
   `;
   return rows[0]!;
@@ -65,8 +67,8 @@ export async function rotateRefreshToken(
 ): Promise<RefreshTokenRow | null> {
   const c = client();
   const rows = await c.begin(async (tx): Promise<RefreshTokenRow[]> => {
-    const families = await tx<Pick<RefreshTokenRow, 'user_id' | 'client_id'>[]>`
-      select user_id, client_id
+    const families = await tx<Pick<RefreshTokenRow, 'family_id'>[]>`
+      select family_id
       from refresh_tokens
       where id = ${oldTokenId}
     `;
@@ -75,7 +77,7 @@ export async function rotateRefreshToken(
 
     await tx`
       select pg_advisory_xact_lock(
-        hashtextextended(${family.user_id} || chr(31) || ${family.client_id}, 0)
+        hashtextextended(${family.family_id}, 0)
       )
     `;
     const inserted = await tx<RefreshTokenRow[]>`
@@ -83,13 +85,13 @@ export async function rotateRefreshToken(
         update refresh_tokens
         set revoked_at = now()
         where id = ${oldTokenId} and revoked_at is null
-        returning user_id, client_id
+        returning user_id, client_id, family_id
       )
-      insert into refresh_tokens (user_id, client_id, token_hash, scope, expires_at)
-      select revoked.user_id, revoked.client_id, ${successor.tokenHash},
+      insert into refresh_tokens (user_id, client_id, family_id, token_hash, scope, expires_at)
+      select revoked.user_id, revoked.client_id, revoked.family_id, ${successor.tokenHash},
              ${successor.scope}, ${successor.expiresAt}
       from revoked
-      returning id, user_id, client_id, token_hash, scope,
+      returning id, user_id, client_id, family_id, token_hash, scope,
                created_at, expires_at, revoked_at
     `;
     return [...inserted];
@@ -106,7 +108,7 @@ export async function rotateRefreshToken(
 export async function getRefreshTokenByHash(tokenHash: string): Promise<RefreshTokenRow | null> {
   const c = client();
   const rows = await c<RefreshTokenRow[]>`
-    select id, user_id, client_id, token_hash, scope,
+    select id, user_id, client_id, family_id, token_hash, scope,
            created_at, expires_at, revoked_at
     from refresh_tokens
     where token_hash = ${tokenHash}
@@ -128,16 +130,13 @@ export async function revokeRefreshToken(id: string): Promise<void> {
 }
 
 /**
- * Revoke every still-active refresh token for a (user_id, client_id) pair.
+ * Revoke every still-active refresh token in a grant family.
  * This is the "token family revocation" path triggered when a revoked token
  * is replayed — per OAuth 2.1 §6.1, the safe response is to assume the whole
- * family has been compromised and invalidate every outstanding refresh
- * token for that client session.
+ * family has been compromised and invalidate every outstanding refresh token
+ * derived from that authorization grant.
  */
-export async function revokeAllRefreshTokensForFamily(
-  userId: string,
-  clientId: string,
-): Promise<void> {
+export async function revokeAllRefreshTokensForFamily(familyId: string): Promise<void> {
   const c = client();
   await c.begin(async (tx) => {
     // The lock must be acquired in a statement before the UPDATE. Under READ
@@ -145,14 +144,13 @@ export async function revokeAllRefreshTokensForFamily(
     // rotation holding the same family lock has committed its successor.
     await tx`
       select pg_advisory_xact_lock(
-        hashtextextended(${userId} || chr(31) || ${clientId}, 0)
+        hashtextextended(${familyId}, 0)
       )
     `;
     await tx`
       update refresh_tokens
       set revoked_at = now()
-      where user_id = ${userId}
-        and client_id = ${clientId}
+      where family_id = ${familyId}
         and revoked_at is null
     `;
   });

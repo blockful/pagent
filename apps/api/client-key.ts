@@ -1,27 +1,29 @@
+import { isIP } from 'node:net';
+import { env } from './schemas.ts';
+
 /**
- * Extract a stable rate-limit key from incoming request headers.
+ * Extract a stable client-IP key under the configured trusted-ingress
+ * contract. Railway strips client-supplied X-Forwarded-For and constructs a
+ * chain whose first entry is the connecting client, even when later CDN and
+ * internal proxy entries vary. Production explicitly opts into that contract
+ * with `TRUSTED_PROXY_MODE=railway`.
  *
- * Trust the LAST hop of `X-Forwarded-For`. Reverse proxies (Railway, Vercel,
- * Cloudflare) append the real client IP to the right of any incoming chain;
- * leftmost entries are whatever the client sent and so are attacker-
- * controllable. Using the last hop assumes exactly one trusted proxy in
- * front of the API. If you ever stack proxies, raise the index by hand.
- *
- * Falls back to "anonymous" if no X-Forwarded-For is present (or all hops
- * are blank), collapsing local-dev / test traffic into a single bucket.
- *
- * Accepts either a string or string[] so it works with both Hono's header
- * accessor (`c.req.header(...)`) and Node's IncomingMessage.headers shape.
+ * A missing header or non-IP first entry is deliberately collapsed into the
+ * anonymous bucket. That prevents malformed values from minting unbounded
+ * attacker-controlled rate-limit keys.
  */
 const ANONYMOUS = 'anonymous';
 
-export function clientKey(xForwardedFor: string | string[] | undefined): string {
+export function clientKey(xForwardedFor: string | readonly string[] | undefined): string {
   if (!xForwardedFor) return ANONYMOUS;
-  const raw = Array.isArray(xForwardedFor) ? xForwardedFor.join(',') : xForwardedFor;
+  if (env.TRUSTED_PROXY_MODE !== undefined && env.TRUSTED_PROXY_MODE !== 'railway') {
+    return ANONYMOUS;
+  }
+  const raw = typeof xForwardedFor === 'string' ? xForwardedFor : xForwardedFor.join(',');
   const hops = raw
     .split(',')
-    .map((h) => h.trim())
+    .map((hop) => hop.trim())
     .filter(Boolean);
-  if (hops.length === 0) return ANONYMOUS;
-  return hops[hops.length - 1]!;
+  const candidate = hops[0];
+  return candidate && isIP(candidate) !== 0 ? candidate : ANONYMOUS;
 }

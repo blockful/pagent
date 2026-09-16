@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, vi } from 'vitest';
 
 import { env } from '../schemas.ts';
 import { initKeys } from './jwt.ts';
-import { magicSendLimiter } from './routes.ts';
+import { magicSendGlobalLimiter, magicSendIpLimiter, magicSendLimiter } from './routes.ts';
 
 export const BASE = 'http://localhost';
 
@@ -13,10 +13,11 @@ export function sha256Hex(s: string): string {
 
 export function postMagicSend(
   body: Record<string, string>,
-  opts: { contentType?: 'json' | 'form'; cookie?: string } = {},
+  opts: { contentType?: 'json' | 'form'; cookie?: string; forwardedFor?: string } = {},
 ): Request {
   const headers: Record<string, string> = {};
   if (opts.cookie !== undefined) headers.cookie = opts.cookie;
+  if (opts.forwardedFor !== undefined) headers['X-Forwarded-For'] = opts.forwardedFor;
   let serialized: string;
   if (opts.contentType === 'form' || opts.contentType === undefined) {
     headers['Content-Type'] = 'application/x-www-form-urlencoded';
@@ -66,5 +67,7 @@ export function setupMagicLinkTest(): void {
   beforeEach(() => {
     vi.clearAllMocks();
     magicSendLimiter.reset();
+    magicSendIpLimiter.reset();
+    magicSendGlobalLimiter.reset();
   });
 }

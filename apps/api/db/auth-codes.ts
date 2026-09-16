@@ -54,6 +54,7 @@ export type AuthCodeRow = {
   code_challenge_method: string;
   scope: string | null;
   resource: string | null;
+  refresh_token_family_id: string;
   created_at: Date;
   expires_at: Date;
   consumed_at: Date | null;
@@ -67,6 +68,7 @@ export type ConsumedAuthCode = {
   codeChallengeMethod: string;
   scope: string | null;
   resource: string | null;
+  refreshTokenFamilyId: string;
 };
 
 /**
@@ -88,7 +90,7 @@ export async function consumeAuthCodeAndInsertRefreshToken(
   return c.begin(async (tx): Promise<ConsumedAuthCode | null> => {
     await tx`
       select pg_advisory_xact_lock(
-        hashtextextended(${refreshToken.userId} || chr(31) || ${refreshToken.clientId}, 0)
+        hashtextextended(${refreshToken.familyId}, 0)
       )
     `;
     const rows = await tx<
@@ -100,6 +102,7 @@ export async function consumeAuthCodeAndInsertRefreshToken(
         code_challenge_method: string;
         scope: string | null;
         resource: string | null;
+        refresh_token_family_id: string;
       }[]
     >`
       update auth_codes
@@ -107,17 +110,18 @@ export async function consumeAuthCodeAndInsertRefreshToken(
       where code = ${code}
         and user_id = ${refreshToken.userId}
         and client_id = ${refreshToken.clientId}
+        and refresh_token_family_id = ${refreshToken.familyId}
         and consumed_at is null
         and expires_at > now()
       returning user_id, client_id, redirect_uri, code_challenge,
-               code_challenge_method, scope, resource
+               code_challenge_method, scope, resource, refresh_token_family_id
     `;
     const row = rows[0];
     if (row === undefined) return null;
     await tx`
-      insert into refresh_tokens (user_id, client_id, token_hash, scope, expires_at)
+      insert into refresh_tokens (user_id, client_id, family_id, token_hash, scope, expires_at)
       values (
-        ${refreshToken.userId}, ${refreshToken.clientId}, ${refreshToken.tokenHash},
+        ${refreshToken.userId}, ${refreshToken.clientId}, ${refreshToken.familyId}, ${refreshToken.tokenHash},
         ${refreshToken.scope}, ${refreshToken.expiresAt}
       )
     `;
@@ -129,6 +133,7 @@ export async function consumeAuthCodeAndInsertRefreshToken(
       codeChallengeMethod: row.code_challenge_method,
       scope: row.scope,
       resource: row.resource,
+      refreshTokenFamilyId: row.refresh_token_family_id,
     };
   });
 }
@@ -144,7 +149,7 @@ export async function consumeAuthCodeAndInsertRefreshToken(
 export async function getAuthCodeForReplay(code: string): Promise<AuthCodeRow | null> {
   const c = client();
   const rows = await c<AuthCodeRow[]>`
-    select code, user_id, client_id, redirect_uri,
+    select code, user_id, client_id, redirect_uri, refresh_token_family_id,
            code_challenge, code_challenge_method, scope, resource,
            created_at, expires_at, consumed_at
     from auth_codes

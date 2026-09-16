@@ -49,9 +49,8 @@ const GOOGLE_SCOPES = 'openid email profile';
  * The fields we extract from Google's ID token. Matches the OIDC standard
  * claims for the requested scopes (`openid email profile`).
  *
- * `sub` is Google's stable per-user identifier — never reused, never
- * mutates. We don't currently persist it (email is our natural key), but
- * a future "link this account to another login method" flow would need it.
+ * `sub` is Google's stable per-user identifier — never reused and never
+ * mutable. It is the persisted Google identity key; email is profile data.
  */
 export interface GoogleProfile {
   sub: string;
@@ -165,6 +164,9 @@ export async function exchangeGoogleCode(code: string): Promise<GoogleProfile> {
   }
   if (typeof payload.email !== 'string' || payload.email.length === 0) {
     throw new Error('google id_token missing email claim');
+  }
+  if (payload.email_verified !== true) {
+    throw new Error('google id_token email_verified claim must be true');
   }
   const profile: GoogleProfile = {
     sub: payload.sub,

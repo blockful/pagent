@@ -1,7 +1,9 @@
 export {
   sanitizeHandle,
   generateUniqueHandle,
+  type GoogleUserProfile,
   type UserProfile,
+  upsertGoogleUser,
   upsertUser,
 } from './user-provider.ts';
 export { createAuthCode } from './auth-code-provider.ts';

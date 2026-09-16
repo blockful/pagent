@@ -83,6 +83,104 @@ test('allocates distinct handles when signups with the same local part race', as
   }
 });
 
+test('binds Google login to subject across a verified email change', async () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl === undefined) throw new TypeError('DATABASE_URL is required');
+  await db.init(databaseUrl);
+  try {
+    const runId = randomUUID();
+    const googleSubject = `google-sub-${runId}`;
+    const created = await db.upsertGoogleUser({
+      googleSubject,
+      email: `google-old-${runId}@example.test`,
+      name: 'Before rename',
+      avatarUrl: null,
+      handle: `google-${runId}`,
+    });
+    const updated = await db.upsertGoogleUser({
+      googleSubject,
+      email: `google-new-${runId}@example.test`,
+      name: 'After rename',
+      avatarUrl: null,
+      handle: `ignored-${runId}`,
+    });
+
+    expect(created.kind).toBe('success');
+    expect(updated.kind).toBe('success');
+    if (created.kind !== 'success' || updated.kind !== 'success') {
+      throw new TypeError('Google subject upsert unexpectedly conflicted');
+    }
+    expect(updated.user.id).toBe(created.user.id);
+    expect(updated.user.handle).toBe(created.user.handle);
+    expect(updated.user.email).toBe(`google-new-${runId}@example.test`);
+  } finally {
+    await db.shutdown();
+  }
+});
+
+test('refuses to auto-link a Google subject to an existing email-only account', async () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl === undefined) throw new TypeError('DATABASE_URL is required');
+  await db.init(databaseUrl);
+  try {
+    const runId = randomUUID();
+    const email = `legacy-${runId}@example.test`;
+    const legacy = await db.upsertUser({
+      email,
+      name: 'Legacy magic-link user',
+      avatarUrl: null,
+      handle: `legacy-${runId}`,
+    });
+
+    const result = await db.upsertGoogleUser({
+      googleSubject: `google-sub-${runId}`,
+      email,
+      name: 'Google profile',
+      avatarUrl: null,
+      handle: `replacement-${runId}`,
+    });
+
+    expect(result).toEqual({ kind: 'link_required' });
+    await expect(db.getUserById(legacy.id)).resolves.toMatchObject({
+      id: legacy.id,
+      name: 'Legacy magic-link user',
+    });
+  } finally {
+    await db.shutdown();
+  }
+});
+
+test('allows exactly one Google subject to claim a new email under a race', async () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl === undefined) throw new TypeError('DATABASE_URL is required');
+  await db.init(databaseUrl);
+  try {
+    const runId = randomUUID();
+    const email = `google-race-${runId}@example.test`;
+    const results = await Promise.all([
+      db.upsertGoogleUser({
+        googleSubject: `google-sub-a-${runId}`,
+        email,
+        name: 'Subject A',
+        avatarUrl: null,
+        handle: `google-a-${runId}`,
+      }),
+      db.upsertGoogleUser({
+        googleSubject: `google-sub-b-${runId}`,
+        email,
+        name: 'Subject B',
+        avatarUrl: null,
+        handle: `google-b-${runId}`,
+      }),
+    ]);
+
+    expect(results.filter((result) => result.kind === 'success')).toHaveLength(1);
+    expect(results.filter((result) => result.kind === 'identity_conflict')).toHaveLength(1);
+  } finally {
+    await db.shutdown();
+  }
+});
+
 test('inspects magic-link bindings without consuming the one-time token', async () => {
   const databaseUrl = process.env.DATABASE_URL;
   if (databaseUrl === undefined) throw new TypeError('DATABASE_URL is required');
@@ -143,6 +241,7 @@ async function createTokenFamily() {
   const oldToken = await db.insertRefreshToken({
     userId: user.id,
     clientId,
+    familyId: randomUUID(),
     tokenHash: `e2e-old-${runId}`,
     scope: 'openid',
     expiresAt,
@@ -159,7 +258,7 @@ test('allows exactly one successor when concurrent refresh-token rotations race'
   await db.init(databaseUrl);
   try {
     // Given: one active refresh token bound to a unique user and OAuth client.
-    const { clientId, expiresAt, oldToken, runId, user } = await createTokenFamily();
+    const { expiresAt, oldToken, runId } = await createTokenFamily();
     const successorAHash = `e2e-successor-a-${runId}`;
     const successorBHash = `e2e-successor-b-${runId}`;
 
@@ -197,7 +296,7 @@ test('allows exactly one successor when concurrent refresh-token rotations race'
     });
     expect(await db.getRefreshTokenByHash(losingHash)).toBeNull();
 
-    await db.revokeAllRefreshTokensForFamily(user.id, clientId);
+    await db.revokeAllRefreshTokensForFamily(winner.family_id);
     expect(await db.getRefreshTokenByHash(winner.token_hash)).toMatchObject({
       id: winner.id,
       revoked_at: expect.any(Date),
@@ -217,7 +316,7 @@ test('leaves no active successor when rotation races family revocation', async (
   try {
     for (let attempt = 0; attempt < 10; attempt++) {
       // Given: a distinct family with one active token for each race attempt.
-      const { clientId, expiresAt, oldToken, runId, user } = await createTokenFamily();
+      const { expiresAt, oldToken, runId } = await createTokenFamily();
       const successorHash = `e2e-concurrent-successor-${runId}`;
 
       // When: rotation and replay-triggered family revocation run concurrently.
@@ -227,7 +326,7 @@ test('leaves no active successor when rotation races family revocation', async (
           scope: 'openid',
           expiresAt,
         }),
-        db.revokeAllRefreshTokensForFamily(user.id, clientId),
+        db.revokeAllRefreshTokensForFamily(oldToken.family_id),
       ]);
 
       // Then: a successor that was inserted cannot remain active.

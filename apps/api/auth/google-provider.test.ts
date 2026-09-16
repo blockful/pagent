@@ -13,12 +13,19 @@ vi.mock('../db.ts', () => ({
   insertOAuthClient: vi.fn(),
   getOAuthClientById: vi.fn(),
   upsertUser: vi.fn(),
+  upsertGoogleUser: vi.fn(),
   getUserByHandle: vi.fn(),
   insertAuthCode: vi.fn(),
 }));
 
 import * as db from '../db.ts';
-import { createAuthCode, generateUniqueHandle, sanitizeHandle, upsertUser } from './provider.ts';
+import {
+  createAuthCode,
+  generateUniqueHandle,
+  sanitizeHandle,
+  upsertGoogleUser,
+  upsertUser,
+} from './provider.ts';
 import { setupGoogleAuthTest } from './google-test-support.ts';
 
 beforeAll(setupGoogleAuthTest);
@@ -183,6 +190,40 @@ describe('upsertUser', () => {
 
     await expect(upsertUser({ email: 'alex@example.com' })).rejects.toBe(conflict);
     expect(db.upsertUser).toHaveBeenCalledOnce();
+  });
+});
+
+describe('upsertGoogleUser', () => {
+  it('forwards the immutable Google subject separately from mutable profile fields', async () => {
+    vi.mocked(db.getUserByHandle).mockResolvedValue(null);
+    vi.mocked(db.upsertGoogleUser).mockResolvedValue({
+      kind: 'success',
+      user: userRow('google-user-uuid', 'alex'),
+    });
+
+    await upsertGoogleUser({
+      googleSubject: 'google-sub-123',
+      email: ' Alex@Example.COM ',
+      name: 'Alex',
+    });
+
+    expect(db.upsertGoogleUser).toHaveBeenCalledWith({
+      googleSubject: 'google-sub-123',
+      email: 'alex@example.com',
+      name: 'Alex',
+      avatarUrl: null,
+      handle: 'alex',
+    });
+  });
+
+  it('returns link-required without retrying or replacing the legacy account', async () => {
+    vi.mocked(db.getUserByHandle).mockResolvedValue(null);
+    vi.mocked(db.upsertGoogleUser).mockResolvedValue({ kind: 'link_required' });
+
+    await expect(
+      upsertGoogleUser({ googleSubject: 'google-sub-new', email: 'legacy@example.test' }),
+    ).resolves.toEqual({ kind: 'link_required' });
+    expect(db.upsertGoogleUser).toHaveBeenCalledOnce();
   });
 });
 

@@ -16,10 +16,10 @@ import {
  * Sequence:
  *   1. Look up the refresh token by SHA-256(raw).
  *   2. If unknown → invalid_grant.
- *   3. If revoked → token family revocation: revoke every active refresh
- *      token for (user_id, client_id) and return invalid_grant.
- *   4. If expired → invalid_grant.
- *   5. If client_id doesn't match the bound client → invalid_grant.
+ *   3. If expired → invalid_grant.
+ *   4. If client_id doesn't match the bound client → invalid_grant.
+ *   5. If revoked → revoke only that grant's token family and return
+ *      invalid_grant.
  *   6. Atomically revoke the old refresh token and insert its successor.
  */
 export async function refreshToken(
@@ -41,9 +41,17 @@ export async function refreshToken(
     throw new TokenError('invalid_grant', 'Refresh token is invalid');
   }
 
-  // Replay of a revoked token → revoke entire family. Per OAuth 2.1 §6.1:
+  if (row.expires_at.getTime() <= Date.now()) {
+    throw new TokenError('invalid_grant', 'Refresh token has expired');
+  }
+
+  if (row.client_id !== clientId) {
+    throw new TokenError('invalid_grant', 'client_id does not match refresh token');
+  }
+
+  // Replay of a revoked token → revoke its grant family. Per OAuth 2.1 §6.1:
   // the safe assumption is that the token leaked, so every still-active
-  // refresh for that user+client gets revoked.
+  // refresh token derived from that authorization grant gets revoked.
   if (row.revoked_at !== null) {
     logger.warn(
       {
@@ -53,16 +61,8 @@ export async function refreshToken(
       },
       'revoked refresh token replay — revoking entire token family',
     );
-    await db.revokeAllRefreshTokensForFamily(row.user_id, row.client_id);
+    await db.revokeAllRefreshTokensForFamily(row.family_id);
     throw new TokenError('invalid_grant', 'Refresh token has been revoked');
-  }
-
-  if (row.expires_at.getTime() <= Date.now()) {
-    throw new TokenError('invalid_grant', 'Refresh token has expired');
-  }
-
-  if (row.client_id !== clientId) {
-    throw new TokenError('invalid_grant', 'client_id does not match refresh token');
   }
 
   const user = await db.getUserById(row.user_id);
@@ -70,7 +70,7 @@ export async function refreshToken(
     throw new TokenError('invalid_grant', 'User no longer exists');
   }
 
-  const prepared = await prepareTokenPair(user, clientId, row.scope);
+  const prepared = await prepareTokenPair(user, clientId, row.scope, row.family_id);
   const successor = await db.rotateRefreshToken(row.id, {
     tokenHash: prepared.refreshToken.tokenHash,
     scope: prepared.refreshToken.scope,
@@ -85,7 +85,7 @@ export async function refreshToken(
       },
       'refresh token rotation race — revoking entire token family',
     );
-    await db.revokeAllRefreshTokensForFamily(row.user_id, row.client_id);
+    await db.revokeAllRefreshTokensForFamily(row.family_id);
     throw new TokenError('invalid_grant', 'Refresh token has been revoked');
   }
   return prepared.response;

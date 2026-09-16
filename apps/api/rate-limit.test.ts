@@ -123,22 +123,14 @@ describe('falls back to "anonymous" bucket when x-forwarded-for is absent', () =
   });
 });
 
-// ---------------------------------------------------------------------------
-// Last-hop trust model (anti-spoofing)
-// ---------------------------------------------------------------------------
-
-describe('rate-limits on the last X-Forwarded-For hop, not the first', () => {
-  it('buckets requests by the last XFF hop; changing the first hop does not reset the counter', async () => {
-    // Make RATE_LIMIT_MAX requests with a multi-hop XFF where the last hop
-    // is 'real-client'. These should all succeed.
+describe("rate-limits on Railway's leftmost X-Forwarded-For client entry", () => {
+  it('does not reset the client bucket when trailing proxy entries change', async () => {
     for (let i = 0; i < 3; i++) {
-      const res = await app.fetch(postNew(`evil-spoof-1, evil-spoof-2, real-client`));
-      expect(res.status, `request ${i + 1} with real-client last hop should be 201`).toBe(201);
+      const res = await app.fetch(postNew(`203.0.113.10, 192.0.2.${i + 1}`));
+      expect(res.status, `request ${i + 1} from the client should be 201`).toBe(201);
     }
 
-    // One more request with a different first hop but the SAME last hop must
-    // be 429, proving the bucket is keyed on the last hop.
-    const spoofed = await app.fetch(postNew(`different-spoof, evil-spoof-2, real-client`));
+    const spoofed = await app.fetch(postNew('203.0.113.10, 192.0.2.200, 198.51.100.7'));
     expect(spoofed.status).toBe(429);
     const body = await json(spoofed);
     expect(body.error).toBe('rate_limited');

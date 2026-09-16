@@ -45,6 +45,7 @@ function storedAuthCode(codeChallenge: string, overrides: Partial<AuthCodeRow> =
     code_challenge_method: 'S256',
     scope: SCOPE,
     resource: null,
+    refresh_token_family_id: 'grant-family-1',
     created_at: new Date(Date.now() - 60_000),
     expires_at: new Date(Date.now() + 60_000),
     consumed_at: null,
@@ -67,6 +68,7 @@ describe('exchangeAuthCode', () => {
       codeChallengeMethod: 'S256',
       scope: SCOPE,
       resource: null,
+      refreshTokenFamilyId: 'grant-family-1',
     });
     vi.mocked(db.getUserById).mockResolvedValueOnce(USER_ROW);
     const response = await exchangeAuthCode('auth-code-abc', CLIENT_ID, REDIRECT_URI, verifier);
@@ -89,6 +91,7 @@ describe('exchangeAuthCode', () => {
     expect(insertArg?.tokenHash).not.toBe(response.refresh_token);
     expect(insertArg?.userId).toBe(USER_ROW.id);
     expect(insertArg?.clientId).toBe(CLIENT_ID);
+    expect(insertArg?.familyId).toBe('grant-family-1');
     expect(insertArg?.scope).toBe(SCOPE);
     const ttlMs = (insertArg?.expiresAt.getTime() ?? 0) - Date.now();
     expect(ttlMs).toBeGreaterThan(89 * 24 * 60 * 60 * 1000);
@@ -137,7 +140,7 @@ describe('exchangeAuthCode', () => {
       exchangeAuthCode('replay-code', CLIENT_ID, REDIRECT_URI, verifier),
     ).rejects.toMatchObject({ code: 'invalid_grant' });
 
-    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(USER_ROW.id, CLIENT_ID);
+    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith('grant-family-1');
     expect(db.consumeAuthCodeAndInsertRefreshToken).not.toHaveBeenCalled();
   });
 
@@ -157,7 +160,7 @@ describe('exchangeAuthCode', () => {
     ).rejects.toMatchObject({ code: 'invalid_grant' });
 
     expect(db.consumeAuthCodeAndInsertRefreshToken).toHaveBeenCalledOnce();
-    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(USER_ROW.id, CLIENT_ID);
+    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith('grant-family-1');
   });
 
   it('does not revoke for a consumed code with an invalid PKCE verifier', async () => {

@@ -20,6 +20,7 @@ const database = vi.hoisted(() => {
             code_challenge_method: 'S256',
             scope: 'page:create',
             resource: null,
+            refresh_token_family_id: 'grant-family-1',
           },
         ];
       }
@@ -50,6 +51,7 @@ import { consumeAuthCodeAndInsertRefreshToken } from './auth-codes.ts';
 const refreshToken = {
   userId: 'user-1',
   clientId: 'client-1',
+  familyId: 'grant-family-1',
   tokenHash: 'refresh-hash',
   scope: 'page:create',
   expiresAt: new Date('2026-02-01T00:00:00Z'),
@@ -66,7 +68,11 @@ describe('authorization-code issuance serialization', () => {
   it('locks the family before consuming the code and inserting its refresh token', async () => {
     await expect(
       consumeAuthCodeAndInsertRefreshToken('auth-code', refreshToken),
-    ).resolves.toMatchObject({ userId: 'user-1', clientId: 'client-1' });
+    ).resolves.toMatchObject({
+      userId: 'user-1',
+      clientId: 'client-1',
+      refreshTokenFamilyId: 'grant-family-1',
+    });
 
     expect(database.begin).toHaveBeenCalledTimes(1);
     expect(database.statements.map(({ text }) => text)).toEqual([
@@ -74,7 +80,7 @@ describe('authorization-code issuance serialization', () => {
       expect.stringMatching(/^update auth_codes/),
       expect.stringMatching(/^insert into refresh_tokens/),
     ]);
-    expect(database.statements.at(0)?.values).toEqual(['user-1', 'client-1']);
+    expect(database.statements.at(0)?.values).toEqual(['grant-family-1']);
   });
 
   it('does not insert a refresh token when another exchange consumed the code', async () => {

@@ -7,7 +7,7 @@ import { registerMagicRoutes } from './route-magic.ts';
 import { registerSessionRoutes } from './route-session.ts';
 import { registerTokenRoutes } from './route-token.ts';
 
-export { magicSendLimiter } from './route-magic.ts';
+export { magicSendGlobalLimiter, magicSendIpLimiter, magicSendLimiter } from './route-magic.ts';
 
 export const authRoutes = new Hono<{ Variables: AuthVariables }>();
 

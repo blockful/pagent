@@ -71,14 +71,21 @@ export async function init(connectionString: string): Promise<void> {
       id         uuid        primary key default gen_random_uuid(),
       handle     text        unique,
       email      text        unique not null,
+      google_sub text,
       name       text,
       avatar_url text,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     )
   `;
+  await sql`alter table users add column if not exists google_sub text`;
   await sql`create unique index if not exists users_email_idx on users (lower(email))`;
   await sql`create unique index if not exists users_handle_idx on users (lower(handle))`;
+  await sql`
+    create unique index if not exists users_google_sub_idx
+    on users (google_sub)
+    where google_sub is not null
+  `;
 
   // Sessions — browser cookies. `token_hash` is SHA-256(cookie); raw token
   // never stored. Sliding window — `expires_at` is extended on every
@@ -133,21 +140,38 @@ export async function init(connectionString: string): Promise<void> {
       code_challenge_method text        not null default 'S256',
       scope                 text,
       resource              text,
+      refresh_token_family_id uuid       not null default gen_random_uuid(),
       created_at            timestamptz not null default now(),
       expires_at            timestamptz not null,
       consumed_at           timestamptz
     )
   `;
+  await sql`
+    alter table auth_codes
+      add column if not exists refresh_token_family_id uuid
+  `;
+  await sql`
+    update auth_codes
+    set refresh_token_family_id = gen_random_uuid()
+    where refresh_token_family_id is null
+  `;
+  await sql`
+    alter table auth_codes
+      alter column refresh_token_family_id set default gen_random_uuid(),
+      alter column refresh_token_family_id set not null
+  `;
   await sql`create index if not exists auth_codes_expires_at_idx on auth_codes (expires_at)`;
 
   // Refresh tokens — opaque, rotated on each use. `token_hash` is
   // SHA-256(raw). On rotation the old row gets revoked_at = now() and a
-  // new row is inserted; presenting a revoked token revokes the whole family.
+  // new row is inserted; presenting a revoked token revokes only that grant's
+  // family, not every grant previously issued to the same client.
   await sql`
     create table if not exists refresh_tokens (
       id         uuid        primary key default gen_random_uuid(),
       user_id    uuid        not null references users(id) on delete cascade,
       client_id  text        not null references oauth_clients(client_id) on delete cascade,
+      family_id  uuid        not null default gen_random_uuid(),
       token_hash text        not null unique,
       scope      text,
       created_at timestamptz not null default now(),
@@ -155,7 +179,22 @@ export async function init(connectionString: string): Promise<void> {
       revoked_at timestamptz
     )
   `;
+  await sql`
+    alter table refresh_tokens
+      add column if not exists family_id uuid
+  `;
+  await sql`
+    update refresh_tokens
+    set family_id = id
+    where family_id is null
+  `;
+  await sql`
+    alter table refresh_tokens
+      alter column family_id set default gen_random_uuid(),
+      alter column family_id set not null
+  `;
   await sql`create index if not exists refresh_tokens_user_id_idx on refresh_tokens (user_id)`;
+  await sql`create index if not exists refresh_tokens_family_id_idx on refresh_tokens (family_id)`;
   await sql`create index if not exists refresh_tokens_expires_at_idx on refresh_tokens (expires_at)`;
 
   // Magic links — passwordless email tokens (15-minute TTL).

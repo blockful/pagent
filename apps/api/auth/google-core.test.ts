@@ -1,10 +1,10 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { env } from '../schemas.ts';
 import { renderConsentPage } from './consent-page.ts';
-import { buildGoogleAuthUrl } from './google.ts';
+import { buildGoogleAuthUrl, exchangeGoogleCode } from './google.ts';
 import { renderLoginPage } from './login-page.ts';
 import { signStateJwt, verifyStateJwt } from './state-jwt.ts';
-import { setupGoogleAuthTest } from './google-test-support.ts';
+import { mockGoogleTokenResponse, setupGoogleAuthTest } from './google-test-support.ts';
 
 beforeAll(setupGoogleAuthTest);
 beforeEach(() => vi.clearAllMocks());
@@ -45,6 +45,41 @@ describe('buildGoogleAuthUrl', () => {
     } finally {
       (env as { GOOGLE_CLIENT_ID: string | undefined }).GOOGLE_CLIENT_ID = original;
     }
+  });
+});
+
+describe('exchangeGoogleCode', () => {
+  it('accepts a verified Google email claim', async () => {
+    const fetchSpy = await mockGoogleTokenResponse({
+      sub: 'google-sub-verified',
+      email: 'verified@example.test',
+      email_verified: true,
+    });
+
+    await expect(exchangeGoogleCode('google-code')).resolves.toMatchObject({
+      sub: 'google-sub-verified',
+      email: 'verified@example.test',
+    });
+    fetchSpy.mockRestore();
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['false', false],
+    ['string true', 'true'],
+  ])('rejects an email_verified claim that is %s', async (_label, emailVerified) => {
+    const claims: Record<string, unknown> = {
+      sub: 'google-sub-unverified',
+      email: 'unverified@example.test',
+    };
+    if (emailVerified !== undefined) claims.email_verified = emailVerified;
+    const fetchSpy = await mockGoogleTokenResponse(
+      claims,
+      emailVerified === undefined ? { includeDefaultEmailVerified: false } : {},
+    );
+
+    await expect(exchangeGoogleCode('google-code')).rejects.toThrow(/email_verified/);
+    fetchSpy.mockRestore();
   });
 });
 

@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { setCookie } from 'hono/cookie';
+import { clientKey } from '../client-key.ts';
 import { env } from '../schemas.ts';
 import { renderLoginPage } from './login-page.ts';
 import { SESSION_COOKIE_NAME } from './middleware.ts';
@@ -27,10 +28,8 @@ export function clearSessionCookie(c: Context): void {
 }
 
 export function getClientIp(c: Context): string | undefined {
-  const xff = c.req.header('x-forwarded-for');
-  if (!xff) return undefined;
-  const last = xff.split(',').pop()?.trim();
-  return last && last.length > 0 ? last : undefined;
+  const key = clientKey(c.req.header('x-forwarded-for'));
+  return key === 'anonymous' ? undefined : key;
 }
 
 export async function renderError(c: Context, message: string, status: 400 | 503 = 400) {

@@ -69,6 +69,7 @@ describe('POST /oauth/token', () => {
       code: 'test-auth-code',
       user_id: TOKEN_USER_ROW.id,
       client_id: TOKEN_CLIENT_ID,
+      refresh_token_family_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       redirect_uri: TOKEN_REDIRECT_URI,
       code_challenge: challenge,
       code_challenge_method: 'S256',
@@ -86,12 +87,14 @@ describe('POST /oauth/token', () => {
       codeChallengeMethod: 'S256',
       scope: 'page:create',
       resource: null,
+      refreshTokenFamilyId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     });
     vi.mocked(db.getUserById).mockResolvedValueOnce(TOKEN_USER_ROW);
     vi.mocked(db.insertRefreshToken).mockImplementation(async (input) => ({
       id: 'rt-id',
       user_id: input.userId,
       client_id: input.clientId,
+      family_id: input.familyId,
       token_hash: input.tokenHash,
       scope: input.scope,
       created_at: new Date(),

@@ -9,8 +9,8 @@ const database = vi.hoisted(() => {
     ): Promise<readonly unknown[]> => {
       const text = strings.join('?').replace(/\s+/g, ' ').trim();
       statements.push({ text, values });
-      if (text.startsWith('select user_id, client_id')) {
-        return [{ user_id: 'user-1', client_id: 'client-1' }];
+      if (text.startsWith('select family_id')) {
+        return [{ family_id: 'grant-family-1' }];
       }
       if (text.startsWith('with revoked as')) {
         return [
@@ -18,6 +18,7 @@ const database = vi.hoisted(() => {
             id: 'successor-1',
             user_id: 'user-1',
             client_id: 'client-1',
+            family_id: 'grant-family-1',
             token_hash: 'new-hash',
             scope: 'openid',
             created_at: new Date('2026-01-01T00:00:00Z'),
@@ -58,21 +59,21 @@ describe('refresh-token family serialization', () => {
 
     expect(database.begin).toHaveBeenCalledTimes(1);
     expect(database.statements.map(({ text }) => text)).toEqual([
-      expect.stringMatching(/^select user_id, client_id/),
+      expect.stringMatching(/^select family_id/),
       expect.stringContaining('pg_advisory_xact_lock'),
       expect.stringMatching(/^with revoked as/),
     ]);
-    expect(database.statements.at(1)?.values).toEqual(['user-1', 'client-1']);
+    expect(database.statements.at(1)?.values).toEqual(['grant-family-1']);
   });
 
   it('locks the family in a prior statement before taking the revocation snapshot', async () => {
-    await revokeAllRefreshTokensForFamily('user-1', 'client-1');
+    await revokeAllRefreshTokensForFamily('grant-family-1');
 
     expect(database.begin).toHaveBeenCalledTimes(1);
     expect(database.statements.map(({ text }) => text)).toEqual([
       expect.stringContaining('pg_advisory_xact_lock'),
       expect.stringMatching(/^update refresh_tokens/),
     ]);
-    expect(database.statements.at(0)?.values).toEqual(['user-1', 'client-1']);
+    expect(database.statements.at(0)?.values).toEqual(['grant-family-1']);
   });
 });

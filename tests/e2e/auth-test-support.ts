@@ -112,6 +112,7 @@ export async function startProductionAuthServer(databaseUrl: string): Promise<Au
       SMTP_USER: 'e2e-smtp-user',
       SMTP_PASS: 'e2e-smtp-password',
       SMTP_FROM: 'e2e@example.test',
+      TRUSTED_PROXY_MODE: 'railway',
       LOG_LEVEL: 'silent',
       OTEL_SDK_DISABLED: 'true',
     },

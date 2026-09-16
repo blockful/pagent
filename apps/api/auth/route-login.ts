@@ -7,7 +7,7 @@ import { exchangeGoogleCode } from './google.ts';
 import { renderLoginPage } from './login-page.ts';
 import type { AuthVariables } from './middleware.ts';
 import { normalizeRequestedScope } from './oauth-scopes.ts';
-import { createAuthCode, upsertUser } from './provider.ts';
+import { createAuthCode, upsertGoogleUser } from './provider.ts';
 import { getClientIp, renderError, setSessionCookie } from './route-shared.ts';
 import {
   clearBrowserTransaction,
@@ -20,6 +20,8 @@ import { signStateJwt, verifyStateJwt } from './state-jwt.ts';
 const AUTHORIZE_WINDOW_MS = 60 * 1000;
 const AUTHORIZE_LIMIT = 30;
 const AUTHORIZE_RETRY_AFTER_SECONDS = Math.ceil(AUTHORIZE_WINDOW_MS / 1000);
+const GOOGLE_ACCOUNT_LINK_ERROR =
+  'This email already belongs to an existing account. Sign in with an email magic link; Google account linking is not available yet.';
 
 type AuthRouter = Hono<{ Variables: AuthVariables }>;
 
@@ -144,11 +146,16 @@ export function registerLoginRoutes(authRoutes: AuthRouter): void {
       } catch {
         return renderError(c, 'Google sign-in failed. Please try again.');
       }
-      const user = await upsertUser({
+      const userResult = await upsertGoogleUser({
+        googleSubject: profile.sub,
         email: profile.email,
         name: profile.name,
         avatarUrl: profile.picture,
       });
+      if (userResult.kind !== 'success') {
+        return renderError(c, GOOGLE_ACCOUNT_LINK_ERROR);
+      }
+      const user = userResult.user;
       const sessionToken = await createSession(
         user.id,
         getClientIp(c),
@@ -181,11 +188,16 @@ export function registerLoginRoutes(authRoutes: AuthRouter): void {
     } catch {
       return renderError(c, 'Google sign-in failed. Please try again.');
     }
-    const user = await upsertUser({
+    const userResult = await upsertGoogleUser({
+      googleSubject: profile.sub,
       email: profile.email,
       name: profile.name,
       avatarUrl: profile.picture,
     });
+    if (userResult.kind !== 'success') {
+      return renderError(c, GOOGLE_ACCOUNT_LINK_ERROR);
+    }
+    const user = userResult.user;
     const pagentCode = await createAuthCode(
       user.id,
       claims.clientId,

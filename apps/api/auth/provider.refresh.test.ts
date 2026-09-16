@@ -27,6 +27,8 @@ import { getClient } from './clients-store.ts';
 import { initKeys, verifyAccessToken } from './jwt.ts';
 import { refreshToken, TokenError } from './provider.ts';
 
+const FAMILY_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
 beforeAll(async () => {
   await initializeTestKeys(initKeys);
 });
@@ -45,6 +47,7 @@ describe('refreshToken', () => {
       id: oldRowId,
       user_id: USER_ROW.id,
       client_id: CLIENT_ID,
+      family_id: FAMILY_ID,
       token_hash: sha256Hex(oldRaw),
       scope: SCOPE,
       created_at: new Date(Date.now() - 60_000),
@@ -56,6 +59,7 @@ describe('refreshToken', () => {
       id: 'rt-row-new',
       user_id: USER_ROW.id,
       client_id: CLIENT_ID,
+      family_id: FAMILY_ID,
       token_hash: input.tokenHash,
       scope: input.scope,
       created_at: new Date(),
@@ -92,6 +96,7 @@ describe('refreshToken', () => {
       id: 'rt-row-raced',
       user_id: USER_ROW.id,
       client_id: CLIENT_ID,
+      family_id: FAMILY_ID,
       token_hash: sha256Hex(oldRaw),
       scope: SCOPE,
       created_at: new Date(Date.now() - 60_000),
@@ -123,7 +128,7 @@ describe('refreshToken', () => {
     expect(rejected[0]?.reason).toBeInstanceOf(TokenError);
     expect(rejected[0]?.reason).toMatchObject({ code: 'invalid_grant' });
     expect(db.rotateRefreshToken).toHaveBeenCalledTimes(2);
-    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(USER_ROW.id, CLIENT_ID);
+    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(FAMILY_ID);
   });
 
   it('revokes the entire token family when a revoked refresh token is replayed', async () => {
@@ -134,6 +139,7 @@ describe('refreshToken', () => {
       id: 'rt-row-revoked',
       user_id: USER_ROW.id,
       client_id: CLIENT_ID,
+      family_id: FAMILY_ID,
       token_hash: sha256Hex(replayedRaw),
       scope: SCOPE,
       created_at: new Date(Date.now() - 120_000),
@@ -145,8 +151,54 @@ describe('refreshToken', () => {
       code: 'invalid_grant',
     });
 
-    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(USER_ROW.id, CLIENT_ID);
+    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(FAMILY_ID);
     expect(db.insertRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('does not revoke a family when an expired revoked refresh token is replayed', async () => {
+    const replayedRaw = 'rt_' + randomBytes(32).toString('hex');
+
+    vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
+    vi.mocked(db.getRefreshTokenByHash).mockResolvedValueOnce({
+      id: 'rt-row-expired-revoked',
+      user_id: USER_ROW.id,
+      client_id: CLIENT_ID,
+      family_id: FAMILY_ID,
+      token_hash: sha256Hex(replayedRaw),
+      scope: SCOPE,
+      created_at: new Date(Date.now() - 120 * 24 * 60 * 60 * 1000),
+      expires_at: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      revoked_at: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+    });
+
+    await expect(refreshToken(replayedRaw, CLIENT_ID)).rejects.toMatchObject({
+      code: 'invalid_grant',
+    });
+
+    expect(db.revokeAllRefreshTokensForFamily).not.toHaveBeenCalled();
+  });
+
+  it('does not revoke a family when a revoked refresh token is replayed by another client', async () => {
+    const replayedRaw = 'rt_' + randomBytes(32).toString('hex');
+
+    vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
+    vi.mocked(db.getRefreshTokenByHash).mockResolvedValueOnce({
+      id: 'rt-row-other-client-revoked',
+      user_id: USER_ROW.id,
+      client_id: 'different-client',
+      family_id: FAMILY_ID,
+      token_hash: sha256Hex(replayedRaw),
+      scope: SCOPE,
+      created_at: new Date(Date.now() - 120_000),
+      expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+      revoked_at: new Date(Date.now() - 60_000),
+    });
+
+    await expect(refreshToken(replayedRaw, CLIENT_ID)).rejects.toMatchObject({
+      code: 'invalid_grant',
+    });
+
+    expect(db.revokeAllRefreshTokensForFamily).not.toHaveBeenCalled();
   });
 
   it('rejects an unknown refresh token with invalid_grant', async () => {
@@ -166,6 +218,7 @@ describe('refreshToken', () => {
       id: 'rt-row-expired',
       user_id: USER_ROW.id,
       client_id: CLIENT_ID,
+      family_id: FAMILY_ID,
       token_hash: sha256Hex(raw),
       scope: SCOPE,
       created_at: new Date(Date.now() - 91 * 24 * 60 * 60 * 1000),
@@ -185,6 +238,7 @@ describe('refreshToken', () => {
       id: 'rt-row-other',
       user_id: USER_ROW.id,
       client_id: 'different-client',
+      family_id: FAMILY_ID,
       token_hash: sha256Hex(raw),
       scope: SCOPE,
       created_at: new Date(),

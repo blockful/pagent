@@ -152,6 +152,85 @@ describe('POST /oauth/magic/send', () => {
     expect(limited.status).toBe(429);
   });
 
+  it('rate-limits varying recipient addresses from the same client IP', async () => {
+    vi.mocked(db.insertMagicLink).mockResolvedValue();
+    const forwardedFor = '203.0.113.10';
+
+    for (let i = 0; i < 10; i++) {
+      const res = await app.fetch(
+        postMagicSend(
+          { email: `recipient-${i}@blockful.io` },
+          { contentType: 'json', forwardedFor },
+        ),
+      );
+      expect(res.status, `request ${i + 1} should succeed`).toBe(200);
+    }
+
+    const limited = await app.fetch(
+      postMagicSend(
+        { email: 'recipient-over-limit@blockful.io' },
+        { contentType: 'json', forwardedFor },
+      ),
+    );
+    expect(limited.status).toBe(429);
+    const body = (await limited.json()) as Record<string, unknown>;
+    expect(body.error).toBe('rate_limited');
+    expect(mockSendMail).toHaveBeenCalledTimes(10);
+  });
+
+  it("uses Railway's leftmost client IP when trailing proxy hops change", async () => {
+    vi.mocked(db.insertMagicLink).mockResolvedValue();
+    for (let i = 0; i < 10; i++) {
+      const res = await app.fetch(
+        postMagicSend(
+          { email: `varying-chain-${i}@blockful.io` },
+          {
+            contentType: 'json',
+            forwardedFor: `203.0.113.10, 192.0.2.${i + 1}`,
+          },
+        ),
+      );
+      expect(res.status, `request ${i + 1} should succeed`).toBe(200);
+    }
+
+    const limited = await app.fetch(
+      postMagicSend(
+        { email: 'varying-chain-over-limit@blockful.io' },
+        {
+          contentType: 'json',
+          forwardedFor: '203.0.113.10, 192.0.2.200, 198.51.100.7',
+        },
+      ),
+    );
+    expect(limited.status).toBe(429);
+    expect(mockSendMail).toHaveBeenCalledTimes(10);
+  });
+
+  it('enforces the provider safeguard across varying recipients and client IPs', async () => {
+    vi.mocked(db.insertMagicLink).mockResolvedValue();
+
+    for (let i = 0; i < 50; i++) {
+      const res = await app.fetch(
+        postMagicSend(
+          { email: `provider-${i}@blockful.io` },
+          { contentType: 'json', forwardedFor: `198.51.100.${i + 1}` },
+        ),
+      );
+      expect(res.status, `request ${i + 1} should succeed`).toBe(200);
+    }
+
+    const limited = await app.fetch(
+      postMagicSend(
+        { email: 'provider-over-limit@blockful.io' },
+        { contentType: 'json', forwardedFor: '198.51.100.201' },
+      ),
+    );
+    expect(limited.status).toBe(429);
+    const body = (await limited.json()) as Record<string, unknown>;
+    expect(body.error).toBe('rate_limited');
+    expect(mockSendMail).toHaveBeenCalledTimes(50);
+  });
+
   it('extracts authorize context from a signed state JWT', async () => {
     vi.mocked(db.insertMagicLink).mockResolvedValueOnce();
 

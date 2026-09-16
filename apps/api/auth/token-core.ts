@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import * as db from '../db.ts';
 import { env } from '../schemas.ts';
 import { signAccessToken } from './jwt.ts';
@@ -110,6 +110,7 @@ export async function prepareTokenPair(
   user: db.UserRow,
   clientId: string,
   scope: string | null,
+  refreshTokenFamilyId: string = randomUUID(),
 ): Promise<PreparedTokenPair> {
   const handle = user.handle ?? user.email.split('@')[0] ?? 'user';
   const accessToken = await signAccessToken({
@@ -127,6 +128,7 @@ export async function prepareTokenPair(
   const refreshTokenRow: db.RefreshTokenInsert = {
     userId: user.id,
     clientId,
+    familyId: refreshTokenFamilyId,
     tokenHash: refreshHash,
     scope,
     expiresAt: refreshExpiresAt,

@@ -62,12 +62,19 @@ export function authorizeUrl(params: Record<string, string>): string {
 
 async function makeSignedIdToken(
   claims: Record<string, unknown>,
-  overrides: { iss?: string; aud?: string; expSeconds?: number } = {},
+  overrides: {
+    iss?: string;
+    aud?: string;
+    expSeconds?: number;
+    includeDefaultEmailVerified?: boolean;
+  } = {},
 ): Promise<string> {
   const issuer = overrides.iss ?? 'https://accounts.google.com';
   const audience = overrides.aud ?? 'test-google-client-id';
   const ttl = overrides.expSeconds ?? 600;
-  return await new SignJWT(claims)
+  const signedClaims =
+    overrides.includeDefaultEmailVerified === false ? claims : { email_verified: true, ...claims };
+  return await new SignJWT(signedClaims)
     .setProtectedHeader({ alg: 'RS256', kid: GOOGLE_KID, typ: 'JWT' })
     .setIssuer(issuer)
     .setAudience(audience)
@@ -78,7 +85,12 @@ async function makeSignedIdToken(
 
 export async function mockGoogleTokenResponse(
   idTokenClaims: Record<string, unknown>,
-  options: { iss?: string; aud?: string; expSeconds?: number } = {},
+  options: {
+    iss?: string;
+    aud?: string;
+    expSeconds?: number;
+    includeDefaultEmailVerified?: boolean;
+  } = {},
 ) {
   const idToken = await makeSignedIdToken(idTokenClaims, options);
   return vi.spyOn(global, 'fetch').mockImplementation(async (input) => {

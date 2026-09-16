@@ -10,12 +10,16 @@ describe('clientKey', () => {
     expect(clientKey('1.2.3.4')).toBe('1.2.3.4');
   });
 
-  it('trusts the LAST hop in a multi-hop chain (anti-spoofing)', () => {
-    expect(clientKey('evil-spoof, evil-spoof-2, real-client')).toBe('real-client');
+  it("uses Railway's leftmost client entry when internal hop count varies", () => {
+    expect(clientKey('203.0.113.8, 198.51.100.7, 192.0.2.9')).toBe('203.0.113.8');
+  });
+
+  it('rejects a non-IP first entry instead of creating attacker-controlled buckets', () => {
+    expect(clientKey('arbitrary-text, 203.0.113.8')).toBe('anonymous');
   });
 
   it('handles array-shaped headers (Node IncomingMessage)', () => {
-    expect(clientKey(['evil-spoof', 'real-client'])).toBe('real-client');
+    expect(clientKey(['203.0.113.8', '192.0.2.9'])).toBe('203.0.113.8');
   });
 
   it('falls back to anonymous on empty / whitespace-only header', () => {
@@ -25,6 +29,6 @@ describe('clientKey', () => {
   });
 
   it('strips whitespace around hops', () => {
-    expect(clientKey('1.1.1.1 ,  2.2.2.2  ')).toBe('2.2.2.2');
+    expect(clientKey('1.1.1.1 ,  2.2.2.2  ')).toBe('1.1.1.1');
   });
 });

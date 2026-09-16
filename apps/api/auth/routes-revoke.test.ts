@@ -32,6 +32,7 @@ describe('POST /oauth/revoke', () => {
       id: 'rt-row',
       user_id: TOKEN_USER_ID,
       client_id: TOKEN_CLIENT_ID,
+      family_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       token_hash: 'irrelevant',
       scope: null,
       created_at: NOW,

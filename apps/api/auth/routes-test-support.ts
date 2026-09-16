@@ -15,6 +15,7 @@ vi.mock('../db.ts', () => ({
   insertOAuthClient: vi.fn(),
   getOAuthClientById: vi.fn(),
   upsertUser: vi.fn(),
+  upsertGoogleUser: vi.fn(),
   getUserByHandle: vi.fn(),
   getUserById: vi.fn(),
   insertAuthCode: vi.fn(),

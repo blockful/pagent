@@ -14,6 +14,7 @@ vi.mock('../db.ts', () => ({
   insertOAuthClient: vi.fn(),
   getOAuthClientById: vi.fn(),
   upsertUser: vi.fn(),
+  upsertGoogleUser: vi.fn(),
   getUserByHandle: vi.fn(),
   insertAuthCode: vi.fn(),
   insertSession: vi.fn(),
@@ -59,14 +60,17 @@ describe('GET /oauth/callback/google', () => {
     });
     vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
     vi.mocked(db.getUserByHandle).mockResolvedValue(null);
-    vi.mocked(db.upsertUser).mockResolvedValue({
-      id: '11111111-2222-3333-4444-555555555555',
-      handle: 'alex',
-      email: 'alex@blockful.io',
-      name: 'Alex Netto',
-      avatar_url: 'https://lh3.googleusercontent.com/abc',
-      created_at: new Date(),
-      updated_at: new Date(),
+    vi.mocked(db.upsertGoogleUser).mockResolvedValue({
+      kind: 'success',
+      user: {
+        id: '11111111-2222-3333-4444-555555555555',
+        handle: 'alex',
+        email: 'alex@blockful.io',
+        name: 'Alex Netto',
+        avatar_url: 'https://lh3.googleusercontent.com/abc',
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
     });
     vi.mocked(db.insertAuthCode).mockResolvedValue();
     const state = await signStateJwt({
@@ -102,8 +106,9 @@ describe('GET /oauth/callback/google', () => {
     expect(tokenCall).toBeDefined();
     if (!tokenCall) throw new Error('Google token endpoint was not called');
     expect(tokenCall[1]?.method).toBe('POST');
-    expect(db.upsertUser).toHaveBeenCalledWith(
+    expect(db.upsertGoogleUser).toHaveBeenCalledWith(
       expect.objectContaining({
+        googleSubject: 'google-sub-123',
         email: 'alex@blockful.io',
         name: 'Alex Netto',
         avatarUrl: 'https://lh3.googleusercontent.com/abc',
@@ -118,6 +123,62 @@ describe('GET /oauth/callback/google', () => {
     expect(authCodeArg.codeChallenge).toBe(VALID_AUTHORIZE.code_challenge);
     expect(authCodeArg.codeChallengeMethod).toBe('S256');
     fetchSpy.mockRestore();
+  });
+
+  it('refuses to auto-link an existing email account to the Google subject', async () => {
+    await mockGoogleTokenResponse({
+      sub: 'google-sub-unlinked',
+      email: 'legacy@blockful.io',
+    });
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
+    vi.mocked(db.getUserByHandle).mockResolvedValue(null);
+    vi.mocked(db.upsertGoogleUser).mockResolvedValue({ kind: 'link_required' });
+    const state = await signStateJwt({
+      clientId: VALID_AUTHORIZE.client_id,
+      redirectUri: VALID_AUTHORIZE.redirect_uri,
+      codeChallenge: VALID_AUTHORIZE.code_challenge,
+      browserTransactionHash: browserTransactionHash(OAUTH_TRANSACTION_TOKEN),
+      consentGranted: true,
+    });
+
+    const res = await app.fetch(
+      new Request(
+        `${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(state)}`,
+        { headers: { cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${OAUTH_TRANSACTION_TOKEN}` } },
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain('Sign in with an email magic link');
+    expect(db.insertAuthCode).not.toHaveBeenCalled();
+    expect(db.insertSession).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unverified Google email before user mutation', async () => {
+    await mockGoogleTokenResponse({
+      sub: 'google-sub-unverified',
+      email: 'unverified@blockful.io',
+      email_verified: false,
+    });
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
+    const state = await signStateJwt({
+      clientId: VALID_AUTHORIZE.client_id,
+      redirectUri: VALID_AUTHORIZE.redirect_uri,
+      codeChallenge: VALID_AUTHORIZE.code_challenge,
+      browserTransactionHash: browserTransactionHash(OAUTH_TRANSACTION_TOKEN),
+      consentGranted: true,
+    });
+
+    const res = await app.fetch(
+      new Request(
+        `${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(state)}`,
+        { headers: { cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${OAUTH_TRANSACTION_TOKEN}` } },
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(db.upsertGoogleUser).not.toHaveBeenCalled();
+    expect(db.insertAuthCode).not.toHaveBeenCalled();
   });
 
   it('rejects a scraped normal OAuth state without the bound browser transaction', async () => {
@@ -142,7 +203,7 @@ describe('GET /oauth/callback/google', () => {
 
     expect(res.status).toBe(400);
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(db.upsertUser).not.toHaveBeenCalled();
+    expect(db.upsertGoogleUser).not.toHaveBeenCalled();
     expect(db.insertAuthCode).not.toHaveBeenCalled();
     expect(res.headers.get('set-cookie')).toContain(`${AUTH_TRANSACTION_COOKIE_NAME}=; Max-Age=0`);
   });
@@ -173,7 +234,7 @@ describe('GET /oauth/callback/google', () => {
 
     expect(res.status).toBe(400);
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(db.upsertUser).not.toHaveBeenCalled();
+    expect(db.upsertGoogleUser).not.toHaveBeenCalled();
     expect(db.insertAuthCode).not.toHaveBeenCalled();
   });
 
@@ -208,7 +269,7 @@ describe('GET /oauth/callback/google', () => {
 
     expect(res.status).toBe(400);
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(db.upsertUser).not.toHaveBeenCalled();
+    expect(db.upsertGoogleUser).not.toHaveBeenCalled();
     expect(db.insertAuthCode).not.toHaveBeenCalled();
   });
 
@@ -260,14 +321,17 @@ describe('GET /oauth/callback/google', () => {
         updated_at: new Date(),
       })
       .mockResolvedValueOnce(null);
-    vi.mocked(db.upsertUser).mockResolvedValue({
-      id: 'new-user',
-      handle: 'alex2',
-      email: 'alex@another.example',
-      name: null,
-      avatar_url: null,
-      created_at: new Date(),
-      updated_at: new Date(),
+    vi.mocked(db.upsertGoogleUser).mockResolvedValue({
+      kind: 'success',
+      user: {
+        id: 'new-user',
+        handle: 'alex2',
+        email: 'alex@another.example',
+        name: null,
+        avatar_url: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
     });
     vi.mocked(db.insertAuthCode).mockResolvedValue();
     const state = await signStateJwt({
@@ -288,7 +352,9 @@ describe('GET /oauth/callback/google', () => {
       ),
     );
     expect(res.status).toBe(302);
-    expect(db.upsertUser).toHaveBeenCalledWith(expect.objectContaining({ handle: 'alex2' }));
+    expect(db.upsertGoogleUser).toHaveBeenCalledWith(
+      expect.objectContaining({ googleSubject: 'google-sub-456', handle: 'alex2' }),
+    );
   });
 
   it('rejects a browser callback without its transaction cookie before mutation', async () => {
@@ -299,7 +365,7 @@ describe('GET /oauth/callback/google', () => {
       ),
     );
     expect(res.status).toBe(400);
-    expect(db.upsertUser).not.toHaveBeenCalled();
+    expect(db.upsertGoogleUser).not.toHaveBeenCalled();
     expect(db.insertSession).not.toHaveBeenCalled();
     expect(res.headers.get('set-cookie')).toContain(`${AUTH_TRANSACTION_COOKIE_NAME}=; Max-Age=0`);
   });
@@ -313,7 +379,7 @@ describe('GET /oauth/callback/google', () => {
       ),
     );
     expect(res.status).toBe(400);
-    expect(db.upsertUser).not.toHaveBeenCalled();
+    expect(db.upsertGoogleUser).not.toHaveBeenCalled();
     expect(db.insertSession).not.toHaveBeenCalled();
   });
 
@@ -324,14 +390,17 @@ describe('GET /oauth/callback/google', () => {
       name: 'Browser User',
     });
     vi.mocked(db.getUserByHandle).mockResolvedValue(null);
-    vi.mocked(db.upsertUser).mockResolvedValue({
-      id: 'browser-user-id',
-      handle: 'browser-user',
-      email: 'browser@blockful.io',
-      name: 'Browser User',
-      avatar_url: null,
-      created_at: new Date(),
-      updated_at: new Date(),
+    vi.mocked(db.upsertGoogleUser).mockResolvedValue({
+      kind: 'success',
+      user: {
+        id: 'browser-user-id',
+        handle: 'browser-user',
+        email: 'browser@blockful.io',
+        name: 'Browser User',
+        avatar_url: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
     });
     vi.mocked(db.insertSession).mockResolvedValue();
     const state = await browserState();
@@ -343,7 +412,7 @@ describe('GET /oauth/callback/google', () => {
     );
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('/');
-    expect(db.upsertUser).toHaveBeenCalledTimes(1);
+    expect(db.upsertGoogleUser).toHaveBeenCalledTimes(1);
     expect(db.insertSession).toHaveBeenCalledTimes(1);
     const setCookie = res.headers.get('set-cookie');
     expect(setCookie).toContain(`${AUTH_TRANSACTION_COOKIE_NAME}=; Max-Age=0`);

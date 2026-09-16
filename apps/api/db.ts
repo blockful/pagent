@@ -14,8 +14,13 @@ export type { Page, PageFormat, PageState, SubmitOutcome } from './db/pages.ts';
 export { getOAuthClientById, insertOAuthClient } from './db/oauth-clients.ts';
 export type { OAuthClientInsert, OAuthClientRow } from './db/oauth-clients.ts';
 
-export { getUserByHandle, getUserById, upsertUser } from './db/users.ts';
-export type { UserRow, UserUpsertInput } from './db/users.ts';
+export { getUserByHandle, getUserById, upsertGoogleUser, upsertUser } from './db/users.ts';
+export type {
+  GoogleUserUpsertInput,
+  GoogleUserUpsertResult,
+  UserRow,
+  UserUpsertInput,
+} from './db/users.ts';
 
 export {
   consumeAuthCodeAndInsertRefreshToken,

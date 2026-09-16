@@ -95,6 +95,7 @@ export const envSchema = z.preprocess(
       LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).optional(),
       RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
       RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+      TRUSTED_PROXY_MODE: z.enum(['railway']).optional(),
 
       // --- Auth ---------------------------------------------------------------
       // Boots without these during the grace period; protected page operations
@@ -157,6 +158,14 @@ export const envSchema = z.preprocess(
         });
       }
       if (cfg.NODE_ENV === 'production') {
+        if (cfg.TRUSTED_PROXY_MODE === undefined) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['TRUSTED_PROXY_MODE'],
+            message:
+              'TRUSTED_PROXY_MODE=railway is required in production after verifying that traffic reaches the service through Railway ingress.',
+          });
+        }
         for (const key of ['PUBLIC_URL', 'API_PUBLIC_URL'] as const) {
           const value = cfg[key];
           if (value && !isHttpsOrigin(value)) {

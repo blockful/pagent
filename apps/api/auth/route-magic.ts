@@ -1,4 +1,5 @@
 import type { Context, Hono } from 'hono';
+import { clientKey } from '../client-key.ts';
 import { RateLimiter } from '../mcp/rate-limit.ts';
 import { env } from '../schemas.ts';
 import { getClient, isAllowedOAuthRedirectUri } from './clients-store.ts';
@@ -17,12 +18,22 @@ import { createSession } from './session.ts';
 import { verifyStateJwt } from './state-jwt.ts';
 
 const MAGIC_SEND_LIMIT = 5;
+const MAGIC_SEND_IP_LIMIT = 10;
+const MAGIC_SEND_GLOBAL_LIMIT = 50;
 const MAGIC_SEND_WINDOW_MS = 15 * 60 * 1000;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type AuthRouter = Hono<{ Variables: AuthVariables }>;
 
 export const magicSendLimiter = new RateLimiter(MAGIC_SEND_LIMIT, MAGIC_SEND_WINDOW_MS);
+export const magicSendIpLimiter = new RateLimiter(MAGIC_SEND_IP_LIMIT, MAGIC_SEND_WINDOW_MS);
+// This is intentionally per process: it bounds one API replica's SMTP spend
+// and resets on restart. The provider's own account quota remains the
+// deployment-wide backstop until a shared limiter is introduced.
+export const magicSendGlobalLimiter = new RateLimiter(
+  MAGIC_SEND_GLOBAL_LIMIT,
+  MAGIC_SEND_WINDOW_MS,
+);
 
 async function parseMagicSendBody(
   c: Context,
@@ -65,17 +76,36 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
       );
     }
     const lowerEmail = email.toLowerCase();
-    const rl = magicSendLimiter.check(lowerEmail);
-    if (!rl.allowed) {
-      c.header('Retry-After', String(rl.secondsUntilReset));
-      return c.json(
-        {
-          error: 'rate_limited',
-          retry_after_seconds: rl.secondsUntilReset,
-          message: `Too many magic link requests for this email; retry after ${rl.secondsUntilReset} seconds`,
-        },
-        429,
-      );
+    const limits = [
+      {
+        limiter: magicSendLimiter,
+        key: lowerEmail,
+        message: 'Too many magic link requests for this email',
+      },
+      {
+        limiter: magicSendIpLimiter,
+        key: clientKey(c.req.header('x-forwarded-for')),
+        message: 'Too many magic link requests from this IP',
+      },
+      {
+        limiter: magicSendGlobalLimiter,
+        key: 'provider',
+        message: 'Magic link requests are temporarily at capacity',
+      },
+    ];
+    for (const limit of limits) {
+      const result = limit.limiter.check(limit.key);
+      if (!result.allowed) {
+        c.header('Retry-After', String(result.secondsUntilReset));
+        return c.json(
+          {
+            error: 'rate_limited',
+            retry_after_seconds: result.secondsUntilReset,
+            message: `${limit.message}; retry after ${result.secondsUntilReset} seconds`,
+          },
+          429,
+        );
+      }
     }
 
     let authorizeContext: Parameters<typeof sendMagicLink>[1] = {};

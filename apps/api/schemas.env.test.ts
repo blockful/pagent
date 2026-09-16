@@ -85,8 +85,42 @@ describe('envSchema', () => {
       ALLOWED_ORIGINS: 'https://pagent.link',
       PUBLIC_URL: 'https://pagent.link',
       API_PUBLIC_URL: 'https://api.pagent.link',
+      TRUSTED_PROXY_MODE: 'railway',
     });
     expect(r.success).toBe(true);
+  });
+
+  it('requires an explicit trusted proxy mode in production', () => {
+    const r = envSchema.safeParse({
+      DATABASE_URL: 'x',
+      NODE_ENV: 'production',
+      ALLOWED_ORIGINS: 'https://pagent.link',
+      PUBLIC_URL: 'https://pagent.link',
+      API_PUBLIC_URL: 'https://api.pagent.link',
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.some((i) => i.path.includes('TRUSTED_PROXY_MODE'))).toBe(true);
+    }
+  });
+
+  it('accepts the Railway trusted-ingress contract in production', () => {
+    const r = envSchema.safeParse({
+      DATABASE_URL: 'x',
+      NODE_ENV: 'production',
+      ALLOWED_ORIGINS: 'https://pagent.link',
+      PUBLIC_URL: 'https://pagent.link',
+      API_PUBLIC_URL: 'https://api.pagent.link',
+      TRUSTED_PROXY_MODE: 'railway',
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.TRUSTED_PROXY_MODE).toBe('railway');
+  });
+
+  it('rejects unsupported trusted proxy modes', () => {
+    expect(
+      envSchema.safeParse({ DATABASE_URL: 'x', TRUSTED_PROXY_MODE: 'untrusted' }).success,
+    ).toBe(false);
   });
 
   it('accepts development without ALLOWED_ORIGINS', () => {
@@ -118,6 +152,7 @@ describe('envSchema', () => {
       ALLOWED_ORIGINS: 'https://a.com',
       PUBLIC_URL: 'https://pagent.link',
       API_PUBLIC_URL: 'https://api.pagent.link',
+      TRUSTED_PROXY_MODE: 'railway',
     });
     expect(r.success).toBe(true);
   });
@@ -154,6 +189,7 @@ describe('envSchema', () => {
       ALLOWED_ORIGINS: 'https://pagent.link',
       PUBLIC_URL: 'https://pagent.link',
       API_PUBLIC_URL: 'https://api.pagent.link',
+      TRUSTED_PROXY_MODE: 'railway',
       [key]: value,
     });
     expect(r.success).toBe(false);
@@ -167,6 +203,7 @@ describe('envSchema', () => {
       ALLOWED_ORIGINS: 'https://pagent.link',
       PUBLIC_URL: 'https://pagent.link',
       API_PUBLIC_URL: 'https://api.pagent.link',
+      TRUSTED_PROXY_MODE: 'railway',
     });
     expect(r.success).toBe(true);
   });

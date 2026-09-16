@@ -85,6 +85,13 @@ export interface UserProfile {
   avatarUrl?: string;
 }
 
+export type GoogleUserProfile = {
+  readonly googleSubject: string;
+  readonly email: string;
+  readonly name?: string;
+  readonly avatarUrl?: string;
+};
+
 /**
  * Insert-or-update a user by email. On a brand-new email the row is created
  * with a freshly generated handle; on a returning email name/avatar_url are
@@ -104,6 +111,28 @@ export async function upsertUser(profile: UserProfile): Promise<db.UserRow> {
     const handle = await generateUniqueHandle(localPart);
     try {
       return await db.upsertUser({
+        email,
+        name: profile.name ?? null,
+        avatarUrl: profile.avatarUrl ?? null,
+        handle,
+      });
+    } catch (error) {
+      if (!isHandleConflict(error) || attempt === HANDLE_ALLOCATION_ATTEMPTS - 1) throw error;
+    }
+  }
+  throw new Error('handle allocation exhausted');
+}
+
+export async function upsertGoogleUser(
+  profile: GoogleUserProfile,
+): Promise<db.GoogleUserUpsertResult> {
+  const email = profile.email.trim().toLowerCase();
+  const localPart = email.split('@')[0] ?? '';
+  for (let attempt = 0; attempt < HANDLE_ALLOCATION_ATTEMPTS; attempt++) {
+    const handle = await generateUniqueHandle(localPart);
+    try {
+      return await db.upsertGoogleUser({
+        googleSubject: profile.googleSubject,
         email,
         name: profile.name ?? null,
         avatarUrl: profile.avatarUrl ?? null,
