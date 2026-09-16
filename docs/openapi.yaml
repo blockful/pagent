@@ -1310,6 +1310,7 @@ paths:
         {
           '200': { description: Granted session or generic access gate state. },
           '404': { description: Generic unavailable response. },
+          '429': { description: Per-client-IP viewer write limit exceeded. },
         }
 
   /v1/share/request:
@@ -1336,6 +1337,7 @@ paths:
         {
           '202': { description: Generic request accepted response. },
           '404': { description: Generic unavailable response. },
+          '429': { description: Per-client-IP viewer write limit exceeded. },
         }
 
   /v1/share/request/{requestId}:
@@ -1382,6 +1384,7 @@ paths:
               excluded as preview or automation,
               or disabled by consent.,
             },
+          '429': { description: Per-client-IP viewer write limit exceeded. },
         }
 
   /v1/viewer/visits/{visitId}/events:
@@ -1399,6 +1402,7 @@ paths:
         {
           '202': { description: Events accepted idempotently. },
           '410': { description: Session is unavailable or does not own the visit. },
+          '429': { description: Per-client-IP engagement delivery limit exceeded. },
         }
 
   /{id}:

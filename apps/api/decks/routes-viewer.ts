@@ -1,6 +1,10 @@
 import { Hono, type Context } from 'hono';
+import { rateLimiter } from 'hono-rate-limiter';
 import { z } from 'zod';
 import type { AuthVariables } from '../auth/middleware.ts';
+import { clientKey } from '../client-key.ts';
+import { getRequestId } from '../request-id.ts';
+import { env } from '../schemas.ts';
 import { ShareUnavailableError } from './errors.ts';
 import {
   accessRequestBodySchema,
@@ -20,6 +24,9 @@ import { ViewerSessionUnavailableError, getViewerDeck } from './repository-viewe
 type ViewerContext = Context<{ Variables: AuthVariables }>;
 const tokenSchema = z.string().min(20).max(200);
 const visitIdSchema = z.string().uuid();
+const accessLimiter = createViewerWriteLimiter(env.RATE_LIMIT_MAX);
+const visitLimiter = createViewerWriteLimiter(env.RATE_LIMIT_MAX);
+const eventLimiter = createViewerWriteLimiter(env.RATE_LIMIT_MAX * 20);
 export const viewerRoutes = new Hono<{ Variables: AuthVariables }>();
 
 viewerRoutes.get('/share', async (c) => {
@@ -32,7 +39,7 @@ viewerRoutes.get('/share', async (c) => {
   }
 });
 
-viewerRoutes.post('/share/access', async (c) => {
+viewerRoutes.post('/share/access', accessLimiter, async (c) => {
   const token = shareToken(c);
   const body = viewerAccessBodySchema.safeParse(await c.req.json().catch(() => null));
   if (token === null) return c.json({ error: 'not_found' }, 404);
@@ -51,7 +58,7 @@ viewerRoutes.post('/share/access', async (c) => {
   }
 });
 
-viewerRoutes.post('/share/request', async (c) => {
+viewerRoutes.post('/share/request', accessLimiter, async (c) => {
   const token = shareToken(c);
   const body = accessRequestBodySchema.safeParse(await c.req.json().catch(() => null));
   if (token === null || !body.success) {
@@ -77,7 +84,7 @@ viewerRoutes.get('/viewer/deck', async (c) => {
   }
 });
 
-viewerRoutes.post('/viewer/visits', async (c) => {
+viewerRoutes.post('/viewer/visits', visitLimiter, async (c) => {
   const token = viewerToken(c);
   const body = startVisitBodySchema.safeParse(await c.req.json().catch(() => null));
   if (token === null || !body.success) return c.json({ error: 'bad_request' }, 400);
@@ -88,7 +95,7 @@ viewerRoutes.post('/viewer/visits', async (c) => {
   }
 });
 
-viewerRoutes.post('/viewer/visits/:visitId/events', async (c) => {
+viewerRoutes.post('/viewer/visits/:visitId/events', eventLimiter, async (c) => {
   const token = viewerToken(c);
   const visitId = visitIdSchema.safeParse(c.req.param('visitId'));
   const body = engagementBodySchema.safeParse(await c.req.json().catch(() => null));
@@ -111,6 +118,28 @@ function shareToken(c: ViewerContext): string | null {
 function viewerToken(c: ViewerContext): string | null {
   const parsed = tokenSchema.safeParse(c.req.header('x-viewer-session'));
   return parsed.success ? parsed.data : null;
+}
+
+function createViewerWriteLimiter(limit: number) {
+  const retryAfter = Math.ceil(env.RATE_LIMIT_WINDOW_MS / 1000);
+  return rateLimiter({
+    windowMs: env.RATE_LIMIT_WINDOW_MS,
+    limit,
+    standardHeaders: 'draft-7',
+    keyGenerator: (c: Context) => clientKey(c.req.header('x-real-ip')),
+    handler: (c) => {
+      c.header('Retry-After', String(retryAfter));
+      return c.json(
+        {
+          error: 'rate_limited',
+          retry_after_seconds: retryAfter,
+          message: `Too many viewer requests; retry after ${retryAfter} seconds`,
+          request_id: getRequestId(c),
+        },
+        429,
+      );
+    },
+  });
 }
 
 function unavailable(c: ViewerContext, error: unknown) {
