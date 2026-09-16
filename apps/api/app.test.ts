@@ -4,6 +4,7 @@
  * DATABASE_URL and PORT are set via vitest.config.ts test.env.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 // Mock db.ts before any import that pulls it in.
 vi.mock('./db.ts', () => ({
@@ -63,8 +64,14 @@ function req(method: string, path: string, body?: unknown): Request {
 }
 
 async function json(res: Response) {
-  return res.json() as Promise<Record<string, unknown>>;
+  return z.record(z.string(), z.unknown()).parse(await res.json());
 }
+
+const openApiDocumentSchema = z.object({
+  openapi: z.string(),
+  info: z.object({ title: z.string() }),
+  paths: z.record(z.string(), z.unknown()),
+});
 
 /** Build a fake active page object (matches the Page type from db.ts). */
 function fakePage(
@@ -743,7 +750,7 @@ describe('OpenAPI surface', () => {
     expect(res.status).toBe(200);
     const ct = res.headers.get('content-type') ?? '';
     expect(ct).toContain('application/json');
-    const body = await res.json();
+    const body = openApiDocumentSchema.parse(await res.json());
     expect(body.openapi).toBe('3.1.0');
     expect(body.info.title).toBe('Pagent API');
   });
@@ -760,11 +767,15 @@ describe('OpenAPI surface', () => {
 
   it('GET /openapi.json includes all expected paths', async () => {
     const res = await app.fetch(new Request('http://test/openapi.json'));
-    const body = await res.json();
+    const body = openApiDocumentSchema.parse(await res.json());
     expect(body.paths).toHaveProperty('/new');
     expect(body.paths).toHaveProperty('/{id}');
     expect(body.paths).toHaveProperty('/{id}/result');
     expect(body.paths).toHaveProperty('/health');
+    expect(body.paths).toHaveProperty('/v1/decks');
+    expect(body.paths).toHaveProperty('/v1/share');
+    expect(body.paths).toHaveProperty('/v1/viewer/deck');
+    expect(body.paths).toHaveProperty('/v1/decks/{deckId}/analytics');
   });
 
   it('GET /docs returns HTML with Scalar marker', async () => {

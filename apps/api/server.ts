@@ -9,10 +9,13 @@ import { makeMcpHttpHandler } from './mcp/http.ts';
 import { logger } from './logger.ts';
 import { metrics } from './metrics.ts';
 import { shutdownTracing } from './tracing.ts';
+import { initDeckSchema } from './decks/schema.ts';
+import { purgeExpiredAnalytics } from './decks/repository-access-settings.ts';
 
 // --- Boot --------------------------------------------------------------------
 
 await db.init(env.DATABASE_URL);
+await initDeckSchema(db.database());
 
 // Initialize the Ed25519 JWT signing keys once at startup, so /oauth/token
 // (signAccessToken) and /.well-known/jwks.json (getJwks) don't throw on
@@ -40,6 +43,26 @@ const sweepTimer = setInterval(async () => {
   }
 }, 60_000);
 sweepTimer.unref();
+
+try {
+  const removed = await purgeExpiredAnalytics();
+  if (removed > 0) logger.info({ removed }, 'startup analytics retention sweep completed');
+} catch (err) {
+  logger.error({ err }, 'startup analytics retention sweep failed');
+}
+
+const retentionTimer = setInterval(
+  async () => {
+    try {
+      const removed = await purgeExpiredAnalytics();
+      if (removed > 0) logger.info({ removed }, 'analytics retention sweep completed');
+    } catch (err) {
+      logger.error({ err }, 'analytics retention sweep failed');
+    }
+  },
+  24 * 60 * 60 * 1_000,
+);
+retentionTimer.unref();
 
 // Multiplex: /mcp goes through the MCP HTTP transport (which writes directly
 // to the underlying response stream — Hono can't host that cleanly); every
@@ -70,6 +93,7 @@ const shutdown = async (signal: string) => {
 
   // Stop the TTL sweep first so its next tick can't race the db.shutdown.
   clearInterval(sweepTimer);
+  clearInterval(retentionTimer);
 
   // Stop accepting new connections; resolves when all in-flight ones finish.
   const drained = new Promise<void>((resolve, reject) => {

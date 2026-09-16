@@ -9,6 +9,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { z } from 'zod';
 
 vi.mock('../db.ts', () => ({
   init: vi.fn(() => Promise.resolve()),
@@ -106,6 +107,17 @@ const INITIALIZE_BODY = JSON.stringify({
 
 const MCP_ACCEPT = 'application/json, text/event-stream';
 
+const errorResponseSchema = z.object({
+  error: z.string(),
+  message: z.string(),
+  request_id: z.string().optional(),
+});
+const rateLimitResponseSchema = errorResponseSchema.extend({ retry_after_seconds: z.number() });
+
+async function parseJson<T>(res: Response, schema: z.ZodType<T>): Promise<T> {
+  return schema.parse(await res.json());
+}
+
 function postMcp(
   headers: Record<string, string> = {},
   body: string = INITIALIZE_BODY,
@@ -122,11 +134,12 @@ function postMcp(
 // ---------------------------------------------------------------------------
 
 describe('SDK client', () => {
-  it('lists all three tools', async () => {
+  it('lists all four tools', async () => {
     const client = await newSdkClient();
     const result = await client.listTools();
     expect(result.tools.map((t) => t.name).sort()).toEqual([
       'check_result',
+      'publish_deck',
       'show_html',
       'show_ui',
     ]);
@@ -280,7 +293,7 @@ describe('HTTP layer', () => {
       body: 'hello',
     });
     expect(res.status).toBe(400);
-    const body = await res.json();
+    const body = await parseJson(res, errorResponseSchema);
     expect(body.error).toBe('bad_request');
     expect(body.message).toContain('application/json');
     expect(typeof body.request_id).toBe('string');
@@ -313,7 +326,7 @@ describe('HTTP layer', () => {
         body: `{"jsonrpc":"2.0","id":1,"method":"junk","params":"${oversize}"}`,
       });
       expect(res.status).toBe(400);
-      const body = await res.json();
+      const body = await parseJson(res, errorResponseSchema);
       expect(body.error).toBe('bad_request');
       expect(body.message).toContain('200-byte limit');
       expect(typeof body.request_id).toBe('string');
@@ -369,7 +382,7 @@ describe('rate limiting', () => {
 
       const r3 = await postFromIp(url, '1.2.3.4');
       expect(r3.status).toBe(429);
-      const body = await r3.json();
+      const body = await parseJson(r3, rateLimitResponseSchema);
       expect(body.error).toBe('rate_limited');
       expect(typeof body.retry_after_seconds).toBe('number');
       expect(body.retry_after_seconds).toBeGreaterThan(0);
@@ -441,7 +454,7 @@ describe('Bearer auth gating', () => {
         expect(wwwAuth).toContain(
           'resource_metadata="http://test.local/.well-known/oauth-protected-resource"',
         );
-        const body = await res.json();
+        const body = await parseJson(res, errorResponseSchema);
         expect(body.error).toBe('unauthorized');
         expect(body.message).toMatch(/bearer/i);
         expect(typeof body.request_id).toBe('string');
@@ -468,7 +481,7 @@ describe('Bearer auth gating', () => {
         expect(res.status).toBe(401);
         const wwwAuth = res.headers.get('WWW-Authenticate');
         expect(wwwAuth).toContain('error="invalid_token"');
-        const body = await res.json();
+        const body = await parseJson(res, errorResponseSchema);
         expect(body.error).toBe('invalid_token');
       } finally {
         spy.mockRestore();

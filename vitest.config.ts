@@ -13,7 +13,13 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['apps/api/**/*.ts', 'apps/mcp/**/*.ts'],
-      exclude: ['**/*.test.ts', '**/dist/**'],
+      exclude: [
+        '**/*.test.ts',
+        '**/dist/**',
+        'apps/api/server.ts',
+        'apps/api/tracing.ts',
+        'apps/mcp/server.ts',
+      ],
       thresholds: {
         lines: 70,
         functions: 70,

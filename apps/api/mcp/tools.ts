@@ -10,6 +10,7 @@
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { publishDeckBodySchema, type PublishDeckBody } from '../decks/domain.ts';
 import { HTML_MAX_BYTES } from '../limits.ts';
 
 // --- Operations contract -----------------------------------------------------
@@ -31,6 +32,19 @@ export type CheckResultOutcome =
   | { kind: 'not_found' }
   | { kind: 'state'; state: PageState; result: unknown; format: PageFormat };
 
+export type PublisherIdentity = {
+  readonly id: string;
+  readonly email: string;
+};
+
+export type PublishDeckResult = {
+  readonly deck_id: string;
+  readonly revision_id: string;
+  readonly revision_number: number;
+  readonly dashboard_url: string;
+  readonly preview_url: string;
+};
+
 export interface PageOps {
   /**
    * `ownerId` is the authenticated user's UUID, lifted from the MCP request's
@@ -41,6 +55,7 @@ export interface PageOps {
   showUi(spec: unknown, ownerId?: string): Promise<ShowUiResult>;
   showHtml(html: string, ownerId?: string): Promise<ShowUiResult>;
   checkResult(page_id: string): Promise<CheckResultOutcome>;
+  publishDeck(input: PublishDeckBody, publisher?: PublisherIdentity): Promise<PublishDeckResult>;
 }
 
 /**
@@ -51,11 +66,25 @@ export interface PageOps {
  * auth context) or for unauthenticated HTTP MCP calls in grace mode — the
  * adapter then inserts the page with owner_id = NULL.
  */
+const publisherExtraSchema = z
+  .object({
+    authInfo: z
+      .object({
+        extra: z.object({ sub: z.string(), email: z.string().email().optional() }).passthrough(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+function publisherFromExtra(extra: unknown): PublisherIdentity | undefined {
+  const parsed = publisherExtraSchema.safeParse(extra);
+  if (!parsed.success || parsed.data.authInfo.extra.email === undefined) return undefined;
+  return { id: parsed.data.authInfo.extra.sub, email: parsed.data.authInfo.extra.email };
+}
+
 function ownerIdFromExtra(extra: unknown): string | undefined {
-  if (!extra || typeof extra !== 'object') return undefined;
-  const authInfo = (extra as { authInfo?: { extra?: Record<string, unknown> } }).authInfo;
-  const sub = authInfo?.extra?.sub;
-  return typeof sub === 'string' ? sub : undefined;
+  const parsed = publisherExtraSchema.safeParse(extra);
+  return parsed.success ? parsed.data.authInfo.extra.sub : undefined;
 }
 
 // --- Tool descriptions -------------------------------------------------------
@@ -104,9 +133,36 @@ const CHECK_RESULT_DESCRIPTION = [
   'If the page expired (Page not found), do NOT retry the same page_id — ask the user in chat whether to start over, then call show_ui (or show_html) with a fresh spec.',
 ].join('\n\n');
 
+const PUBLISH_DECK_DESCRIPTION = [
+  'Publish a durable slide deck to Pagent, or create a new immutable revision of an existing deck.',
+  'Use stable slide ids across revisions so slide-level analytics remain comparable.',
+  'Returns deck and revision ids plus dashboard and private preview URLs. Publishing never creates a public viewer link; create sharing access in the dashboard.',
+].join('\n\n');
+
 // --- Registration ------------------------------------------------------------
 
 export function registerPagentTools(server: McpServer, ops: PageOps): void {
+  server.registerTool(
+    'publish_deck',
+    {
+      title: 'Publish a durable deck',
+      description: PUBLISH_DECK_DESCRIPTION,
+      inputSchema: publishDeckBodySchema.shape,
+    },
+    async (input, extra) => {
+      const published = await ops.publishDeck(input, publisherFromExtra(extra));
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Deck published as revision ${published.revision_number}.\n\nDashboard: ${published.dashboard_url}\nPrivate preview: ${published.preview_url}`,
+          },
+        ],
+        structuredContent: published,
+      };
+    },
+  );
+
   server.registerTool(
     'show_ui',
     {

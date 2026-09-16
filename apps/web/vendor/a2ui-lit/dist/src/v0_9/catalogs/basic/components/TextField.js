@@ -154,14 +154,16 @@ let A2uiBasicTextFieldElement = (() => {
                 type = 'password';
             const classes = { 'a2ui-textfield': true, invalid: isInvalid };
             return html `
-      ${props.label ? html `<label>${props.label}</label>` : nothing}
+      ${props.label ? html `<label for="data">${props.label}</label>` : nothing}
       ${props.variant === 'longText'
                 ? html `<textarea
+            id="data"
             class=${classMap(classes)}
             .value=${props.value || ''}
             @input=${onInput}
           ></textarea>`
                 : html `<input
+            id="data"
             type=${type}
             class=${classMap(classes)}
             .value=${props.value || ''}

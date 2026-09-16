@@ -63,6 +63,12 @@ type ApiErrorBody = {
   max_bytes?: number;
 };
 
+const publishDeckResultSchema = z.object({
+  deckId: z.string().uuid(),
+  revisionId: z.string().uuid(),
+  revisionNumber: z.number().int().positive(),
+});
+
 async function readError(res: Response, fallbackVerb: string): Promise<Error> {
   const body = (await res.json().catch(() => ({}))) as ApiErrorBody;
   const hint = formatRetryHint(body);
@@ -77,6 +83,26 @@ async function readError(res: Response, fallbackVerb: string): Promise<Error> {
 // header is therefore enough; we don't need to plumb a second copy through
 // the request body.
 const restOps: PageOps = {
+  async publishDeck(input) {
+    const res = await fetch(`${SERVICE_URL}/v1/decks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) throw await readError(res, 'publish_deck');
+    const published = publishDeckResultSchema.parse(await res.json());
+    const rendererBase = SERVICE_URL.replace(/^https:\/\/api\./, 'https://').replace(
+      /^http:\/\/api\./,
+      'http://',
+    );
+    return {
+      deck_id: published.deckId,
+      revision_id: published.revisionId,
+      revision_number: published.revisionNumber,
+      dashboard_url: `${rendererBase}/decks/${published.deckId}`,
+      preview_url: `${rendererBase}/decks/${published.deckId}#preview`,
+    };
+  },
   async showUi(spec, _ownerId) {
     const res = await fetch(`${SERVICE_URL}/new`, {
       method: 'POST',

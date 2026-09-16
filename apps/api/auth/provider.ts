@@ -186,18 +186,23 @@ export interface TokenResponse {
  * client errors, 401 for invalid_client). The route layer catches these and
  * serializes them.
  */
+type TokenErrorCode =
+  | 'invalid_grant'
+  | 'invalid_client'
+  | 'invalid_request'
+  | 'unsupported_grant_type'
+  | 'invalid_scope';
+
 export class TokenError extends Error {
-  constructor(
-    public readonly code:
-      | 'invalid_grant'
-      | 'invalid_client'
-      | 'invalid_request'
-      | 'unsupported_grant_type'
-      | 'invalid_scope',
-    public readonly description: string,
-    public readonly status: 400 | 401 = 400,
-  ) {
+  readonly code: TokenErrorCode;
+  readonly description: string;
+  readonly status: 400 | 401;
+
+  constructor(code: TokenErrorCode, description: string, status: 400 | 401 = 400) {
     super(description);
+    this.code = code;
+    this.description = description;
+    this.status = status;
     this.name = 'TokenError';
   }
 }

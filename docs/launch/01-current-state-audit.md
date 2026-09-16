@@ -8,7 +8,7 @@ Pagent is a **finished, deployed, genuinely well-engineered** product that is ef
 
 ## ✅ What's live and solid
 
-- **The whole spine works in production.** `api.pagent.link` is healthy (`{"ok":true,"db":"ok"}`), the renderer is live at `pagent.link`. Architecture is clean: Hono REST API + Vite/Lit renderer + dual MCP (bundled **stdio** *and* in-process **HTTP** transport, so it works in Claude Code, Cursor, Codex, Cline, etc.). Supabase persistence + self-hosted Grafana observability are wired.
+- **The whole spine works in production.** `api.pagent.link` is healthy (`{"ok":true,"db":"ok"}`), the renderer is live at `pagent.link`. Architecture is clean: Hono REST API + Vite/Lit renderer + dual MCP (bundled **stdio** _and_ in-process **HTTP** transport, so it works in Claude Code, Cursor, Codex, Cline, etc.). Supabase persistence + self-hosted Grafana observability are wired.
 - **Two real capabilities**, not one:
   - `show_ui` — interactive forms/pickers/wizards; the result comes back to the agent via polling.
   - `show_html` — view-only dashboards/reports/infographics (sandboxed, JS-stripped, 1 MB cap).
@@ -24,8 +24,8 @@ Pagent is a **finished, deployed, genuinely well-engineered** product that is ef
 
 ## ✏️ Copy & positioning gaps
 
-1. **`show_html` is invisible.** The [landing page](../../apps/web/home.ts) hero is *forms-only* ("a real form, not a fake form in prose"). Half the product — agent-generated dashboards/reports — isn't shown anywhere. Biggest positioning miss.
-2. **The marketplace/plugin description is developer-jargony** — "*Ships a stdio MCP and skill… self-hosted via PAGENT_URL… via the A2UI protocol*" ([marketplace.json](../../.claude-plugin/marketplace.json)). The saved positioning is that the listing audience is **end users / Claude Code users**, so this copy talks to the wrong reader.
+1. **`show_html` is invisible.** The [landing page](../../apps/web/home.ts) hero is _forms-only_ ("a real form, not a fake form in prose"). Half the product — agent-generated dashboards/reports — isn't shown anywhere. Biggest positioning miss.
+2. **The marketplace/plugin description is developer-jargony** — "_Ships a stdio MCP and skill… self-hosted via PAGENT_URL… via the A2UI protocol_" ([marketplace.json](../../.claude-plugin/marketplace.json)). The saved positioning is that the listing audience is **end users / Claude Code users**, so this copy talks to the wrong reader.
 3. **Install story is split.** The landing leads with a paste-a-prose-prompt block; Claude Code users have a cleaner two-command path. Lead with the simplest path per client.
 4. **Insider terms in the hero** — "no host app required," "single-shot," "A2UI v0.9."
 
@@ -34,8 +34,8 @@ Full fixes with proposed copy: [doc 02](./02-copy-and-app-change-list.md).
 ## 🚦 Launch-readiness / technical gaps
 
 - **Stale brand in the page `<title>`: "Agent UI"** ([index.html:7](../../apps/web/index.html)) — the old name still ships in the browser tab + search results.
-- **No social/SEO meta at all** — no `meta description`, no Open Graph / Twitter card, no share image. For a launch where *every channel is a shared link*, blank link previews are an own-goal.
-- **Supabase flags RLS disabled on `public.pages`** (critical advisory). Real exposure is *probably low* (the API connects via direct Postgres `DATABASE_URL`; the browser only talks to the REST API, so the anon key isn't used client-side), but make it a **deliberate** decision before the spotlight — either enable RLS with policies, or document why the anon key is never exposed.
+- **No social/SEO meta at all** — no `meta description`, no Open Graph / Twitter card, no share image. For a launch where _every channel is a shared link_, blank link previews are an own-goal.
+- **Supabase flags RLS disabled on `public.pages`** (critical advisory). Real exposure is _probably low_ (the API connects via direct Postgres `DATABASE_URL`; the browser only talks to the REST API, so the anon key isn't used client-side), but make it a **deliberate** decision before the spotlight — either enable RLS with policies, or document why the anon key is never exposed.
 
 ## 🔧 What's in flight
 

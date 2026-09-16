@@ -20,6 +20,7 @@ import { MAX_BODY_BYTES, ALLOWED_ORIGINS } from '../app.ts';
 import { clientKey } from '../client-key.ts';
 import { env } from '../schemas.ts';
 import * as store from '../store.ts';
+import { publishDeck } from '../decks/repository-decks.ts';
 import { logger } from '../logger.ts';
 import { verifyAccessToken } from '../auth/jwt.ts';
 import { RateLimiter } from './rate-limit.ts';
@@ -75,6 +76,18 @@ function applyBaseHeaders(req: IncomingMessage, res: ServerResponse, requestId: 
 
 export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
   return {
+    async publishDeck(input, publisher) {
+      if (publisher === undefined) throw new TypeError('Authentication required to publish a deck');
+      const published = await publishDeck(publisher, input);
+      const base = cfg.publicUrl.replace(/\/$/, '');
+      return {
+        deck_id: published.deckId,
+        revision_id: published.revisionId,
+        revision_number: published.revisionNumber,
+        dashboard_url: `${base}/decks/${published.deckId}`,
+        preview_url: `${base}/decks/${published.deckId}#preview`,
+      };
+    },
     async showUi(spec, ownerId) {
       // ownerId arrives from the SDK's RequestHandlerExtra.authInfo.extra.sub
       // (set by the Bearer middleware below). Forwarded unchanged into the

@@ -226,6 +226,10 @@ function client(): ReturnType<typeof postgres> {
   return sql;
 }
 
+export function database(): ReturnType<typeof postgres> {
+  return client();
+}
+
 type PageRow = {
   id: string;
   spec: unknown;
@@ -816,6 +820,7 @@ export type MagicLinkAuthorizeContext = {
   scope?: string;
   state?: string;
   browserSession?: boolean;
+  returnTo?: string;
 };
 
 export type MagicLinkInsert = {

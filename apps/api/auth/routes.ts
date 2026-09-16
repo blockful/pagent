@@ -97,6 +97,20 @@ function getClientIp(c: Context): string | undefined {
   return last && last.length > 0 ? last : undefined;
 }
 
+function browserReturnTarget(value: string | undefined): string {
+  if (value === undefined) return '/';
+  let target: URL;
+  try {
+    target = new URL(value);
+  } catch {
+    return '/';
+  }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') return '/';
+  if (env.ALLOWED_ORIGINS?.includes(target.origin)) return target.toString();
+  const developmentHost = target.hostname === 'localhost' || target.hostname === '127.0.0.1';
+  return env.NODE_ENV !== 'production' && developmentHost ? target.toString() : '/';
+}
+
 // --- AS metadata (RFC 8414) --------------------------------------------------
 // Every endpoint URL is derived from PUBLIC_URL via getIssuer() — never
 // hardcode api.pagent.link. getIssuer() reads env on every call so a test
@@ -259,7 +273,8 @@ authRoutes.get('/oauth/authorize', authorizeLimiter, async (c) => {
   // Browser-session path: no PKCE / client validation. Just stamp a state JWT
   // and render the login page so the user can pick a provider.
   if (query.browser_session === '1') {
-    const signedState = await signStateJwt({ browserSession: true });
+    const returnTo = browserReturnTarget(query.return_to);
+    const signedState = await signStateJwt({ browserSession: true, returnTo });
     return c.html(renderLoginPage({ signedState }));
   }
 
@@ -367,7 +382,7 @@ authRoutes.get('/oauth/callback/google', async (c) => {
     // the browser resolve it against the request origin. Operators who deploy
     // the API on a separate hostname from the renderer can configure a CORS
     // / reverse-proxy setup so this still lands on the dashboard.
-    return c.redirect('/', 302);
+    return c.redirect(browserReturnTarget(claims.returnTo), 302);
   }
 
   // MCP-client flow: validate the resumed claims — they were signed by us 15
@@ -543,6 +558,7 @@ authRoutes.post('/oauth/magic/send', async (c) => {
         scope: claims.scope,
         state: claims.state,
         browserSession: claims.browserSession,
+        returnTo: claims.returnTo,
       };
     } catch {
       // Invalid / expired state — proceed with empty context. The verify
@@ -631,7 +647,7 @@ authRoutes.get('/oauth/magic', async (c) => {
       c.req.header('user-agent') ?? undefined,
     );
     setSessionCookie(c, sessionToken);
-    return c.redirect('/', 302);
+    return c.redirect(browserReturnTarget(ctx.returnTo), 302);
   }
 
   // Without a redirect_uri there's nowhere to send the user.

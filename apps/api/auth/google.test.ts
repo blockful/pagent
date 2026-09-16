@@ -138,6 +138,17 @@ describe('state JWT', () => {
     expect(decoded.clientId).toBeUndefined();
   });
 
+  it('round-trip preserves the validated browser return target', async () => {
+    // Given an authenticated-viewer flow that started on a shared deck.
+    const returnTo = 'http://localhost:8788/share/opaque-token';
+
+    // When the browser state crosses the provider round-trip.
+    const decoded = await verifyStateJwt(await signStateJwt({ browserSession: true, returnTo }));
+
+    // Then the exact target survives for the post-login redirect.
+    expect(decoded.returnTo).toBe(returnTo);
+  });
+
   it('rejects a tampered token (modified payload, original signature)', async () => {
     const token = await signStateJwt({ clientId: 'mcp-cli', redirectUri: 'http://x' });
     // Surgically replace the middle segment with a payload that claims a

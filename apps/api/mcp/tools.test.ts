@@ -40,6 +40,13 @@ const defaultOps: PageOps = {
   showUi: async () => ({ id: 'a'.repeat(32), url: 'http://x/a', expires_at: 0 }),
   showHtml: async () => ({ id: 'b'.repeat(32), url: 'http://x/b', expires_at: 0 }),
   checkResult: async () => ({ kind: 'state', state: 'open', result: null, format: 'a2ui' }),
+  publishDeck: async () => ({
+    deck_id: '00000000-0000-4000-8000-000000000001',
+    revision_id: '00000000-0000-4000-8000-000000000002',
+    revision_number: 1,
+    dashboard_url: 'http://x/decks/00000000-0000-4000-8000-000000000001',
+    preview_url: 'http://x/decks/00000000-0000-4000-8000-000000000001#preview',
+  }),
 };
 
 function makeOps(overrides: Partial<PageOps> = {}): PageOps {
@@ -47,12 +54,39 @@ function makeOps(overrides: Partial<PageOps> = {}): PageOps {
 }
 
 describe('registerPagentTools', () => {
-  it('registers three tools: show_ui, show_html, check_result', () => {
+  it('registers publish_deck with the existing page tools', () => {
+    // Given
     const { server, tools } = makeServer();
+
+    // When
     registerPagentTools(server, makeOps());
+
+    // Then
     expect(tools.has('show_ui')).toBe(true);
     expect(tools.has('show_html')).toBe(true);
     expect(tools.has('check_result')).toBe(true);
+    expect(tools.has('publish_deck')).toBe(true);
+  });
+
+  it('publish_deck returns durable deck and revision URLs', async () => {
+    // Given
+    const { server, tools } = makeServer();
+    registerPagentTools(server, makeOps());
+
+    // When
+    const handler = tools.get('publish_deck')?.handler;
+    const output = await handler?.({
+      title: 'Northstar',
+      slides: [{ id: 'cover', html: '<h1>Northstar</h1>' }],
+    });
+
+    // Then
+    expect(output).toMatchObject({
+      structuredContent: {
+        deck_id: '00000000-0000-4000-8000-000000000001',
+        revision_number: 1,
+      },
+    });
   });
 
   it('show_html description mentions view-only and no scripts', () => {

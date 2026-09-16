@@ -6,6 +6,8 @@ import { basicCatalog } from '@a2ui/lit/v0_9';
 import '@a2ui/lit/v0_9'; // registers <a2ui-surface>
 import './home'; // registers <home-page>
 import './components-showcase'; // registers <components-showcase>
+import './product-components';
+import './product-navigation';
 import { assertCatalogsAllowed } from './spec-guard.js';
 import { nextPollDelay, pollTimeoutMessage } from './poll-backoff.js';
 import { createSandboxedIframe } from './html-renderer.js';
@@ -447,10 +449,16 @@ function setCanonicalUrl(): void {
 }
 setCanonicalUrl();
 
-const root = document.getElementById('app')!;
+const root = document.getElementById('app');
+if (root === null) throw new TypeError('App root is missing');
+const deckDetailMatch = /^\/decks\/([0-9a-f-]{36})\/?$/i.exec(location.pathname);
+const shareMatch = /^\/share\/([^/]+)\/?$/.exec(location.pathname);
 if (location.pathname === '/_components') {
   root.classList.add('is-home');
   root.appendChild(document.createElement('components-showcase'));
+} else if (location.pathname === '/_product-components') {
+  root.classList.add('is-home');
+  root.appendChild(document.createElement('product-components'));
 } else if (location.pathname === '/demo' || location.pathname === '/demo/') {
   root.classList.add('is-home');
   // Lazy chunk: keeps the demo page's spec + dashboard HTML out of the main
@@ -458,6 +466,35 @@ if (location.pathname === '/_components') {
   void import('./demo').then(() => {
     root.appendChild(document.createElement('pagent-demo'));
   });
+} else if (location.pathname === '/decks' || location.pathname === '/decks/') {
+  root.classList.add('is-home');
+  void import('./deck-library.ts').then(() =>
+    root.appendChild(document.createElement('deck-library')),
+  );
+} else if (deckDetailMatch !== null) {
+  root.classList.add('is-home');
+  void import('./deck-detail.ts').then(() => {
+    const element = document.createElement('deck-detail-page');
+    element.setAttribute('deckid', deckDetailMatch[1] ?? '');
+    root.appendChild(element);
+  });
+} else if (shareMatch !== null) {
+  root.classList.add('is-home');
+  void import('./deck-viewer.ts').then(() => {
+    const element = document.createElement('deck-viewer');
+    element.setAttribute('sharetoken', decodeURIComponent(shareMatch[1] ?? ''));
+    root.appendChild(element);
+  });
+} else if (location.pathname === '/view' || location.pathname === '/view/') {
+  root.classList.add('is-home');
+  void import('./deck-viewer.ts').then(() =>
+    root.appendChild(document.createElement('deck-viewer')),
+  );
+} else if (location.pathname === '/privacy' || location.pathname === '/privacy/') {
+  root.classList.add('is-home');
+  void import('./privacy-page.ts').then(() =>
+    root.appendChild(document.createElement('privacy-page')),
+  );
 } else if (!pageId) {
   root.classList.add('is-home');
   root.appendChild(document.createElement('home-page'));

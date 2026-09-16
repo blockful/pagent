@@ -991,6 +991,25 @@ describe('Browser session login flow', () => {
     expect(db.insertAuthCode).not.toHaveBeenCalled();
   });
 
+  it('Magic link browser session returns to the original shared deck', async () => {
+    // Given a validated shared-deck target stored with the magic link.
+    const returnTo = 'http://localhost:8788/share/opaque-token';
+    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce({
+      email: 'alex@blockful.io',
+      authorizeContext: { browserSession: true, returnTo },
+    });
+    vi.mocked(db.getUserByHandle).mockResolvedValue(null);
+    vi.mocked(db.upsertUser).mockResolvedValueOnce(SESSION_USER_ROW);
+    vi.mocked(db.insertSession).mockResolvedValueOnce(undefined);
+
+    // When the viewer consumes the login link.
+    const res = await app.fetch(new Request(`${BASE}/oauth/magic?token=return-flow-token`));
+
+    // Then the new session returns to that deck instead of the dashboard root.
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(returnTo);
+  });
+
   it('Google callback with browser_session=true sets cookie and redirects to /', async () => {
     // Build a state JWT that carries browser_session=true.
     const browserState = await signStateJwt({ browserSession: true });
