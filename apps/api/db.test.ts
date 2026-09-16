@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -8,9 +8,17 @@ import type { Page, PageFormat } from './db';
 // Source-of-truth read for structural SQL assertions. Real DB connections are
 // out of scope for unit tests (DATABASE_URL is a placeholder in
 // vitest.config.ts), so we verify init()'s CREATE TABLE / ALTER TABLE / CREATE
-// INDEX statements by inspecting db.ts directly. If the SQL changes, the test
-// fails — that's the point.
-const dbSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'db.ts'), 'utf8');
+// INDEX statements by inspecting the facade and its leaf modules. If the SQL
+// changes, the test fails — that's the point.
+const apiDirectory = dirname(fileURLToPath(import.meta.url));
+const dbDirectory = join(apiDirectory, 'db');
+const dbSource = [
+  readFileSync(join(apiDirectory, 'db.ts'), 'utf8'),
+  ...readdirSync(dbDirectory)
+    .filter((name) => name.endsWith('.ts'))
+    .sort()
+    .map((name) => readFileSync(join(dbDirectory, name), 'utf8')),
+].join('\n');
 
 /** Normalize whitespace so multi-line SQL templates match a single-line probe. */
 const flat = dbSource.replace(/\s+/g, ' ');
