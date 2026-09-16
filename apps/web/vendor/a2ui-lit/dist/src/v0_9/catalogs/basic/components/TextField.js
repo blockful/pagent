@@ -158,12 +158,14 @@ let A2uiBasicTextFieldElement = (() => {
       ${props.variant === 'longText'
                 ? html `<textarea
             class=${classMap(classes)}
+            aria-label=${props.label || nothing}
             .value=${props.value || ''}
             @input=${onInput}
           ></textarea>`
                 : html `<input
             type=${type}
             class=${classMap(classes)}
+            aria-label=${props.label || nothing}
             .value=${props.value || ''}
             @input=${onInput}
           />`}
