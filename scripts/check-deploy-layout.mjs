@@ -7,8 +7,8 @@ const [railwayConfig, packageManifest] = await Promise.all([
   readFile(resolve(root, 'package.json'), 'utf8').then(JSON.parse),
 ]);
 
-if (railwayConfig.build?.buildCommand !== 'npm ci') {
-  throw new Error('Railway must install the root lockfile with npm ci');
+if (railwayConfig.build?.buildCommand !== 'npm run check:deploy') {
+  throw new Error('Railway must validate the root deployment layout after installing dependencies');
 }
 if (railwayConfig.deploy?.startCommand !== 'npm -w @pagent/api run start') {
   throw new Error('Railway must start the API through the root workspace');
