@@ -89,10 +89,9 @@
   "devDependencies": {
     "@types/jsdom": "^28.0.1",
     "@types/node": "^24.10.1",
-    "google-artifactregistry-auth": "^3.5.0",
     "jsdom": "^25.0.0",
     "typescript": "^5.8.3",
-    "wireit": "^0.15.0-pre.2"
+    "wireit": "^0.14.13"
   },
   "peerDependencies": {
     "@a2ui/markdown-it": "file:../markdown/markdown-it"

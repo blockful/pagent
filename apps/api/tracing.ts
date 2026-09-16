@@ -34,7 +34,9 @@ if (status.enabled) {
       exportIntervalMillis: 60_000,
     }),
     logRecordProcessors: [
-      new BatchLogRecordProcessor(new OTLPLogExporter({ url: `${base}/v1/logs`, headers })),
+      new BatchLogRecordProcessor({
+        exporter: new OTLPLogExporter({ url: `${base}/v1/logs`, headers }),
+      }),
     ],
     instrumentations: [
       getNodeAutoInstrumentations({

@@ -27,8 +27,8 @@ export const TYP = 'at+jwt';
 
 // Loaded once via initKeys(). signAccessToken / verifyAccessToken throw a
 // clear error if init wasn't called — better than a cryptic null deref.
-let privateKey: CryptoKey | null = null;
-let publicKey: CryptoKey | null = null;
+let privateKey: Awaited<ReturnType<typeof importPKCS8>> | null = null;
+let publicKey: Awaited<ReturnType<typeof importSPKI>> | null = null;
 let publicJwk: JWK | null = null;
 
 // --- Types -------------------------------------------------------------------

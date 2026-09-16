@@ -33,8 +33,11 @@ const DEFAULT_TOKEN_ENDPOINT_AUTH_METHOD = 'none';
  * surfaced to the client.
  */
 export class InvalidClientMetadataError extends Error {
-  constructor(public readonly description: string) {
+  readonly description: string;
+
+  constructor(description: string) {
     super(description);
+    this.description = description;
     this.name = 'InvalidClientMetadataError';
   }
 }
