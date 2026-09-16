@@ -121,6 +121,17 @@ test('stdio MCP creates a page, the browser submits it, and the agent receives i
     await page.getByRole('button', { name: 'Submit' }).click();
     expect((await submitted).status()).toBe(200);
     await expect(page.getByRole('status')).toContainText(/waiting for the agent/i);
+    const a2uiHost = page.locator('.a2ui-host');
+    const nameField = page.getByLabel('Your name');
+    await expect(a2uiHost).toHaveAttribute('inert', '');
+    const acceptedFocus = await nameField.evaluate((element) => {
+      if (!(element instanceof HTMLElement)) throw new TypeError('Expected an HTML form control');
+      element.focus();
+      return element.matches(':focus');
+    });
+    expect(acceptedFocus).toBe(false);
+    await page.keyboard.type('Mallory');
+    await expect(nameField).toHaveValue('Ada');
 
     const result = resultSchema.parse(
       await client.callTool({
@@ -144,6 +155,7 @@ test('stdio MCP creates a page, the browser submits it, and the agent receives i
     await expect(
       page.locator('.awaiting-banner .material-symbols', { hasText: 'check_circle' }),
     ).toBeVisible();
+    await expect(a2uiHost).toHaveAttribute('inert', '');
   } finally {
     await client.close();
   }

@@ -258,7 +258,11 @@ class AgentUIApp extends SignalWatcher(LitElement) {
         ? html`<div class="error" role="alert" aria-live="assertive">${this.submitError}</div>`
         : nothing}
       ${renderSubmissionBanner(this.submissionState)}
-      <div class="a2ui-host" aria-disabled=${submissionLocked ? 'true' : 'false'}>
+      <div
+        class="a2ui-host"
+        aria-disabled=${submissionLocked ? 'true' : 'false'}
+        ?inert=${submissionLocked}
+      >
         ${repeat(
           surfaces,
           ([id]) => id,
