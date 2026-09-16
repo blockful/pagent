@@ -13,6 +13,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
+import { z } from 'zod';
 
 // Mocks must come before importing the middleware module.
 vi.mock('./session.ts', () => ({
@@ -33,6 +34,18 @@ import {
 } from './middleware.ts';
 
 const BASE = 'http://localhost';
+
+const authUserSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  handle: z.string().nullable(),
+  authMethod: z.enum(['cookie', 'bearer']),
+});
+const optionalAuthUserSchema = authUserSchema.nullable();
+
+async function parseJson<T>(res: Response, schema: z.ZodType<T>): Promise<T> {
+  return schema.parse(await res.json());
+}
 
 /**
  * Build a fresh test app for each case so c.var doesn't leak between tests.
@@ -70,7 +83,7 @@ describe('resolveAuth — cookie path', () => {
       }),
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await parseJson(res, authUserSchema);
     expect(body.id).toBe('user-uuid-1');
     expect(body.authMethod).toBe('cookie');
     expect(lookupSession).toHaveBeenCalledWith('session-token-1');
@@ -87,7 +100,7 @@ describe('resolveAuth — cookie path', () => {
       }),
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await parseJson(res, optionalAuthUserSchema);
     expect(body).toBeNull();
   });
 });
@@ -113,7 +126,7 @@ describe('resolveAuth — Bearer path', () => {
       }),
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await parseJson(res, authUserSchema);
     expect(body.id).toBe('user-uuid-2');
     expect(body.email).toBe('bob@example.com');
     expect(body.handle).toBe('bob');
@@ -130,7 +143,7 @@ describe('resolveAuth — Bearer path', () => {
       }),
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await parseJson(res, optionalAuthUserSchema);
     expect(body).toBeNull();
   });
 
@@ -142,7 +155,7 @@ describe('resolveAuth — Bearer path', () => {
       }),
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await parseJson(res, optionalAuthUserSchema);
     expect(body).toBeNull();
     expect(verifyAccessToken).not.toHaveBeenCalled();
   });
@@ -155,7 +168,7 @@ describe('resolveAuth — Bearer path', () => {
       }),
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await parseJson(res, optionalAuthUserSchema);
     expect(body).toBeNull();
     expect(verifyAccessToken).not.toHaveBeenCalled();
   });
@@ -179,7 +192,7 @@ describe('resolveAuth — Bearer path', () => {
         headers: { authorization: 'Bearer valid.jwt' },
       }),
     );
-    const body = await res.json();
+    const body = await parseJson(res, authUserSchema);
     expect(body.handle).toBeNull();
   });
 });
@@ -189,7 +202,7 @@ describe('resolveAuth — anonymous', () => {
     const app = makeTestApp();
     const res = await app.fetch(new Request(`${BASE}/me`));
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await parseJson(res, optionalAuthUserSchema);
     expect(body).toBeNull();
     expect(lookupSession).not.toHaveBeenCalled();
     expect(verifyAccessToken).not.toHaveBeenCalled();
@@ -214,68 +227,9 @@ describe('resolveAuth — priority', () => {
         },
       }),
     );
-    const body = await res.json();
+    const body = await parseJson(res, authUserSchema);
     expect(body.id).toBe('user-from-cookie');
     expect(body.authMethod).toBe('cookie');
     expect(verifyAccessToken).not.toHaveBeenCalled();
-  });
-});
-
-describe('requireAuth', () => {
-  it('returns 401 with structured JSON when c.var.user is null', async () => {
-    const app = makeTestApp();
-    const res = await app.fetch(new Request(`${BASE}/private`));
-    expect(res.status).toBe(401);
-    const body = await res.json();
-    expect(body.error).toBe('unauthorized');
-    expect(body.message).toMatch(/auth/i);
-    // request_id is populated by the global request-id middleware in app.ts;
-    // here we mounted middleware in isolation so the field may be undefined.
-    // Whichever it is, it should not crash the response.
-  });
-
-  it('passes through when c.var.user is populated', async () => {
-    (lookupSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      id: 'user-uuid-1',
-      email: 'alex@blockful.io',
-      handle: 'alex',
-      authMethod: 'cookie',
-    });
-    const app = makeTestApp();
-    const res = await app.fetch(
-      new Request(`${BASE}/private`, {
-        headers: { cookie: `${SESSION_COOKIE_NAME}=valid-token` },
-      }),
-    );
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.user.id).toBe('user-uuid-1');
-  });
-
-  it('returns 401 when Bearer JWT is invalid', async () => {
-    (verifyAccessToken as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('bad sig'));
-    const app = makeTestApp();
-    const res = await app.fetch(
-      new Request(`${BASE}/private`, {
-        headers: { authorization: 'Bearer broken.jwt' },
-      }),
-    );
-    expect(res.status).toBe(401);
-    const body = await res.json();
-    expect(body.error).toBe('unauthorized');
-  });
-
-  it('returns 401 when session cookie is expired (lookup returns null)', async () => {
-    (lookupSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
-    const app = makeTestApp();
-    const res = await app.fetch(
-      new Request(`${BASE}/private`, {
-        headers: { cookie: `${SESSION_COOKIE_NAME}=expired-token` },
-      }),
-    );
-    expect(res.status).toBe(401);
-    const body = await res.json();
-    expect(body.error).toBe('unauthorized');
   });
 });
