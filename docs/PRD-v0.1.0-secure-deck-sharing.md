@@ -256,6 +256,10 @@ Analytics can be viewed per link or aggregated across the presentation page. Thi
 ### 10.3 Revisions
 
 - Editing or republishing a presentation page creates a new immutable revision.
+- Authorized editors can browse and preview earlier revisions from the Page's
+  version history.
+- Restoring an earlier revision creates a new latest revision from that
+  snapshot; it never overwrites or deletes existing history.
 - By default, active share links follow the latest published revision.
 - Historical visits retain the revision ID viewed, so slide analytics remain interpretable.
 - Reordering or deleting slides never rewrites historical event meaning.
@@ -283,6 +287,7 @@ Priority meanings:
 | DM-07 | P0       | Users can preview the exact latest presentation revision without generating analytics.                                                                      |
 | DM-08 | P1       | Users can duplicate a presentation page or create a new client-specific link from the list.                                                                 |
 | DM-09 | P0       | Workspace administrators can open `/admin` for membership, policy, audit, and page-metadata governance without implicit content or viewer-analytics access. |
+| DM-10 | P1       | Authorized editors can list and preview earlier revisions and restore one as a new latest revision without mutating existing history.                       |
 
 ### 11.2 External viewer access
 
@@ -581,7 +586,20 @@ Research was performed against first-party product and help documentation availa
 - Shared with me.
 - Permission management and governance metadata.
 
-All four phases are part of v0.1.0. They may ship behind feature flags, but the release should not be described as complete until the secure share-to-insight workflow works end to end.
+### Post-v0.1.0 roadmap: Version history and recovery
+
+- Add a Versions surface to presentation Page detail with revision author,
+  timestamp, and optional change summary.
+- Preview any retained revision without generating viewer analytics.
+- Restore an earlier revision by creating a new latest revision, preserving the
+  complete history and revision-bound analytics.
+- Keep versioning within `write` plus the authenticated web/REST management
+  surfaces; do not add another MCP tool.
+
+Phases A through D are part of v0.1.0. The version-history and recovery phase is
+the next presentation-lifecycle milestone. The release may ship behind feature
+flags, but v0.1.0 should not be described as complete until the secure
+share-to-insight workflow works end to end.
 
 ## 18. Launch acceptance criteria
 
@@ -629,7 +647,7 @@ These questions do not block the draft, but should be resolved before engineerin
 2. **Access request notifications:** email only for v0.1.0, or in-app inbox plus email? Recommendation: in-app state with email notification.
 3. **Consent default:** always show analytics consent, or make it a workspace policy? Recommendation: workspace policy with regionally appropriate defaults, finalized after legal review.
 4. **Retention:** is 12 months appropriate for viewer-level data? Recommendation: 12 months, configurable downward, with deletion on request.
-5. **Link revision behavior:** should links always follow the latest deck or default to the revision originally sent? Recommendation: follow latest, show a revision history, add pinning as P1.
+5. **Link revision behavior:** version history and non-destructive restore are required. Should links always follow the latest revision or optionally stay pinned to the version originally sent? Recommendation: follow latest by default and add explicit pinning after the core history flow.
 6. **Authenticated audience:** should v0.1.0 support only Pagent Google/magic-link accounts, or include enterprise SSO? Recommendation: reuse Pagent auth now and defer SSO.
 
 ## 21. Future extensions
