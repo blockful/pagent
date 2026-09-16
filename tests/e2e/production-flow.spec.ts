@@ -186,8 +186,9 @@ test('generated text stays within a 320px viewport for long identifiers and CJK 
     for (const text of [longIdentifier, cjkCopy]) {
       const box = await page.getByText(text).boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.x).toBeGreaterThanOrEqual(0);
-      expect(box!.x + box!.width).toBeLessThanOrEqual(layout.viewportWidth);
+      if (box === null) throw new TypeError(`Could not measure generated text: ${text}`);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(layout.viewportWidth);
     }
   } finally {
     await client.close();
@@ -244,16 +245,18 @@ test('generated tabs and modal fit a 320px viewport', async ({ page }) => {
     await expect(longTab).toBeVisible();
     const tabBox = await longTab.boundingBox();
     expect(tabBox).not.toBeNull();
-    expect(tabBox!.x).toBeGreaterThanOrEqual(0);
-    expect(tabBox!.x + tabBox!.width).toBeLessThanOrEqual(320);
+    if (tabBox === null) throw new TypeError('Could not measure the long tab');
+    expect(tabBox.x).toBeGreaterThanOrEqual(0);
+    expect(tabBox.x + tabBox.width).toBeLessThanOrEqual(320);
 
     await page.getByRole('button', { name: 'Open narrow modal' }).click();
     const dialog = page.locator('a2ui-modal dialog');
     await expect(dialog).toBeVisible();
     const dialogBox = await dialog.boundingBox();
     expect(dialogBox).not.toBeNull();
-    expect(dialogBox!.x).toBeGreaterThanOrEqual(0);
-    expect(dialogBox!.x + dialogBox!.width).toBeLessThanOrEqual(320);
+    if (dialogBox === null) throw new TypeError('Could not measure the modal dialog');
+    expect(dialogBox.x).toBeGreaterThanOrEqual(0);
+    expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(320);
 
     const layout = await page.evaluate(() => ({
       viewportWidth: window.innerWidth,

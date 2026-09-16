@@ -84,7 +84,10 @@ export function sanitize(html: string): {
       FORCE_BODY: true,
       WHOLE_DOCUMENT: false,
       RETURN_TRUSTED_TYPE: false,
-    }) as string;
+    });
+    if (typeof output !== 'string') {
+      throw new TypeError('Expected DOMPurify to return a string');
+    }
 
     return { output, removedTags, removedAttrs };
   } finally {
