@@ -7,6 +7,7 @@
  * schemas.test.ts; here we only validate the cryptographic primitives.
  */
 import { generateKeyPairSync } from 'node:crypto';
+import type { KeyObject } from 'node:crypto';
 import { describe, expect, it, beforeAll, afterEach, vi } from 'vitest';
 import {
   ALG,
@@ -18,7 +19,7 @@ import {
   getJwks,
   getIssuer,
 } from './jwt.ts';
-import { decodeJwt, decodeProtectedHeader } from 'jose';
+import { SignJWT, decodeJwt, decodeProtectedHeader } from 'jose';
 
 // --- Test setup --------------------------------------------------------------
 
@@ -30,16 +31,20 @@ const SAMPLE_CLAIMS = {
   scope: 'page:create page:read',
 };
 
-function generateTestKeyEnv(): { signingKey: string; publicKey: string } {
+let testPrivateKey: KeyObject | null = null;
+
+function generateTestKeyEnv(): { signingKey: string; publicKey: string; privateKey: KeyObject } {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   return {
     signingKey: privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64url'),
     publicKey: publicKey.export({ type: 'spki', format: 'der' }).toString('base64url'),
+    privateKey,
   };
 }
 
 beforeAll(async () => {
-  const { signingKey, publicKey } = generateTestKeyEnv();
+  const { signingKey, publicKey, privateKey } = generateTestKeyEnv();
+  testPrivateKey = privateKey;
   await initKeys(signingKey, publicKey);
 });
 
@@ -48,6 +53,27 @@ afterEach(() => {
   // same hygiene — anything that flips to fake timers must restore real ones.
   vi.useRealTimers();
 });
+
+async function signTokenWithTyp(typ: string | undefined): Promise<string> {
+  const privateKey = testPrivateKey;
+  if (!privateKey) throw new Error('test signing key not initialized');
+  const issuer = getIssuer();
+  const protectedHeader = typ === undefined ? { alg: ALG, kid: KID } : { alg: ALG, typ, kid: KID };
+  return await new SignJWT({
+    client_id: SAMPLE_CLAIMS.clientId,
+    scope: SAMPLE_CLAIMS.scope,
+    email: SAMPLE_CLAIMS.email,
+    handle: SAMPLE_CLAIMS.handle,
+  })
+    .setProtectedHeader(protectedHeader)
+    .setSubject(SAMPLE_CLAIMS.sub)
+    .setIssuer(issuer)
+    .setAudience(issuer)
+    .setIssuedAt()
+    .setExpirationTime('1h')
+    .setJti('typ-enforcement-test')
+    .sign(privateKey);
+}
 
 // --- Round-trip --------------------------------------------------------------
 
@@ -71,6 +97,23 @@ describe('signAccessToken / verifyAccessToken', () => {
     expect(payload.handle).toBe(SAMPLE_CLAIMS.handle);
     expect(payload.client_id).toBe(SAMPLE_CLAIMS.clientId);
     expect(payload.scope).toBe(SAMPLE_CLAIMS.scope);
+  });
+
+  it('accepts a same-issuer and audience token with typ=at+jwt', async () => {
+    const token = await signTokenWithTyp(TYP);
+    await expect(verifyAccessToken(token)).resolves.toMatchObject({
+      sub: SAMPLE_CLAIMS.sub,
+    });
+  });
+
+  it('rejects a same-issuer and audience token with missing typ', async () => {
+    const token = await signTokenWithTyp(undefined);
+    await expect(verifyAccessToken(token)).rejects.toThrow();
+  });
+
+  it('rejects a same-issuer and audience token with typ=JWT', async () => {
+    const token = await signTokenWithTyp('JWT');
+    await expect(verifyAccessToken(token)).rejects.toThrow();
   });
 
   it('sets exp to iat + ACCESS_TOKEN_TTL_SECONDS (default 3600)', async () => {

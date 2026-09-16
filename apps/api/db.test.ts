@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { withRetry, getActivePage } from './db';
+import { databaseSsl, withRetry, getActivePage } from './db';
 import type { Page, PageFormat } from './db';
 
 // Source-of-truth read for structural SQL assertions. Real DB connections are
@@ -387,6 +387,24 @@ describe('init() — auth tables', () => {
         new RegExp(`create index if not exists ${t}_expires_at_idx on ${t} \\(expires_at\\)`, 'i'),
       );
     }
+  });
+});
+
+describe('init() — database TLS', () => {
+  it('verifies server certificates unless sslmode=disable is explicit', () => {
+    expect(databaseSsl('postgresql://user:pass@db.example.com/app')).toBe('verify-full');
+    expect(databaseSsl('postgresql://user:pass@db.example.com/app?sslmode=require')).toBe(
+      'verify-full',
+    );
+    expect(databaseSsl('postgresql://user:pass@localhost/app?sslmode=disable')).toBe(false);
+  });
+});
+
+describe('rotateRefreshToken() — atomic compare-and-set', () => {
+  it('inserts a successor only from a successfully revoked active token', () => {
+    expect(flat).toMatch(
+      /with revoked as \( update refresh_tokens set revoked_at = now\(\) where id = \$\{oldTokenId\} and revoked_at is null returning user_id, client_id \) insert into refresh_tokens \(user_id, client_id, token_hash, scope, expires_at\) select revoked\.user_id, revoked\.client_id, \$\{successor\.tokenHash\}, \$\{successor\.scope\}, \$\{successor\.expiresAt\} from revoked returning id, user_id, client_id, token_hash, scope, created_at, expires_at, revoked_at/,
+    );
   });
 });
 

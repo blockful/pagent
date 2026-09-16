@@ -46,6 +46,7 @@ vi.mock('../db.ts', () => ({
   consumeAuthCode: vi.fn(),
   getAuthCodeForReplay: vi.fn(),
   insertRefreshToken: vi.fn(),
+  rotateRefreshToken: vi.fn(),
   getRefreshTokenByHash: vi.fn(),
   revokeRefreshToken: vi.fn(),
   revokeAllRefreshTokensForFamily: vi.fn(),
@@ -316,10 +317,10 @@ describe('refreshToken', () => {
       revoked_at: null,
     });
     vi.mocked(db.getUserById).mockResolvedValueOnce(USER_ROW);
-    vi.mocked(db.insertRefreshToken).mockImplementation(async (input) => ({
+    vi.mocked(db.rotateRefreshToken).mockImplementation(async (_oldTokenId, input) => ({
       id: 'rt-row-new',
-      user_id: input.userId,
-      client_id: input.clientId,
+      user_id: USER_ROW.id,
+      client_id: CLIENT_ID,
       token_hash: input.tokenHash,
       scope: input.scope,
       created_at: new Date(),
@@ -338,15 +339,61 @@ describe('refreshToken', () => {
     expect(response.refresh_token).toMatch(/^rt_[0-9a-f]{64}$/);
     expect(response.refresh_token).not.toBe(oldRaw);
 
-    // The new refresh token was inserted, AND the old one was revoked.
-    expect(db.insertRefreshToken).toHaveBeenCalledTimes(1);
-    expect(db.revokeRefreshToken).toHaveBeenCalledWith(oldRowId);
+    expect(db.rotateRefreshToken).toHaveBeenCalledWith(
+      oldRowId,
+      expect.objectContaining({
+        tokenHash: sha256Hex(response.refresh_token),
+        scope: SCOPE,
+      }),
+    );
+    expect(db.insertRefreshToken).not.toHaveBeenCalled();
+    expect(db.revokeRefreshToken).not.toHaveBeenCalled();
 
     // The hashed lookup used the SHA-256 of the raw token (defense-in-depth).
     expect(db.getRefreshTokenByHash).toHaveBeenCalledWith(sha256Hex(oldRaw));
 
     // Family revocation NOT triggered on the happy path.
     expect(db.revokeAllRefreshTokensForFamily).not.toHaveBeenCalled();
+  });
+
+  it('allows only one successor when concurrent refreshes race, then revokes the family', async () => {
+    const oldRaw = 'rt_' + randomBytes(32).toString('hex');
+    const oldRow: db.RefreshTokenRow = {
+      id: 'rt-row-raced',
+      user_id: USER_ROW.id,
+      client_id: CLIENT_ID,
+      token_hash: sha256Hex(oldRaw),
+      scope: SCOPE,
+      created_at: new Date(Date.now() - 60_000),
+      expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+      revoked_at: null,
+    };
+
+    vi.mocked(getClient).mockResolvedValue(CLIENT_INFO);
+    vi.mocked(db.getRefreshTokenByHash).mockResolvedValue(oldRow);
+    vi.mocked(db.getUserById).mockResolvedValue(USER_ROW);
+    vi.mocked(db.rotateRefreshToken)
+      .mockImplementationOnce(async (_oldTokenId, input) => ({
+        ...oldRow,
+        id: 'rt-row-winner',
+        token_hash: input.tokenHash,
+        expires_at: input.expiresAt,
+      }))
+      .mockResolvedValueOnce(null);
+
+    const results = await Promise.allSettled([
+      refreshToken(oldRaw, CLIENT_ID),
+      refreshToken(oldRaw, CLIENT_ID),
+    ]);
+
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toBeInstanceOf(TokenError);
+    expect(rejected[0]?.reason).toMatchObject({ code: 'invalid_grant' });
+    expect(db.rotateRefreshToken).toHaveBeenCalledTimes(2);
+    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(USER_ROW.id, CLIENT_ID);
   });
 
   it('revokes the entire token family when a revoked refresh token is replayed', async () => {

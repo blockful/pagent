@@ -3,7 +3,7 @@ import { logger } from '../logger.ts';
 import { getClient } from './clients-store.ts';
 import {
   hashRefreshToken,
-  mintTokens,
+  prepareTokenPair,
   REFRESH_TOKEN_PREFIX,
   TokenError,
   type TokenResponse,
@@ -20,7 +20,7 @@ import {
  *      token for (user_id, client_id) and return invalid_grant.
  *   4. If expired → invalid_grant.
  *   5. If client_id doesn't match the bound client → invalid_grant.
- *   6. Mint a new access+refresh pair, then revoke the old refresh token.
+ *   6. Atomically revoke the old refresh token and insert its successor.
  */
 export async function refreshToken(
   rawRefreshToken: string,
@@ -70,12 +70,25 @@ export async function refreshToken(
     throw new TokenError('invalid_grant', 'User no longer exists');
   }
 
-  // Mint the new pair first; only revoke the old token after the insert
-  // succeeds. If minting fails halfway through, the original token stays
-  // valid so the caller can retry rather than getting locked out.
-  const response = await mintTokens(user, clientId, row.scope);
-  await db.revokeRefreshToken(row.id);
-  return response;
+  const prepared = await prepareTokenPair(user, clientId, row.scope);
+  const successor = await db.rotateRefreshToken(row.id, {
+    tokenHash: prepared.refreshToken.tokenHash,
+    scope: prepared.refreshToken.scope,
+    expiresAt: prepared.refreshToken.expiresAt,
+  });
+  if (!successor) {
+    logger.warn(
+      {
+        refresh_token_id: row.id,
+        user_id: row.user_id,
+        client_id: row.client_id,
+      },
+      'refresh token rotation race — revoking entire token family',
+    );
+    await db.revokeAllRefreshTokensForFamily(row.user_id, row.client_id);
+    throw new TokenError('invalid_grant', 'Refresh token has been revoked');
+  }
+  return prepared.response;
 }
 
 /**

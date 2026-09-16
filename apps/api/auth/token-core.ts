@@ -73,6 +73,11 @@ export function generateRefreshToken(): { raw: string; hash: string } {
   return { raw, hash };
 }
 
+export type PreparedTokenPair = {
+  readonly response: TokenResponse;
+  readonly refreshToken: db.RefreshTokenInsert;
+};
+
 /**
  * Verify a PKCE challenge against the supplied verifier (RFC 7636).
  *
@@ -92,20 +97,20 @@ export function pkceVerify(codeVerifier: string, codeChallenge: string, method: 
 }
 
 /**
- * Mint the access+refresh pair given a verified context (user, client,
- * scope). Shared between the authorization_code and refresh_token grants so
- * the JWT claim shape and refresh-token persistence stay in lockstep.
+ * Prepare the access+refresh pair and its persistence input from a verified
+ * context. Shared between the authorization_code and refresh_token grants so
+ * the response and stored refresh-token hash stay in lockstep.
  *
  * `user` is the pagent user row — we need `id`, `email`, and `handle` for
  * the JWT claims. The handle must be non-null at this point (we generate one
  * at upsertUser time), but we defensively fall back to the email local part
  * if it's somehow missing.
  */
-export async function mintTokens(
+export async function prepareTokenPair(
   user: db.UserRow,
   clientId: string,
   scope: string | null,
-): Promise<TokenResponse> {
+): Promise<PreparedTokenPair> {
   const handle = user.handle ?? user.email.split('@')[0] ?? 'user';
   const accessToken = await signAccessToken({
     sub: user.id,
@@ -119,13 +124,13 @@ export async function mintTokens(
 
   const { raw: refreshToken, hash: refreshHash } = generateRefreshToken();
   const refreshExpiresAt = new Date(Date.now() + env.REFRESH_TOKEN_MAX_DAYS * 24 * 60 * 60 * 1000);
-  await db.insertRefreshToken({
+  const refreshTokenRow: db.RefreshTokenInsert = {
     userId: user.id,
     clientId,
     tokenHash: refreshHash,
     scope,
     expiresAt: refreshExpiresAt,
-  });
+  };
 
   const response: TokenResponse = {
     access_token: accessToken,
@@ -134,5 +139,15 @@ export async function mintTokens(
     refresh_token: refreshToken,
   };
   if (scope !== null) response.scope = scope;
-  return response;
+  return { response, refreshToken: refreshTokenRow };
+}
+
+export async function mintTokens(
+  user: db.UserRow,
+  clientId: string,
+  scope: string | null,
+): Promise<TokenResponse> {
+  const prepared = await prepareTokenPair(user, clientId, scope);
+  await db.insertRefreshToken(prepared.refreshToken);
+  return prepared.response;
 }

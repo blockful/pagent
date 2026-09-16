@@ -46,10 +46,15 @@ export type Page = {
 
 let sql: ReturnType<typeof postgres> | null = null;
 
+export function databaseSsl(connectionString: string): false | 'verify-full' {
+  return new URL(connectionString).searchParams.get('sslmode') === 'disable'
+    ? false
+    : 'verify-full';
+}
+
 export async function init(connectionString: string): Promise<void> {
   if (sql) return;
-  const sslMode = new URL(connectionString).searchParams.get('sslmode');
-  const ssl = sslMode === 'disable' ? false : 'require';
+  const ssl = databaseSsl(connectionString);
   sql = postgres(connectionString, { ssl, prepare: false });
   await sql`
     create table if not exists pages (
@@ -695,7 +700,7 @@ export async function getAuthCodeForReplay(code: string): Promise<AuthCodeRow | 
 // ---------------------------------------------------------------------------
 // `token_hash` is SHA-256(raw refresh token). Raw values are only ever held
 // by the caller (memory + their HTTPS request). On rotation we insert a new
-// row and revoke the old one; on detected replay (presenting a row already
+// row while revoking the old one atomically; on detected replay (presenting a row already
 // `revoked_at IS NOT NULL`) we revoke every row in the same (user_id,
 // client_id) family per OAuth 2.1 §6.1.
 
@@ -718,12 +723,17 @@ export type RefreshTokenInsert = {
   expiresAt: Date;
 };
 
+export type RefreshTokenSuccessor = {
+  tokenHash: string;
+  scope: string | null;
+  expiresAt: Date;
+};
+
 /**
- * Insert a fresh refresh token row. `revoked_at` is left NULL — the rotation
- * path flips it on the old row before inserting the new one. Not wrapped in
- * withRetry: a retry after a successful insert would race against the
- * unique(token_hash) constraint and surface a spurious failure even though
- * the original write succeeded.
+ * Insert a fresh refresh token row for authorization-code exchange.
+ * `revoked_at` is left NULL. Not wrapped in withRetry: a retry after a
+ * successful insert would race against the unique(token_hash) constraint and
+ * surface a spurious failure even though the original write succeeded.
  */
 export async function insertRefreshToken(input: RefreshTokenInsert): Promise<RefreshTokenRow> {
   const c = client();
@@ -737,6 +747,33 @@ export async function insertRefreshToken(input: RefreshTokenInsert): Promise<Ref
              created_at, expires_at, revoked_at
   `;
   return rows[0]!;
+}
+
+/**
+ * Atomically revoke an active refresh token and insert its successor. A null
+ * result means another request already rotated the token, so no successor was
+ * inserted by this request.
+ */
+export async function rotateRefreshToken(
+  oldTokenId: string,
+  successor: RefreshTokenSuccessor,
+): Promise<RefreshTokenRow | null> {
+  const c = client();
+  const rows = await c<RefreshTokenRow[]>`
+    with revoked as (
+      update refresh_tokens
+      set revoked_at = now()
+      where id = ${oldTokenId} and revoked_at is null
+      returning user_id, client_id
+    )
+    insert into refresh_tokens (user_id, client_id, token_hash, scope, expires_at)
+    select revoked.user_id, revoked.client_id, ${successor.tokenHash},
+           ${successor.scope}, ${successor.expiresAt}
+    from revoked
+    returning id, user_id, client_id, token_hash, scope,
+             created_at, expires_at, revoked_at
+  `;
+  return rows[0] ?? null;
 }
 
 /**
@@ -758,8 +795,7 @@ export async function getRefreshTokenByHash(tokenHash: string): Promise<RefreshT
 
 /**
  * Mark a single refresh token revoked. Idempotent: a second call against the
- * same id is a no-op. Used by both the rotation path (revoke old before
- * issuing new) and the explicit /oauth/revoke endpoint.
+ * same id is a no-op. Used by the explicit /oauth/revoke endpoint.
  */
 export async function revokeRefreshToken(id: string): Promise<void> {
   const c = client();

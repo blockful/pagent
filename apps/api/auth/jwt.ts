@@ -152,16 +152,11 @@ export async function verifyAccessToken(token: string): Promise<JwtPayload> {
     throw new Error('JWT public key not initialized — call initKeys() at boot');
   }
   const issuer = getIssuer();
-  // jose's jwtVerify checks signature, `exp` (against current time with a
-  // small clock-skew tolerance), `nbf`, and the issuer/audience options.
-  // It does NOT validate the `typ` header for us — that's a callers'
-  // concern; we set it on sign but don't gate on it here (RFC 9068 §4
-  // requires RS-side typ enforcement, but pagent's verifier is only ever
-  // called on its own tokens, so the `iss` check is already enough).
   const { payload } = await jwtVerify(token, publicKey, {
     issuer,
     audience: issuer,
     algorithms: [ALG],
+    typ: TYP,
   });
   assertPagentClaims(payload);
   return payload;
