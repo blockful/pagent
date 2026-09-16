@@ -473,8 +473,9 @@ burning an otherwise active one-time link.
 
 ### 3.9 Browser session endpoints
 
-These are for the web renderer and future dashboard, not for MCP
-clients.
+These implemented API endpoints are for a future web-renderer/dashboard
+integration, not for MCP clients. The current renderer does not initiate
+browser sign-in or call these endpoints.
 
 ```
 POST /auth/logout
@@ -488,8 +489,9 @@ GET /auth/me
 Cookie: pagent_session=...
 ```
 
-Returns the current user's profile. Used by the renderer to show a
-logged-in state.
+Returns the current user's profile. A future renderer/dashboard integration
+can use it to show a logged-in state. Cross-origin browser fetches will also
+need credentialed CORS enabled for the exact renderer origin.
 
 **Response** `200`:
 
@@ -1197,7 +1199,9 @@ cookie before any user mutation or authorization-code issuance.
 
 ### 8.2 Phase 2: Grace period (auth encouraged)
 
-1. The renderer shows a "Sign in" option but doesn't require it.
+1. Add the renderer's "Sign in" option, browser-session initiation, and
+   credentialed `/auth/me` integration. These UI/CORS pieces are not shipped
+   yet; the API endpoints and callback/session machinery are already present.
 2. MCP clients that support OAuth (e.g. Claude Code with the MCP SDK)
    will go through the auth flow on first connect. MCP clients that
    don't support OAuth continue to work (the `/mcp` endpoint returns

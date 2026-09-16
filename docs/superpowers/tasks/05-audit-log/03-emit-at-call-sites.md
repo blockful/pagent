@@ -12,7 +12,9 @@ lifecycle code so that `page.created`, `page.submitted`,
   `createPage()` and `createHtmlPage()`. Emit `page.created` after
   `db.insertPage()`. Emit `page.received` in `advanceResult()` (or
   equivalent) when state flips from `submitted` to `received`.
-- `apps/api/app.ts` -- extract `ip_address` (via `clientKey()`) and
+- `apps/api/app/page-routes.ts` -- extract `ip_address` through the trusted
+  `clientKey()` contract, converting its `anonymous` limiter sentinel to
+  `undefined`, and extract
   `user_agent` from the Hono context in `newPageHandler`,
   `submitResultHandler`, and `getResultHandler`. Pass `RequestContext` to
   store functions. Emit `page.submitted` after `db.submitPage()` returns
@@ -21,8 +23,10 @@ lifecycle code so that `page.created`, `page.submitted`,
   `db.deleteExpiredPages()` (or its caller) to return expired row
   metadata (`id`, `state`, `format`, `created_at`). Call
   `emitAuditEvents()` with `page.expired` for each deleted row.
-- `apps/api/db.ts` -- extend `deleteExpiredPages()` return type to
+- `apps/api/db/pages.ts` -- extend `deleteExpiredPages()` return type to
   include the `expired` array with `{ id, state, format, created_at }`.
+- `apps/api/db.ts` -- continue re-exporting the page function and type through
+  the stable database facade.
 - `apps/api/mcp/http.ts` -- extract IP/UA from the raw
   `IncomingMessage` and pass `RequestContext` to store calls.
 
@@ -39,10 +43,10 @@ lifecycle code so that `page.created`, `page.submitted`,
   metadata: `state_at_expiry`, `format`, `age_ms`.
 - All emits include `ip_address` and `user_agent` when available (null
   for system-initiated events like expiry).
-- Existing tests in `app.test.ts` still pass (no regressions from
-  signature changes).
-- New tests verify that each handler calls `emitAuditEvent` with the
-  correct action and metadata shape.
+- Existing colocated app/store tests still pass (no regressions from signature
+  changes).
+- New tests in `apps/api/app/page-routes.test.ts` and the relevant store suites
+  verify each emission's action and metadata shape.
 
 ## Dependencies
 

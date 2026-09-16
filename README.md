@@ -43,10 +43,10 @@ In plain English: the agent reads its skill, decides a real form is the right wa
 npm-workspaces monorepo. Three apps + the plugin scaffolding.
 
 ```
+railway.json                          # Railway API service config (repo-root deploy)
 apps/
 ├── api/                             # REST service (Hono). Deployed on Railway.
 │   ├── server.ts
-│   ├── railway.json
 │   └── .env.example
 ├── web/                             # Vite-served renderer. Deployed on Vercel.
 │   ├── index.html, main.ts
@@ -218,12 +218,15 @@ To bypass in an emergency: `git push --no-verify` (don't make this a habit).
 
 ## Deploy
 
-### `apps/api/` → Railway
+### API → Railway
 
-`apps/api/railway.json` contains the build + start config. To deploy:
+The repository-root `railway.json` contains the build + start config. The API
+must deploy from the repository root because it uses npm workspaces and serves
+`docs/openapi.yaml` at runtime. To deploy:
 
 1. Create a new Railway service from this repo.
-2. Set **Root Directory** to `apps/api` so Railway picks up the railway.json.
+2. Leave **Root Directory** unset so Railway includes the root workspace,
+   lockfile, `apps/api`, and `docs/openapi.yaml` and picks up `railway.json`.
 3. Set environment variables (see `apps/api/.env.example`):
    - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://pagent.link`). Used in `show_ui` responses. **Required in production.** Boot fails loudly if missing.
    - `API_PUBLIC_URL` — the Railway public origin of `apps/api` (e.g. `https://api.pagent.link`). Used for OAuth issuer/discovery, default Google callbacks, magic links, and MCP auth metadata. **Required in production.** Must be HTTPS.
@@ -239,7 +242,8 @@ To bypass in an emergency: `git push --no-verify` (don't make this a habit).
    - `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` — SMTP credentials for magic-link login. Required when auth is enabled. `SMTP_PORT` and `SMTP_FROM` have defaults.
    - `SESSION_MAX_AGE_DAYS` / `REFRESH_TOKEN_MAX_DAYS` / `ACCESS_TOKEN_TTL_SECONDS` — optional auth lifetime controls. Defaults: 30 / 90 / 3600.
    - `OTEL_EXPORTER_OTLP_ENDPOINT` — optional. Grafana Cloud OTLP HTTP base URL (e.g. `https://otlp-gateway-prod-us-central-0.grafana.net/otlp`). Leave unset to disable observability entirely. See `apps/api/.env.example` for the rest of the OTel envs.
-4. Deploy. Railway runs `npm install` (which walks up to the workspace root) and starts the API with `npm -w @pagent/api run start`.
+4. Deploy. Railway runs `npm ci` at the repository root and starts the API with
+   `npm -w @pagent/api run start`.
 
 The `/health` endpoint is configured as the healthcheck path. Returns 200 only when the DB is reachable; 503 otherwise.
 
@@ -336,13 +340,13 @@ in Grafana from the trace and log streams.
 
 ### Common failure modes
 
-| Symptom                                             | Likely cause                                             | Where to look                                    | First response                                                                                                                           |
-| --------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /health` → 503                                 | Postgres unreachable                                     | Supabase status page; Railway DB env vars        | Check Supabase dashboard. If the DB is up but the env var was rotated, restore `DATABASE_URL` in Railway and redeploy.                   |
-| Spike of 429s on `POST /new`                        | Per-IP rate limit hit (default 30 req / 60 s)            | Railway logs — group by client IP                | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                    |
-| 413 on `POST /new`                                  | Request body > 256 KB                                    | Log field `error: payload_too_large`             | If a real use case, raise `MAX_BODY_BYTES` in `apps/api/app.ts` (code change + redeploy). Otherwise it's spam; ignore.                   |
-| CORS errors in the browser console at `pagent.link` | `ALLOWED_ORIGINS` does not include the renderer's origin | Browser DevTools → Network → failing preflight   | Add the missing origin to `ALLOWED_ORIGINS` in Railway env and restart the service.                                                      |
-| Boot failure with `ZodError` in Railway logs        | A required env var is missing                            | Railway logs (the process exits before it binds) | Read the Zod validation error — it names the missing field. Usually `PUBLIC_URL` or `ALLOWED_ORIGINS`. Set it in Railway, then redeploy. |
+| Symptom                                             | Likely cause                                             | Where to look                                     | First response                                                                                                                                   |
+| --------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /health` → 503                                 | Postgres unreachable                                     | Supabase status page; Railway DB env vars         | Check Supabase dashboard. If the DB is up but the env var was rotated, restore `DATABASE_URL` in Railway and redeploy.                           |
+| Spike of 429s on `POST /new`                        | Per-IP rate limit hit (default 30 req / 60 s)            | Railway logs — group by client IP                 | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                            |
+| 413 on `POST /new`                                  | A2UI spec > 256 KB or total JSON/HTML body > 1 MB        | Response fields `format` and `max_bytes`; API log | Reduce the payload. If the limit must change, adjust `A2UI_MAX_SPEC_BYTES` in `app/config.ts` or `HTML_MAX_BYTES` in `limits.ts`, then redeploy. |
+| CORS errors in the browser console at `pagent.link` | `ALLOWED_ORIGINS` does not include the renderer's origin | Browser DevTools → Network → failing preflight    | Add the missing origin to `ALLOWED_ORIGINS` in Railway env and restart the service.                                                              |
+| Boot failure with `ZodError` in Railway logs        | A required env var is missing                            | Railway logs (the process exits before it binds)  | Read the Zod validation error — it names the missing field. Usually `PUBLIC_URL` or `ALLOWED_ORIGINS`. Set it in Railway, then redeploy.         |
 
 ### Rollback
 

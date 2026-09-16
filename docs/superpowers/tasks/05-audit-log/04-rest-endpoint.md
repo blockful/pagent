@@ -7,12 +7,12 @@ pagination, and access-control enforcement.
 
 ## Files to create/modify
 
-- `apps/api/app.ts` -- register `app.get('/audit', auditHandler)` after
-  existing routes. Implement `auditHandler`: parse and validate query
-  params with the Zod schema, enforce the mandatory filter requirement
-  (`resource_id` or `user_id`), call `db.queryAuditLog()`, and return
-  the paginated JSON response.
-- `apps/api/app.test.ts` -- tests for the `/audit` endpoint.
+- `apps/api/app/audit-routes.ts` -- implement and export route registration for
+  `GET /audit`: parse and validate query params, enforce the mandatory filter
+  requirement (`resource_id` or `user_id`), call `db.queryAuditLog()`, and
+  return the paginated JSON response.
+- `apps/api/app.ts` -- register the audit route module with the Hono app.
+- `apps/api/app/audit-routes.test.ts` -- tests for the `/audit` endpoint.
 
 ## Acceptance criteria
 

@@ -136,8 +136,10 @@ manually before pushing:
 .husky/pre-push
 ```
 
-CI mirrors the same steps and additionally runs `build:web` and verifies the
-MCP bundle is up to date. Both gates must be green for a PR to merge.
+CI mirrors the same steps and additionally verifies the deploy layout, enforces
+coverage, runs the real-PostgreSQL Chromium suite, builds the web app, and
+verifies the MCP bundle is up to date. Both gates must be green for a PR to
+merge.
 
 ---
 

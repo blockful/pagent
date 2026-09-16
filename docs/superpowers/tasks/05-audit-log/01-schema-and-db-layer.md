@@ -2,17 +2,19 @@
 
 ## Description
 
-Create the `audit_log` table DDL in `db.init()` and implement the four
+Create the `audit_log` table DDL in `db/connection.ts` and implement the four
 low-level database functions: single insert, batch insert, paginated
 query, and retention purge.
 
 ## Files to create/modify
 
-- `apps/api/db.ts` -- add `CREATE TABLE IF NOT EXISTS audit_log` with
-  indexes inside `init()`. Add `insertAuditEvent()`,
+- `apps/api/db/connection.ts` -- add `CREATE TABLE IF NOT EXISTS audit_log`
+  with indexes inside `init()`.
+- `apps/api/db/audit.ts` -- add `insertAuditEvent()`,
   `insertAuditEvents()`, `queryAuditLog()`, `purgeOldAuditEvents()`.
-- `apps/api/db.test.ts` -- unit tests for all four functions (mocked SQL
-  client).
+- `apps/api/db.ts` -- re-export the new audit functions and types through the
+  stable database facade.
+- `apps/api/db/audit.test.ts` -- tests for all four functions.
 
 ## Acceptance criteria
 
