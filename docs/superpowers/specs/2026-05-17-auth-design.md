@@ -241,7 +241,7 @@ GET /.well-known/oauth-authorization-server
   "token_endpoint_auth_methods_supported": ["none"],
   "code_challenge_methods_supported": ["S256"],
   "scopes_supported": ["page:create", "page:read", "page:write"],
-  "service_documentation": "https://github.com/anthropics/agent-ui-session#readme"
+  "service_documentation": "https://github.com/blockful/pagent#readme"
 }
 ```
 
@@ -263,7 +263,7 @@ GET /.well-known/oauth-protected-resource
   "scopes_supported": ["page:create", "page:read", "page:write"],
   "bearer_methods_supported": ["header"],
   "resource_name": "Pagent API",
-  "resource_documentation": "https://github.com/anthropics/agent-ui-session#readme"
+  "resource_documentation": "https://github.com/blockful/pagent#readme"
 }
 ```
 

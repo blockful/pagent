@@ -410,7 +410,7 @@ The API publishes its OpenAPI 3.1 spec at the conventional locations:
 
 The hand-authored source lives at `docs/openapi.yaml` and is loaded once at boot.
 
-The `spec` body is opaque to the service. V0 assumes A2UI v0.9 — there is no `format` tag on the wire.
+The `spec` body is opaque to the service. The optional `format` field selects `a2ui` (the default, using A2UI v0.9 messages) or sanitized, view-only `html`.
 
 A page is single-shot and walks a 3-state machine: `open -> submitted -> received`. `POST /:id/result` requires `state === "open"` (otherwise 409). The first `GET /:id/result` after submit returns `state: "submitted"` and flips the page to `received`; subsequent reads return `state: "received"`. The renderer can detect that transition via `GET /:id` to upgrade its "waiting for the agent" banner.
 

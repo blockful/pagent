@@ -97,9 +97,10 @@ export const envSchema = z.preprocess(
       RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 
       // --- Auth ---------------------------------------------------------------
-      // Boots without these during the grace period; auth endpoints return 503
-      // until configured. When REQUIRE_AUTH=true the superRefine below enforces
-      // every crypto/SMTP var (see AUTH_REQUIRED_VARS).
+      // Boots without these during the grace period; protected page operations
+      // accept anonymous requests while configured OAuth providers remain
+      // available. When REQUIRE_AUTH=true the superRefine below enforces every
+      // crypto/SMTP var (see AUTH_REQUIRED_VARS).
       //
       // NB: process.env values are always strings, so `z.coerce.boolean()` is a
       // trap — it coerces every non-empty string (including 'false') to true.

@@ -6,7 +6,7 @@ import { getIssuer, getJwks } from './jwt.ts';
 import type { AuthVariables } from './middleware.ts';
 import { SUPPORTED_SCOPES } from './oauth-scopes.ts';
 
-const DOCS_URL = 'https://github.com/anthropics/agent-ui-session#readme';
+const DOCS_URL = 'https://github.com/blockful/pagent#readme';
 const REGISTER_WINDOW_MS = 60 * 60 * 1000;
 const REGISTER_LIMIT = 10;
 const REGISTER_RETRY_AFTER_SECONDS = Math.ceil(REGISTER_WINDOW_MS / 1000);

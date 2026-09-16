@@ -890,7 +890,7 @@ components:
       required: [id, handle, email]
       properties:
         id: { type: string, format: uuid }
-        handle: { type: string }
+        handle: { type: [string, 'null'] }
         email: { type: string, format: email }
         name: { type: [string, 'null'] }
         avatar_url: { type: [string, 'null'], format: uri }

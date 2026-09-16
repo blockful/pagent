@@ -35,6 +35,13 @@ function getTool(tools: Map<string, RegisteredTool>, name: string): RegisteredTo
   return tool;
 }
 
+function getStructuredContent(result: unknown): unknown {
+  if (typeof result !== 'object' || result === null || !('structuredContent' in result)) {
+    throw new Error('expected tool result to include structuredContent');
+  }
+  return result.structuredContent;
+}
+
 // Default no-op PageOps. Tests that exercise a specific handler call
 // makeOps({ ... }) to override one or more methods.
 const defaultOps: PageOps = {
@@ -85,10 +92,10 @@ describe('registerPagentTools', () => {
     async (name, args, requiredScope, expectedContent) => {
       const tools = makeTools();
       const handler = getTool(tools, name).handler;
-      const result = (await handler(args, {
+      const result = await handler(args, {
         authInfo: { scopes: [requiredScope], extra: { sub: 'user-uuid' } },
-      })) as { structuredContent: unknown };
-      expect(result.structuredContent).toEqual(expectedContent);
+      });
+      expect(getStructuredContent(result)).toEqual(expectedContent);
     },
   );
 
