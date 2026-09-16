@@ -1,19 +1,23 @@
 # 07 — Token exchange and refresh
 
+> Status: implemented. This checklist is retained as an as-built contract and
+> has been reconciled with the current runtime.
+
 ## Description
 
 Implement the OAuth token endpoint (`POST /oauth/token`) supporting both the `authorization_code` and `refresh_token` grant types, plus the revocation endpoint (`POST /oauth/revoke`). This is where PKCE verification happens and JWT access tokens are minted.
 
-## Files to create/modify
+## As-built files
 
-- `apps/api/auth/provider.ts` — extend the `OAuthServerProvider` with token operations:
-  - `exchangeAuthCode(code, clientId, redirectUri, codeVerifier): Promise<TokenResponse>` — looks up auth code, validates `consumed_at IS NULL`, verifies PKCE (`code_challenge === BASE64URL(SHA256(code_verifier))`), validates `client_id` and `redirect_uri` match, marks code as consumed. Calls `signAccessToken()` from `jwt.ts`, generates opaque refresh token (`rt_` + 32 random bytes), stores `SHA-256(refresh_token)` in `refresh_tokens` with 90-day expiry. Returns `{ access_token, token_type, expires_in, refresh_token, scope }`.
-  - `refreshToken(refreshToken, clientId): Promise<TokenResponse>` — looks up by `SHA-256(token)`, checks not expired, checks not revoked. If revoked: revoke ALL tokens for `(user_id, client_id)` pair (token family revocation). Rotates: inserts new refresh token, revokes old one (`revoked_at = now()`). Mints new access token. Returns same `TokenResponse` shape.
+- `apps/api/auth/provider.ts` — exposes token operations:
+  - `exchangeAuthCode(code, clientId, redirectUri, codeVerifier): Promise<TokenResponse>` — validates expiry, PKCE, client, and redirect before mutation. It atomically consumes the code and inserts the initial refresh token under the per-grant family lock. A correctly bound replay revokes only that grant family.
+  - `refreshToken(refreshToken, clientId): Promise<TokenResponse>` — looks up by `SHA-256(token)`, validates expiry and client binding before replay handling, rotates atomically while preserving `family_id`, and revokes only that grant family on a correctly bound replay.
   - `revokeToken(token, tokenTypeHint, clientId): Promise<void>` — revokes the specified token. Always returns success per RFC 7009.
 - `apps/api/auth/routes.ts` — add routes:
   - `POST /oauth/token` — parses `application/x-www-form-urlencoded` body, dispatches on `grant_type` to `exchangeAuthCode()` or `refreshToken()`. Rate-limited to 20/IP/min.
   - `POST /oauth/revoke` — parses body, calls `revokeToken()`. Returns 200 always.
-- `apps/api/auth/provider.test.ts` (new) — tests:
+- `apps/api/auth/provider.exchange.test.ts`, `provider.refresh.test.ts`, and
+  `provider.revoke.test.ts` — test:
   - Authorization code exchange: valid code + verifier returns JWT + refresh token.
   - PKCE failure: wrong `code_verifier` returns `invalid_grant`.
   - Expired code returns `invalid_grant`.
@@ -32,7 +36,9 @@ Implement the OAuth token endpoint (`POST /oauth/token`) supporting both the `au
 - Refresh token format: `rt_` prefix + 32 random bytes hex-encoded.
 - Refresh tokens are stored as SHA-256 hashes.
 - Refresh token rotation: every use issues a new refresh token and revokes the old one.
-- Token family revocation: presenting a revoked refresh token revokes all tokens for that `(user_id, client_id)` pair.
+- Token family revocation: presenting a non-expired revoked token from its bound
+  client revokes only tokens with the same per-grant `family_id`; independent
+  later grants remain valid.
 - Auth code is single-use: `consumed_at` is set on first exchange.
 - Rate limit: 20/IP/min on token endpoint.
 - Error responses use OAuth 2.1 error format: `{ error, error_description }`.

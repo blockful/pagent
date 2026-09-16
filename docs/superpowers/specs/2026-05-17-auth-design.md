@@ -1,20 +1,20 @@
 # Auth — Design
 
-Status: draft, awaiting user review (2026-05-17).
+Status: implemented; this document describes the shipped design as of 2026-09-15.
 
 ## 1. Overview and motivation
 
-Pagent has no authentication. Every page is anonymous, every API call is
-unauthenticated, and every MCP tool invocation is unguarded. This was
-acceptable for an MVP where the blast radius of abuse is capped by the
-30-minute TTL and per-IP rate limits, but it blocks every feature on the
-V2 roadmap: page ownership, user dashboards, audit logs, custom URLs,
-webhooks — all require a notion of "who."
+Pagent originally shipped without authentication: pages, API calls, and MCP
+tool invocations were anonymous. The implemented auth system adds user
+identity and page ownership while retaining a configurable grace period for
+anonymous page creation. It establishes the foundation required by dashboard,
+audit-log, custom-URL, and webhook features.
 
 This spec introduces:
 
-- **Users** — identified by email, created via Google OAuth or Magic
-  Link (passwordless email).
+- **Users** — created via Google OAuth or Magic Link (passwordless email).
+  Google identities are bound to the provider's immutable subject; verified
+  email remains unique profile/contact data.
 - **Sessions** — httpOnly cookies for browser clients (the renderer at
   `pagent.link` and any future dashboard).
 - **OAuth 2.1 Authorization Server** — co-hosted with the API, issuing
@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS users (
   id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   handle     text        UNIQUE,          -- nullable: set during onboarding (Custom URLs feature), not at creation
   email      text        UNIQUE NOT NULL,
+  google_sub text,
   name       text,
   avatar_url text,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -61,6 +62,8 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users (lower(email));
 CREATE UNIQUE INDEX IF NOT EXISTS users_handle_idx ON users (lower(handle));
+CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub_idx
+  ON users (google_sub) WHERE google_sub IS NOT NULL;
 ```
 
 **`handle`** is a short, URL-safe username (e.g. `alex`). Auto-generated
@@ -141,6 +144,7 @@ CREATE TABLE IF NOT EXISTS auth_codes (
   code_challenge_method  text        NOT NULL DEFAULT 'S256',
   scope                  text,
   resource               text,
+  refresh_token_family_id uuid       NOT NULL DEFAULT gen_random_uuid(),
   created_at             timestamptz NOT NULL DEFAULT now(),
   expires_at             timestamptz NOT NULL,
   consumed_at            timestamptz
@@ -163,6 +167,7 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id    uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   client_id  text        NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+  family_id  uuid        NOT NULL DEFAULT gen_random_uuid(),
   token_hash text        NOT NULL UNIQUE,
   scope      text,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -171,15 +176,16 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS refresh_tokens_user_id_idx ON refresh_tokens (user_id);
+CREATE INDEX IF NOT EXISTS refresh_tokens_family_id_idx ON refresh_tokens (family_id);
 CREATE INDEX IF NOT EXISTS refresh_tokens_expires_at_idx ON refresh_tokens (expires_at);
 ```
 
 `token_hash` stores `SHA-256(raw_refresh_token)`. Like session tokens,
 the raw value is never stored server-side. On rotation the old row gets
-`revoked_at = now()` and a new row is inserted. If a revoked token is
-presented, all refresh tokens for that `(user_id, client_id)` pair are
-revoked (token family revocation — defense against stolen refresh
-tokens per OAuth 2.1 Section 6.1).
+`revoked_at = now()` and a successor with the same `family_id` is inserted.
+If a non-expired revoked token is replayed by its bound client, only active
+tokens derived from that authorization grant are revoked. Independent later
+grants for the same user and client have different family IDs and remain valid.
 
 ### 2.6 `magic_links`
 
@@ -187,12 +193,13 @@ Passwordless email login tokens. Short-lived (15 minutes).
 
 ```sql
 CREATE TABLE IF NOT EXISTS magic_links (
-  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  email      text        NOT NULL,
-  token_hash text        NOT NULL UNIQUE,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  expires_at timestamptz NOT NULL,
-  consumed_at timestamptz
+  id                uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  email             text        NOT NULL,
+  token_hash        text        NOT NULL UNIQUE,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  expires_at        timestamptz NOT NULL,
+  consumed_at       timestamptz,
+  authorize_context jsonb
 );
 
 CREATE INDEX IF NOT EXISTS magic_links_expires_at_idx ON magic_links (expires_at);
@@ -435,9 +442,11 @@ GET /oauth/callback/google?code=...&state=...
 ```
 
 Internal endpoint. Not part of the public OAuth contract. Receives the
-authorization code from Google, exchanges it for user info, upserts the
-user, then redirects back into the Pagent authorize flow (issues a
-Pagent auth code and redirects to the MCP client's `redirect_uri`).
+authorization code from Google, verifies the ID token and
+`email_verified=true`, then identifies the user by Google's immutable `sub`.
+Email-only accounts are not auto-linked; they must use Magic Link until an
+authenticated account-linking flow exists. A successful callback resumes the
+Pagent authorize flow and redirects to the MCP client's `redirect_uri`.
 
 ### 3.8 Magic Link verification (internal)
 
@@ -532,11 +541,16 @@ MCP Client                  Pagent API (AS+RS)         Google / Email
     │                             │                         │
     │  Open browser:              │                         │
     │  GET /oauth/authorize?      │                         │
+    │    response_type=code&      │                         │
     │    client_id=...&           │                         │
     │    code_challenge=...&      │                         │
     │    redirect_uri=            │                         │
     │    http://localhost:PORT/   │                         │
     │    callback&state=...       │                         │
+    │─ ─ ─ ─ ─(browser)─ ─ ─ ─ ▶│                         │
+    │                             │  Consent page shown     │
+    │  POST /oauth/authorize/     │                         │
+    │    consent (Allow)          │                         │
     │─ ─ ─ ─ ─(browser)─ ─ ─ ─ ▶│                         │
     │                             │  Login page shown       │
     │                             │  User picks Google      │
@@ -579,7 +593,14 @@ claims (`sub`, `email`, `name`, `picture`) to upsert the user.
 User Browser           Pagent API                  Google OAuth
     │                       │                           │
     │  GET /oauth/authorize │                           │
-    │  (login page shown)   │                           │
+    │  ?response_type=code… │                           │
+    │──────────────────────▶│                           │
+    │  Consent page         │                           │
+    │◀──────────────────────│                           │
+    │  POST /oauth/authorize/consent (Allow)            │
+    │──────────────────────▶│                           │
+    │  Login page           │                           │
+    │◀──────────────────────│                           │
     │  Clicks "Google"      │                           │
     │──────────────────────▶│                           │
     │                       │  302 to                   │
@@ -627,8 +648,13 @@ encodes both:
 - The original authorize request parameters (client_id, redirect_uri,
   code_challenge, scope) so the callback can resume the flow.
 
-This is a signed, encrypted JWT (JWE) to prevent tampering. It is
-short-lived (15 min) and single-use.
+This is a signed HS256 JWT, not an encrypted JWE. Its fields are values the
+client already supplied, so confidentiality is not required; the signature,
+issuer, audience, and 15-minute expiry prevent undetected tampering and
+cross-purpose use. The state token itself is not stored or consumed as a
+single-use record. For OAuth-client flows, explicit consent produces a fresh
+signed state and subsequent use is additionally bound to the initiating
+browser's HttpOnly transaction cookie.
 
 ### 4.3 Magic Link flow
 
@@ -636,7 +662,14 @@ short-lived (15 min) and single-use.
 User Browser           Pagent API                  Email Service
     │                       │                           │
     │  GET /oauth/authorize │                           │
-    │  (login page shown)   │                           │
+    │  ?response_type=code… │                           │
+    │──────────────────────▶│                           │
+    │  Consent page         │                           │
+    │◀──────────────────────│                           │
+    │  POST /oauth/authorize/consent (Allow)            │
+    │──────────────────────▶│                           │
+    │  Login page           │                           │
+    │◀──────────────────────│                           │
     │  Enters email, clicks │                           │
     │  "Send link"          │                           │
     │──────────────────────▶│                           │
@@ -768,12 +801,11 @@ table.
 **Lifetime:** 90 days. Rotated on every use — the exchange returns a
 new refresh token and revokes the old one.
 
-**Token family revocation:** If a revoked refresh token is presented,
-all refresh tokens for that `(user_id, client_id)` pair are revoked
-immediately. This detects token theft: the legitimate client used the
-refresh token (rotating it), and now the attacker tries to use the old
-one. Both parties lose their tokens, forcing re-authentication. This
-follows OAuth 2.1 Section 6.1 guidance.
+**Token family revocation:** If a non-expired revoked refresh token is
+presented by its bound client, every active refresh token with the same
+per-grant `family_id` is revoked immediately. This detects token theft without
+letting an obsolete token invalidate a later, independent authorization grant.
+Expired or cross-client presentations are rejected before revocation.
 
 ### 5.3 Signing key management
 
@@ -1065,13 +1097,19 @@ attacks. Separate rate limits from the existing page-creation limiter:
 | --------------------- | ------------ | ------- | ------------------ |
 | `POST /oauth/register`| 10 per IP    | 1 hour  | IP                 |
 | `POST /oauth/token`   | 20 per IP    | 1 min   | IP                 |
-| `POST /oauth/magic/send` | 5 per email | 15 min | Email              |
+| `POST /oauth/magic/send` | 5 per email, 10 per IP, 50 per API process | 15 min | Email + IP + provider bucket |
 | `GET /oauth/authorize`| 30 per IP    | 1 min   | IP                 |
 
 These are in-process (same `RateLimiter` class from
 `apps/api/mcp/rate-limit.ts`), which is acceptable for the single-
 instance deployment. If we scale horizontally, these move to
 Redis/Upstash.
+
+Production rate-limit identity uses the Railway-controlled
+`X-Forwarded-For` contract: Railway removes the caller-supplied header and
+places the connecting client IP first. `TRUSTED_PROXY_MODE=railway` is required
+in production so the deployment makes that trust boundary explicit; staging
+must confirm traffic cannot bypass Railway ingress.
 
 ### 7.4 CSRF protection
 
@@ -1175,6 +1213,7 @@ New environment variables for the API (`apps/api`):
 | `PUBLIC_URL`                | Production | -                                    | HTTPS renderer origin used in generated page URLs                  |
 | `API_PUBLIC_URL`            | Production | -                                    | HTTPS API origin used for OAuth issuer, callbacks, and magic links |
 | `ALLOWED_ORIGINS`           | Production | -                                    | Comma-separated CORS allow-list                                    |
+| `TRUSTED_PROXY_MODE`        | Production | -                                    | Must be `railway`; trusts Railway's leftmost forwarded client IP  |
 | `REQUIRE_AUTH`              | No         | `false`                              | If `true`, page creation, result reads, and MCP require auth       |
 | `JWT_SIGNING_KEY`           | Yes*       | -                                    | Ed25519 private key, base64url-encoded (DER)                       |
 | `JWT_PUBLIC_KEY`            | Yes*       | -                                    | Ed25519 public key, base64url-encoded (DER)                        |
@@ -1192,9 +1231,10 @@ New environment variables for the API (`apps/api`):
 | `SMTP_FROM`                 | No         | `noreply@pagent.link`                | From address for magic link emails                                 |
 
 *Required when `REQUIRE_AUTH=true`. Production additionally requires
-`PUBLIC_URL`, `API_PUBLIC_URL`, and `ALLOWED_ORIGINS`; both public URLs must be
-HTTPS origins. Magic links are random opaque tokens stored as hashes and do not
-use a separate `MAGIC_LINK_SECRET`.
+`PUBLIC_URL`, `API_PUBLIC_URL`, `ALLOWED_ORIGINS`, and
+`TRUSTED_PROXY_MODE=railway`; both public URLs must be HTTPS origins. Magic
+links are random opaque tokens stored as hashes and do not use a separate
+`MAGIC_LINK_SECRET`.
 
 New environment variable for the stdio MCP (`apps/mcp`):
 
@@ -1360,10 +1400,8 @@ None blocking implementation. Future considerations:
 - **SMTP provider** — `nodemailer` with raw SMTP is the simplest start.
   If deliverability becomes an issue, swap to Resend or SendGrid (the
   `magic-link.ts` module abstracts the transport).
-- **Account linking** — a user who first logs in via Magic Link and
-  later via Google (same email) should be the same user. The `email`
-  column's uniqueness constraint handles this: upsert on email. But
-  there's no "link your Google account to your Magic Link account" UI
-  yet.
+- **Account linking** — Google identities are never auto-linked to an
+  email-only account. Add an authenticated, explicit linking UI before allowing
+  a Magic Link user to attach a Google subject.
 - **Admin endpoints** — user management, client management, session
   revocation. Deferred to V2.

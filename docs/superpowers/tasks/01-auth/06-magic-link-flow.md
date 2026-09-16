@@ -17,7 +17,7 @@ Implement passwordless email login via Magic Links: sending the email with a one
     `SHA-256(token)` and returns the email and stored authorize context.
   - `createTransport(): Transporter` — creates a nodemailer SMTP transport from `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` env vars.
 - `apps/api/auth/route-magic.ts` — registers:
-  - `POST /oauth/magic/send` — accepts `{ email, state? }` as JSON or form data, validates email and any signed OAuth context, then calls `sendMagicLink()`. Every valid email uses the same delivery and accepted-response path. Rate-limited to 5/email/15min.
+  - `POST /oauth/magic/send` — accepts `{ email, state? }` as JSON or form data, validates email and any signed OAuth context, then calls `sendMagicLink()`. Every valid email uses the same delivery and accepted-response path. Rate-limited to 5/email, 10/client IP, and 50/API process per 15 minutes.
   - `GET /oauth/magic` — accepts `?token=...`, inspects without consuming,
     verifies the same HttpOnly browser transaction (and explicit consent for
     OAuth-client flows), rechecks the registered redirect, then consumes the
@@ -30,7 +30,7 @@ Implement passwordless email login via Magic Links: sending the email with a one
   - Already-consumed token is rejected.
   - A scanner or browser without the bound transaction gets 400 and leaves the
     token available for the intended browser.
-  - Rate limit (5/email/15min) is enforced.
+  - Layered email, client-IP, and provider-capacity limits are enforced.
   - Email enumeration: the send path does not query or reveal prior registration.
 
 ## Acceptance criteria
@@ -44,7 +44,7 @@ Implement passwordless email login via Magic Links: sending the email with a one
 - Email is sent via `nodemailer` with `SMTP_*` env vars.
 - `SMTP_FROM` defaults to `noreply@pagent.link`.
 - `/oauth/magic/send` does not query or reveal prior email registration (anti-enumeration, spec section 7.6).
-- Rate limit: 5 per email per 15 minutes.
+- Rate limits: 5 per email, 10 per client IP, and 50 per API process per 15 minutes.
 - If `SMTP_HOST` is not configured, `/oauth/magic/send` returns 503.
 
 ## Dependencies
@@ -57,7 +57,7 @@ Implement passwordless email login via Magic Links: sending the email with a one
 - Section 2.6 (magic_links table schema)
 - Section 3.8 (Magic Link verification endpoint)
 - Section 4.3 (Magic Link flow — full sequence diagram)
-- Section 7.3 (Rate limiting — 5/email/15min for magic/send)
+- Section 7.3 (Layered rate limiting for magic/send)
 - Section 7.6 (Email enumeration prevention)
 - Section 9 (SMTP env vars)
 - Section 10 (Dependencies — `nodemailer`)

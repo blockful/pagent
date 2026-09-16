@@ -11,7 +11,7 @@ Implement the Google OAuth identity provider leg: the authorize endpoint's login
 
 - `apps/api/auth/google.ts` — Google OAuth helpers:
   - `buildGoogleAuthUrl(state: string): string` — constructs the Google OAuth URL with `GOOGLE_CLIENT_ID`, `GOOGLE_REDIRECT_URI`, `scope=openid email profile`, `response_type=code`, encoded `state`.
-  - `exchangeGoogleCode(code: string): Promise<{ sub, email, name, picture }>` — exchanges the Google authorization code for an ID token via `googleapis.com/token`, decodes the ID token claims.
+  - `exchangeGoogleCode(code: string): Promise<{ sub, email, name, picture }>` — exchanges the Google authorization code for an ID token via `googleapis.com/token`, verifies the token and `email_verified=true`, then decodes the profile claims.
 - `apps/api/auth/consent-page.ts` — renders the initial OAuth-client page with
   unverified client metadata, exact redirect URI, requested scopes, and
   explicit Allow/Cancel POST actions. It exposes no identity-provider link.
@@ -22,7 +22,7 @@ Implement the Google OAuth identity provider leg: the authorize endpoint's login
   - `POST /oauth/authorize/consent` — verifies signed state and the matching browser transaction. Cancel stays local. Allow records consent in signed state and renders sign-in choices.
   - `GET /oauth/callback/google` — before exchanging Google's code or mutating a user, verifies signed consent and the matching browser transaction and rechecks the client redirect. It then upserts the user, creates a Pagent code, and redirects to the exact registered URI.
 - `apps/api/auth/provider.ts` — exposes the user and authorization-code provider operations:
-  - `upsertUser(profile: { email, name?, avatarUrl? }): Promise<User>` — INSERT ON CONFLICT(email) UPDATE name, avatar_url, updated_at. Auto-generates `handle` from email local part (with numeric suffix if taken).
+  - `upsertGoogleUser(profile)` — binds the account to Google's immutable `sub`, updates mutable email/profile data for that subject, rejects subject/email conflicts, and never auto-links an email-only account. Auto-generates `handle` from the email local part on first insert.
   - `createAuthCode(userId, clientId, redirectUri, codeChallenge, codeChallengeMethod, scope): Promise<string>` — generates random code, inserts into `auth_codes` with 10-minute expiry.
 
 ## Acceptance criteria
@@ -35,7 +35,10 @@ Implement the Google OAuth identity provider leg: the authorize endpoint's login
   `AUTH_STATE_SECRET`) encoding the authorize parameters, explicit consent,
   and the browser-transaction hash.
 - State JWT is validated and verified on callback — tampered state is rejected.
-- Google callback successfully upserts user with `email`, `name`, `avatar_url` from Google's ID token.
+- Google callback requires a verified email and binds the user to Google's
+  immutable `sub`; email changes for the same subject preserve the user.
+- An existing email-only account is not auto-linked, and the error directs the
+  user to Magic Link until an authenticated linking flow exists.
 - `handle` is auto-generated from email local part, lowercased, validated against `^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$`, with numeric suffix if taken.
 - Auth code is inserted with 10-minute expiry and PKCE challenge.
 - `redirect_uri` passes the safe-scheme policy and exact registered-URI match

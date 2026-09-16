@@ -399,7 +399,9 @@ paths:
       operationId: sendMagicLink
       tags: [Auth]
       summary: Send a single-use magic sign-in link
-      description: Accepts JSON or form data and rate-limits each normalized email address.
+      description: >-
+        Accepts JSON or form data and applies per-email, per-client-IP, and
+        process-wide provider safeguards.
       requestBody:
         required: true
         content:
@@ -427,7 +429,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/OAuthError'
         '429':
-          description: Per-email rate limit exceeded.
+          description: Per-email, per-client-IP, or provider-capacity limit exceeded.
           content:
             application/json:
               schema:
@@ -986,7 +988,12 @@ components:
           format: email
         state:
           type: string
-          description: Signed authorization state emitted by `GET /oauth/authorize`.
+          description: >-
+            Signed authorization state. Browser-session login receives it from
+            `GET /oauth/authorize?browser_session=1`. An OAuth client receives
+            the usable, consent-granted state in the HTML returned by
+            `POST /oauth/authorize/consent`; the pre-consent state from the GET
+            authorization page is rejected by this endpoint.
 
     OAuthTokenResponse:
       type: object
