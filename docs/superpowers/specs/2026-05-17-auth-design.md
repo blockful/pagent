@@ -1331,7 +1331,9 @@ from Node.js. Supports SMTP, has TypeScript types, and is well-
 maintained.
 
 No new packages for `@pagent/web` (the renderer). The login page is
-server-rendered by the API; the renderer only reads the session cookie.
+server-rendered by the API. A future renderer integration will call
+`/auth/me` with credentials so the browser attaches the `HttpOnly` session
+cookie; renderer JavaScript must not read the cookie directly.
 
 No new packages for `@pagent/mcp` (the stdio server). It sends Bearer
 tokens read from `PAGENT_TOKEN` in its existing `fetch` calls.
