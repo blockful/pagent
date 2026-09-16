@@ -147,7 +147,7 @@ export function makeMcpHttpHandler(cfg: McpHttpConfig) {
     // Headers follow IETF draft-7 (combined `RateLimit` + `RateLimit-Policy`)
     // to match what hono-rate-limiter emits on the REST side.
     if (req.method === 'POST') {
-      const result = limiter.check(clientKey(req.headers['x-forwarded-for']));
+      const result = limiter.check(clientKey(req.headers['x-real-ip']));
       res.setHeader(
         'RateLimit',
         `limit=${result.limit}, remaining=${result.remaining}, reset=${result.secondsUntilReset}`,

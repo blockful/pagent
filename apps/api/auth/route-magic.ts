@@ -78,23 +78,24 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
     const lowerEmail = email.toLowerCase();
     const limits = [
       {
+        limiter: magicSendGlobalLimiter,
+        key: 'provider',
+        message: 'Magic link requests are temporarily at capacity',
+      },
+      {
         limiter: magicSendLimiter,
         key: lowerEmail,
         message: 'Too many magic link requests for this email',
       },
       {
         limiter: magicSendIpLimiter,
-        key: clientKey(c.req.header('x-forwarded-for')),
+        key: clientKey(c.req.header('x-real-ip')),
         message: 'Too many magic link requests from this IP',
       },
-      {
-        limiter: magicSendGlobalLimiter,
-        key: 'provider',
-        message: 'Magic link requests are temporarily at capacity',
-      },
     ];
+    const now = Date.now();
     for (const limit of limits) {
-      const result = limit.limiter.check(limit.key);
+      const result = limit.limiter.peek(limit.key, now);
       if (!result.allowed) {
         c.header('Retry-After', String(result.secondsUntilReset));
         return c.json(
@@ -106,6 +107,9 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
           429,
         );
       }
+    }
+    for (const limit of limits) {
+      limit.limiter.check(limit.key, now);
     }
 
     let authorizeContext: Parameters<typeof sendMagicLink>[1] = {};

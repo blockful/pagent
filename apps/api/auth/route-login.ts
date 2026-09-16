@@ -34,7 +34,7 @@ const authorizeLimiter = rateLimiter({
   windowMs: AUTHORIZE_WINDOW_MS,
   limit: AUTHORIZE_LIMIT,
   standardHeaders: 'draft-7',
-  keyGenerator: (c: Context) => clientKey(c.req.header('x-forwarded-for')),
+  keyGenerator: (c: Context) => clientKey(c.req.header('x-real-ip')),
   handler: (c) => {
     c.header('Retry-After', String(AUTHORIZE_RETRY_AFTER_SECONDS));
     return c.json(

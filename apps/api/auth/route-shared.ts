@@ -28,7 +28,7 @@ export function clearSessionCookie(c: Context): void {
 }
 
 export function getClientIp(c: Context): string | undefined {
-  const key = clientKey(c.req.header('x-forwarded-for'));
+  const key = clientKey(c.req.header('x-real-ip'));
   return key === 'anonymous' ? undefined : key;
 }
 

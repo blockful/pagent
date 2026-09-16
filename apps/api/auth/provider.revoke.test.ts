@@ -10,7 +10,7 @@ import {
 
 vi.mock('../db.ts', () => ({
   getRefreshTokenByHash: vi.fn(),
-  revokeRefreshToken: vi.fn(),
+  revokeAllRefreshTokensForFamily: vi.fn(),
 }));
 
 vi.mock('./clients-store.ts', () => ({
@@ -30,7 +30,7 @@ beforeEach(() => {
 });
 
 describe('revokeToken', () => {
-  it('marks a refresh token as revoked when it exists and is active', async () => {
+  it('revokes the refresh-token family when the token exists', async () => {
     const raw = 'rt_' + randomBytes(32).toString('hex');
     vi.mocked(db.getRefreshTokenByHash).mockResolvedValueOnce({
       id: 'rt-id',
@@ -46,16 +46,18 @@ describe('revokeToken', () => {
 
     await revokeToken(raw, undefined, undefined);
 
-    expect(db.revokeRefreshToken).toHaveBeenCalledWith('rt-id');
+    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(
+      'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    );
   });
 
   it('silently succeeds for an unknown refresh token (no error, no revoke)', async () => {
     vi.mocked(db.getRefreshTokenByHash).mockResolvedValueOnce(null);
     await expect(revokeToken('rt_unknown', undefined, undefined)).resolves.toBeUndefined();
-    expect(db.revokeRefreshToken).not.toHaveBeenCalled();
+    expect(db.revokeAllRefreshTokensForFamily).not.toHaveBeenCalled();
   });
 
-  it('does not re-revoke an already-revoked token', async () => {
+  it('revokes the family even when the presented token was already revoked', async () => {
     const raw = 'rt_' + randomBytes(32).toString('hex');
     vi.mocked(db.getRefreshTokenByHash).mockResolvedValueOnce({
       id: 'rt-already',
@@ -70,13 +72,33 @@ describe('revokeToken', () => {
     });
 
     await revokeToken(raw, undefined, undefined);
-    expect(db.revokeRefreshToken).not.toHaveBeenCalled();
+    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(
+      'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    );
+  });
+
+  it('does not revoke a token bound to a different supplied client', async () => {
+    const raw = 'rt_' + randomBytes(32).toString('hex');
+    vi.mocked(db.getRefreshTokenByHash).mockResolvedValueOnce({
+      id: 'rt-other-client',
+      user_id: USER_ROW.id,
+      client_id: CLIENT_ID,
+      family_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      token_hash: sha256Hex(raw),
+      scope: SCOPE,
+      created_at: new Date(),
+      expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+      revoked_at: null,
+    });
+
+    await revokeToken(raw, undefined, 'different-client');
+    expect(db.revokeAllRefreshTokensForFamily).not.toHaveBeenCalled();
   });
 
   it('is a no-op for non-rt_-prefixed tokens (V1 access tokens have no denylist)', async () => {
     await revokeToken('eyJhbGciOiJFZERTQSJ9.fake-jwt-payload.fake-signature', undefined, undefined);
     expect(db.getRefreshTokenByHash).not.toHaveBeenCalled();
-    expect(db.revokeRefreshToken).not.toHaveBeenCalled();
+    expect(db.revokeAllRefreshTokensForFamily).not.toHaveBeenCalled();
   });
 
   it('silently succeeds for an empty token string', async () => {

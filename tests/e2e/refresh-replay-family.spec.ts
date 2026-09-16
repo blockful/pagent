@@ -100,3 +100,82 @@ test('a replayed old grant cannot revoke a later authorization grant for the sam
     await db.shutdown();
   }
 });
+
+test('explicit revocation leaves no active successor when it races refresh rotation', async () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl === undefined) throw new TypeError('DATABASE_URL is required');
+
+  let api: APIRequestContext | undefined;
+  let stopServer: (() => Promise<void>) | undefined;
+  await db.init(databaseUrl);
+  try {
+    const runId = randomUUID();
+    const clientId = randomUUID();
+    const user = await db.upsertUser({
+      email: `revoke-race-${runId}@example.test`,
+      name: 'Refresh revoke race E2E',
+      avatarUrl: null,
+      handle: `revoke-race-${runId}`,
+    });
+    await db.insertOAuthClient({
+      client_id: clientId,
+      client_name: 'Refresh revoke race E2E',
+      client_uri: null,
+      logo_uri: null,
+      redirect_uris: [`https://client.example/callback/${runId}`],
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      scope: 'page:create',
+      token_endpoint_auth_method: 'none',
+    });
+
+    const server = await startProductionAuthServer(databaseUrl);
+    stopServer = server.stop;
+    api = await request.newContext({ baseURL: server.localUrl });
+
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const rawToken = `rt_${randomBytes(32).toString('hex')}`;
+      const familyId = randomUUID();
+      const original = await db.insertRefreshToken({
+        userId: user.id,
+        clientId,
+        familyId,
+        tokenHash: createHash('sha256').update(rawToken).digest('hex'),
+        scope: 'page:create',
+        expiresAt: new Date(Date.now() + 10 * 60_000),
+      });
+
+      const [refresh, revoke] = await Promise.all([
+        api.post('/oauth/token', {
+          form: {
+            grant_type: 'refresh_token',
+            refresh_token: rawToken,
+            client_id: clientId,
+          },
+        }),
+        api.post('/oauth/revoke', {
+          form: { token: rawToken, token_type_hint: 'refresh_token', client_id: clientId },
+        }),
+      ]);
+
+      expect(revoke.status()).toBe(200);
+      expect([200, 400]).toContain(refresh.status());
+      await expect(db.getRefreshTokenByHash(original.token_hash)).resolves.toMatchObject({
+        family_id: familyId,
+        revoked_at: expect.any(Date),
+      });
+
+      if (refresh.status() === 200) {
+        const successor = tokenResponseSchema.parse(await refresh.json());
+        const successorRow = await db.getRefreshTokenByHash(
+          createHash('sha256').update(successor.refresh_token).digest('hex'),
+        );
+        expect(successorRow).toMatchObject({ family_id: familyId, revoked_at: expect.any(Date) });
+      }
+    }
+  } finally {
+    await api?.dispose();
+    await stopServer?.();
+    await db.shutdown();
+  }
+});

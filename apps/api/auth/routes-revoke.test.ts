@@ -6,7 +6,7 @@ const TOKEN_USER_ID = '22222222-3333-4444-5555-666666666666';
 
 function postRevoke(
   body: Record<string, string>,
-  opts: { contentType?: 'form' | 'json'; xForwardedFor?: string } = {},
+  opts: { contentType?: 'form' | 'json'; xRealIp?: string } = {},
 ): Request {
   const headers: Record<string, string> = {};
   let serialized: string;
@@ -17,14 +17,14 @@ function postRevoke(
     headers['Content-Type'] = 'application/x-www-form-urlencoded';
     serialized = new URLSearchParams(body).toString();
   }
-  if (opts.xForwardedFor !== undefined) headers['x-forwarded-for'] = opts.xForwardedFor;
+  if (opts.xRealIp !== undefined) headers['x-real-ip'] = opts.xRealIp;
   return new Request(`${BASE}/oauth/revoke`, { method: 'POST', headers, body: serialized });
 }
 
 describe('POST /oauth/revoke', () => {
   beforeEach(() => {
     vi.mocked(db.getRefreshTokenByHash).mockReset();
-    vi.mocked(db.revokeRefreshToken).mockReset();
+    vi.mocked(db.revokeAllRefreshTokensForFamily).mockReset();
   });
 
   it('returns 200 with no body for a successful revocation', async () => {
@@ -40,30 +40,32 @@ describe('POST /oauth/revoke', () => {
       revoked_at: null,
     });
     const res = await app.fetch(
-      postRevoke({ token: 'rt_abc', client_id: TOKEN_CLIENT_ID }, { xForwardedFor: '10.2.0.1' }),
+      postRevoke({ token: 'rt_abc', client_id: TOKEN_CLIENT_ID }, { xRealIp: '10.2.0.1' }),
     );
     expect(res.status).toBe(200);
-    expect(db.revokeRefreshToken).toHaveBeenCalledWith('rt-row');
+    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(
+      'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    );
   });
 
   it('returns 200 even when the token is unknown (RFC 7009 §2.2)', async () => {
     vi.mocked(db.getRefreshTokenByHash).mockResolvedValueOnce(null);
-    const res = await app.fetch(postRevoke({ token: 'rt_unknown' }, { xForwardedFor: '10.2.0.2' }));
+    const res = await app.fetch(postRevoke({ token: 'rt_unknown' }, { xRealIp: '10.2.0.2' }));
     expect(res.status).toBe(200);
-    expect(db.revokeRefreshToken).not.toHaveBeenCalled();
+    expect(db.revokeAllRefreshTokensForFamily).not.toHaveBeenCalled();
   });
 
   it('returns 200 when the body is empty (no token field)', async () => {
-    const res = await app.fetch(postRevoke({}, { xForwardedFor: '10.2.0.3' }));
+    const res = await app.fetch(postRevoke({}, { xRealIp: '10.2.0.3' }));
     expect(res.status).toBe(200);
     expect(db.getRefreshTokenByHash).not.toHaveBeenCalled();
   });
 
   it('returns 200 even for a malformed JSON body (degrades to no-op)', async () => {
     const res = await app.fetch(
-      postRevoke({ token: 'rt_anything' }, { contentType: 'json', xForwardedFor: '10.2.0.4' }),
+      postRevoke({ token: 'rt_anything' }, { contentType: 'json', xRealIp: '10.2.0.4' }),
     );
     expect(res.status).toBe(200);
-    expect(db.revokeRefreshToken).not.toHaveBeenCalled();
+    expect(db.revokeAllRefreshTokensForFamily).not.toHaveBeenCalled();
   });
 });

@@ -16,7 +16,7 @@ export function createNewPageLimiter() {
     windowMs: env.RATE_LIMIT_WINDOW_MS,
     limit: env.RATE_LIMIT_MAX,
     standardHeaders: 'draft-7', // sets RateLimit-* headers per IETF draft 7
-    keyGenerator: (c: Context) => clientKey(c.req.header('x-forwarded-for')),
+    keyGenerator: (c: Context) => clientKey(c.req.header('x-real-ip')),
     handler: (c) => {
       const retryAfter = Math.ceil(env.RATE_LIMIT_WINDOW_MS / 1000);
       c.header('Retry-After', String(retryAfter));

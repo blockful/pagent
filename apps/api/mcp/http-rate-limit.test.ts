@@ -43,7 +43,7 @@ function postFromIp(url: URL, ip: string): Promise<Response> {
     headers: {
       Accept: MCP_ACCEPT,
       'Content-Type': 'application/json',
-      'X-Forwarded-For': ip,
+      'X-Real-IP': ip,
     },
     body: INITIALIZE_BODY,
   });

@@ -129,7 +129,7 @@ test('invalid PKCE cannot consume a valid authorization code', async () => {
       });
       const exchange = () =>
         concurrentApi.post('/oauth/token', {
-          headers: { 'x-forwarded-for': `198.51.100.${attempt + 1}` },
+          headers: { 'x-real-ip': `198.51.100.${attempt + 1}` },
           form: {
             grant_type: 'authorization_code',
             code: concurrentCode,

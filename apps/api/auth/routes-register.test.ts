@@ -19,9 +19,9 @@ function registerRow(overrides: Partial<Parameters<typeof db.insertOAuthClient>[
   };
 }
 
-function postRegister(body: unknown, xForwardedFor?: string): Request {
+function postRegister(body: unknown, xRealIp?: string): Request {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (xForwardedFor !== undefined) headers['x-forwarded-for'] = xForwardedFor;
+  if (xRealIp !== undefined) headers['x-real-ip'] = xRealIp;
   return new Request(`${BASE}/oauth/register`, {
     method: 'POST',
     headers,

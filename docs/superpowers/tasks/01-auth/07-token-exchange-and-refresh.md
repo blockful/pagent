@@ -12,8 +12,8 @@ Implement the OAuth token endpoint (`POST /oauth/token`) supporting both the `au
 - `apps/api/auth/provider.ts` — exposes token operations:
   - `exchangeAuthCode(code, clientId, redirectUri, codeVerifier): Promise<TokenResponse>` — validates expiry, PKCE, client, and redirect before mutation. It atomically consumes the code and inserts the initial refresh token under the per-grant family lock. A correctly bound replay revokes only that grant family.
   - `refreshToken(refreshToken, clientId): Promise<TokenResponse>` — looks up by `SHA-256(token)`, validates expiry and client binding before replay handling, rotates atomically while preserving `family_id`, and revokes only that grant family on a correctly bound replay.
-  - `revokeToken(token, tokenTypeHint, clientId): Promise<void>` — revokes the specified token. Always returns success per RFC 7009.
-- `apps/api/auth/routes.ts` — add routes:
+  - `revokeToken(token, tokenTypeHint, clientId): Promise<void>` — recognizes opaque refresh tokens and revokes their whole per-grant family; it always returns success per RFC 7009.
+- `apps/api/auth/route-token.ts` — registers:
   - `POST /oauth/token` — parses `application/x-www-form-urlencoded` body, dispatches on `grant_type` to `exchangeAuthCode()` or `refreshToken()`. Rate-limited to 20/IP/min.
   - `POST /oauth/revoke` — parses body, calls `revokeToken()`. Returns 200 always.
 - `apps/api/auth/provider.exchange.test.ts`, `provider.refresh.test.ts`, and
@@ -36,6 +36,8 @@ Implement the OAuth token endpoint (`POST /oauth/token`) supporting both the `au
 - Refresh token format: `rt_` prefix + 32 random bytes hex-encoded.
 - Refresh tokens are stored as SHA-256 hashes.
 - Refresh token rotation: every use issues a new refresh token and revokes the old one.
+- Explicit refresh-token revocation invalidates the full per-grant family, including a
+  successor created by a concurrent rotation.
 - Token family revocation: presenting a non-expired revoked token from its bound
   client revokes only tokens with the same per-grant `family_id`; independent
   later grants remain valid.

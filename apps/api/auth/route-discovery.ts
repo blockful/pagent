@@ -17,7 +17,7 @@ const registerLimiter = rateLimiter({
   windowMs: REGISTER_WINDOW_MS,
   limit: REGISTER_LIMIT,
   standardHeaders: 'draft-7',
-  keyGenerator: (c: Context) => clientKey(c.req.header('x-forwarded-for')),
+  keyGenerator: (c: Context) => clientKey(c.req.header('x-real-ip')),
   handler: (c) => {
     c.header('Retry-After', String(REGISTER_RETRY_AFTER_SECONDS));
     return c.json(

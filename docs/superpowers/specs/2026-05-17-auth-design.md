@@ -98,8 +98,9 @@ cleartext. Lookup is by hash: `WHERE token_hash = SHA256(cookie_value)
 AND expires_at > now()`.
 
 Session lifetime: 30 days, sliding — each authenticated request extends
-`expires_at` by 30 days. A TTL sweep (same pattern as the existing page
-sweep) reaps expired rows.
+`expires_at` by 30 days. The server's 60-second TTL sweep reaps expired
+session rows alongside other expired auth artifacts; session reads still
+require `expires_at > now()` so cleanup timing never affects authorization.
 
 ### 2.3 `oauth_clients`
 
@@ -186,6 +187,8 @@ the raw value is never stored server-side. On rotation the old row gets
 If a non-expired revoked token is replayed by its bound client, only active
 tokens derived from that authorization grant are revoked. Independent later
 grants for the same user and client have different family IDs and remain valid.
+Expired refresh-token rows are reclaimed by the server's periodic auth-artifact
+sweep; exchanges still reject expired rows before cleanup runs.
 
 ### 2.6 `magic_links`
 
@@ -204,6 +207,10 @@ CREATE TABLE IF NOT EXISTS magic_links (
 
 CREATE INDEX IF NOT EXISTS magic_links_expires_at_idx ON magic_links (expires_at);
 ```
+
+Expired authorization codes and magic links are likewise reclaimed by the
+periodic auth-artifact sweep. Their validation paths enforce expiry first, so
+the sweep is retention work rather than an authorization control.
 
 ### 2.7 Changes to `pages`
 
@@ -413,13 +420,13 @@ token is revoked.
 
 **Error cases:**
 
-| Status | Error                  | When                                              |
-| ------ | ---------------------- | ------------------------------------------------- |
-| 400    | `invalid_grant`        | Code expired, already consumed, or verifier fails  |
-| 400    | `invalid_client`       | `client_id` not found or mismatch                  |
-| 400    | `invalid_request`      | Missing required parameters                        |
-| 400    | `unsupported_grant_type` | Not `authorization_code` or `refresh_token`      |
-| 429    | `rate_limited`         | Too many token requests                            |
+| Status | Error                    | When                                                                    |
+| ------ | ------------------------ | ----------------------------------------------------------------------- |
+| 400    | `invalid_grant`          | Code/refresh token invalid or expired, PKCE fails, or client binding mismatches |
+| 401    | `invalid_client`         | `client_id` is not registered                                           |
+| 400    | `invalid_request`        | Missing required parameters                                             |
+| 400    | `unsupported_grant_type` | Not `authorization_code` or `refresh_token`                            |
+| 429    | `rate_limited`           | Too many token requests                                                 |
 
 ### 3.6 Token revocation (RFC 7009)
 
@@ -433,7 +440,10 @@ client_id=...
 ```
 
 **Response** `200` (always — per RFC 7009, even if the token was already
-revoked or invalid).
+revoked or invalid). When the supplied opaque refresh token is recognized and
+its optional `client_id` binding matches, revocation invalidates every refresh
+token in that token's per-grant family. Access-token revocation remains a
+no-op in V1 because access tokens are short-lived JWTs without a denylist.
 
 ### 3.7 Google OAuth callback (internal)
 
@@ -1000,8 +1010,9 @@ if (env.REQUIRE_AUTH) {
   const token = authHeader.slice(7);
   try {
     const authInfo = await tokenVerifier.verifyAccessToken(token);
-    // Attach auth info for the transport
-    (req as any).auth = authInfo;
+    // Attach auth info for the transport. IncomingMessage is augmented with
+    // the SDK-supported `auth` property in apps/api/mcp/http.ts.
+    req.auth = authInfo;
   } catch (err) {
     respondJson(res, 401, {
       error: 'invalid_token',
@@ -1105,11 +1116,11 @@ These are in-process (same `RateLimiter` class from
 instance deployment. If we scale horizontally, these move to
 Redis/Upstash.
 
-Production rate-limit identity uses the Railway-controlled
-`X-Forwarded-For` contract: Railway removes the caller-supplied header and
-places the connecting client IP first. `TRUSTED_PROXY_MODE=railway` is required
-in production so the deployment makes that trust boundary explicit; staging
-must confirm traffic cannot bypass Railway ingress.
+Production rate-limit identity uses Railway's `X-Real-IP` header. The runtime
+accepts it only when `TRUSTED_PROXY_MODE=railway`; missing, repeated, or
+non-IP values use the shared anonymous bucket, and `X-Forwarded-For` is
+ignored. Staging must confirm traffic cannot bypass Railway ingress before
+enabling that mode.
 
 ### 7.4 CSRF protection
 
@@ -1157,7 +1168,13 @@ cookie before any user mutation or authorization-code issuance.
 
 1. Add all auth tables to `db.ts`'s `init()` via `CREATE TABLE IF NOT
    EXISTS`. Add `owner_id` column to `pages` via `ALTER TABLE ... ADD
-   COLUMN IF NOT EXISTS`.
+   COLUMN IF NOT EXISTS`. Family-ID defaults are installed before backfill and
+   `NOT NULL` enforcement, and the backfill/constraint step is serialized by
+   a transaction advisory lock so old replicas can keep inserting during a
+   rolling deploy. Legacy authorization codes without a recoverable family
+   are marked consumed; legacy refresh rows are assigned an ID and revoked.
+   Both cases force one-time reauthentication rather than weakening replay
+   containment.
 2. Deploy all OAuth and auth endpoints.
 3. `REQUIRE_AUTH` defaults to `false`. Everything works exactly as
    before — no user needs to log in, pages are created without owners.
@@ -1213,7 +1230,7 @@ New environment variables for the API (`apps/api`):
 | `PUBLIC_URL`                | Production | -                                    | HTTPS renderer origin used in generated page URLs                  |
 | `API_PUBLIC_URL`            | Production | -                                    | HTTPS API origin used for OAuth issuer, callbacks, and magic links |
 | `ALLOWED_ORIGINS`           | Production | -                                    | Comma-separated CORS allow-list                                    |
-| `TRUSTED_PROXY_MODE`        | Production | -                                    | Must be `railway`; trusts Railway's leftmost forwarded client IP  |
+| `TRUSTED_PROXY_MODE`        | Production | -                                    | Must be `railway`; trusts Railway's `X-Real-IP` and ignores `X-Forwarded-For` |
 | `REQUIRE_AUTH`              | No         | `false`                              | If `true`, page creation, result reads, and MCP require auth       |
 | `JWT_SIGNING_KEY`           | Yes*       | -                                    | Ed25519 private key, base64url-encoded (DER)                       |
 | `JWT_PUBLIC_KEY`            | Yes*       | -                                    | Ed25519 public key, base64url-encoded (DER)                        |

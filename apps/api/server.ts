@@ -33,9 +33,13 @@ if (env.JWT_SIGNING_KEY && env.JWT_PUBLIC_KEY) {
 // Counts pages whose TTL fired while still 'open' as abandoned.
 const sweepTimer = setInterval(async () => {
   try {
-    const { total, abandoned } = await db.deleteExpiredPages();
+    const [{ total, abandoned }, auth] = await Promise.all([
+      db.deleteExpiredPages(),
+      db.deleteExpiredAuthArtifacts(),
+    ]);
     if (abandoned > 0) metrics.pagesAbandoned.add(abandoned);
     if (total > 0) logger.debug({ total, abandoned }, 'ttl sweep removed expired pages');
+    if (auth.total > 0) logger.debug(auth, 'ttl sweep removed expired auth artifacts');
   } catch (err) {
     logger.error({ err }, 'ttl sweep failed');
   }

@@ -151,16 +151,9 @@ export async function init(connectionString: string): Promise<void> {
       add column if not exists refresh_token_family_id uuid
   `;
   await sql`
-    update auth_codes
-    set refresh_token_family_id = gen_random_uuid()
-    where refresh_token_family_id is null
-  `;
-  await sql`
     alter table auth_codes
-      alter column refresh_token_family_id set default gen_random_uuid(),
-      alter column refresh_token_family_id set not null
+      alter column refresh_token_family_id set default gen_random_uuid()
   `;
-  await sql`create index if not exists auth_codes_expires_at_idx on auth_codes (expires_at)`;
 
   // Refresh tokens — opaque, rotated on each use. `token_hash` is
   // SHA-256(raw). On rotation the old row gets revoked_at = now() and a
@@ -184,15 +177,37 @@ export async function init(connectionString: string): Promise<void> {
       add column if not exists family_id uuid
   `;
   await sql`
-    update refresh_tokens
-    set family_id = id
-    where family_id is null
-  `;
-  await sql`
     alter table refresh_tokens
-      alter column family_id set default gen_random_uuid(),
-      alter column family_id set not null
+      alter column family_id set default gen_random_uuid()
   `;
+  await sql.begin(async (tx) => {
+    await tx`
+      select pg_advisory_xact_lock(
+        hashtextextended('pagent:refresh-family-migration', 0)
+      )
+    `;
+    await tx`
+      update auth_codes
+      set refresh_token_family_id = gen_random_uuid(),
+          consumed_at = coalesce(consumed_at, now())
+      where refresh_token_family_id is null
+    `;
+    await tx`
+      update refresh_tokens
+      set family_id = id,
+          revoked_at = coalesce(revoked_at, now())
+      where family_id is null
+    `;
+    await tx`
+      alter table auth_codes
+        alter column refresh_token_family_id set not null
+    `;
+    await tx`
+      alter table refresh_tokens
+        alter column family_id set not null
+    `;
+  });
+  await sql`create index if not exists auth_codes_expires_at_idx on auth_codes (expires_at)`;
   await sql`create index if not exists refresh_tokens_user_id_idx on refresh_tokens (user_id)`;
   await sql`create index if not exists refresh_tokens_family_id_idx on refresh_tokens (family_id)`;
   await sql`create index if not exists refresh_tokens_expires_at_idx on refresh_tokens (expires_at)`;

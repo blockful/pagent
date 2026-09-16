@@ -78,7 +78,7 @@ Notes on column choices:
   is intentional — adding a resource type should be deliberate.
 - **metadata** — JSONB bag for action-specific details. Schema per
   action type is documented in section 3 below.
-- **ip_address** — Last-hop IP from `X-Forwarded-For`, extracted by
+- **ip_address** — Railway client IP from `X-Real-IP`, extracted by
   the existing `clientKey()` utility. Stored as text, not inet, to
   avoid parse failures on malformed headers.
 - **user_agent** — Raw `User-Agent` header value, truncated to 512
@@ -622,7 +622,7 @@ emitAuditEvent({
     action_surface_id: action.surfaceId,
     latency_ms: Date.now() - outcome.createdAt.getTime(),
   },
-  ip_address: clientKey(c.req.header('x-forwarded-for')),
+  ip_address: clientKey(c.req.header('x-real-ip')),
   user_agent: c.req.header('user-agent')?.slice(0, 512),
 });
 ```
@@ -859,7 +859,7 @@ default of 90.
 | Column | PII? | Content | Risk |
 |---|---|---|---|
 | `user_id` | Yes (when auth ships) | Links to user identity. | Medium. Mitigated by access control. |
-| `ip_address` | Yes | Client IP address, last hop from X-Forwarded-For. | Medium. IP is PII under GDPR. |
+| `ip_address` | Yes | Client IP address from trusted Railway `X-Real-IP`. | Medium. IP is PII under GDPR. |
 | `user_agent` | Borderline | Browser/agent UA string. Can fingerprint devices. | Low. Generic string, not unique to a person. |
 | `metadata` | Depends | Action-specific JSONB. Never contains the full result payload, but does contain the URL, format, and byte sizes. | Low. No user-typed input is stored in metadata. |
 

@@ -11,6 +11,9 @@ vi.mock('../db.ts', () => ({
   fetchAndAdvanceResult: vi.fn(() => Promise.resolve(null)),
   deletePage: vi.fn(() => Promise.resolve()),
   deleteExpiredPages: vi.fn(() => Promise.resolve({ total: 0, abandoned: 0 })),
+  deleteExpiredAuthArtifacts: vi.fn(() =>
+    Promise.resolve({ sessions: 0, authCodes: 0, magicLinks: 0, refreshTokens: 0, total: 0 }),
+  ),
   ping: vi.fn().mockResolvedValue(undefined),
   insertOAuthClient: vi.fn(),
   getOAuthClientById: vi.fn(),

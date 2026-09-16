@@ -30,7 +30,7 @@ const TOKEN_USER_ROW = {
 
 function postToken(
   body: Record<string, string>,
-  opts: { contentType?: 'form' | 'json'; xForwardedFor?: string } = {},
+  opts: { contentType?: 'form' | 'json'; xRealIp?: string } = {},
 ): Request {
   const headers: Record<string, string> = {};
   let serialized: string;
@@ -41,7 +41,7 @@ function postToken(
     headers['Content-Type'] = 'application/x-www-form-urlencoded';
     serialized = new URLSearchParams(body).toString();
   }
-  if (opts.xForwardedFor !== undefined) headers['x-forwarded-for'] = opts.xForwardedFor;
+  if (opts.xRealIp !== undefined) headers['x-real-ip'] = opts.xRealIp;
   return new Request(`${BASE}/oauth/token`, { method: 'POST', headers, body: serialized });
 }
 
@@ -110,7 +110,7 @@ describe('POST /oauth/token', () => {
           redirect_uri: TOKEN_REDIRECT_URI,
           code_verifier: verifier,
         },
-        { xForwardedFor: '10.1.0.1' },
+        { xRealIp: '10.1.0.1' },
       ),
     );
     expect(res.status).toBe(200);
@@ -135,7 +135,7 @@ describe('POST /oauth/token', () => {
           redirect_uri: TOKEN_REDIRECT_URI,
           code_verifier: 'v',
         },
-        { contentType: 'json', xForwardedFor: '10.1.0.2' },
+        { contentType: 'json', xRealIp: '10.1.0.2' },
       ),
     );
     expect(res.status).toBe(400);
@@ -147,10 +147,7 @@ describe('POST /oauth/token', () => {
 
   it('returns unsupported_grant_type for unknown grants (400)', async () => {
     const res = await app.fetch(
-      postToken(
-        { grant_type: 'password', username: 'x', password: 'y' },
-        { xForwardedFor: '10.1.0.3' },
-      ),
+      postToken({ grant_type: 'password', username: 'x', password: 'y' }, { xRealIp: '10.1.0.3' }),
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as Record<string, unknown>;
@@ -159,7 +156,7 @@ describe('POST /oauth/token', () => {
   });
 
   it('returns invalid_request when grant_type is missing', async () => {
-    const res = await app.fetch(postToken({ code: 'x' }, { xForwardedFor: '10.1.0.4' }));
+    const res = await app.fetch(postToken({ code: 'x' }, { xRealIp: '10.1.0.4' }));
     expect(res.status).toBe(400);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.error).toBe('invalid_request');
@@ -177,7 +174,7 @@ describe('POST /oauth/token', () => {
           redirect_uri: TOKEN_REDIRECT_URI,
           code_verifier: 'v',
         },
-        { xForwardedFor: '10.1.0.5' },
+        { xRealIp: '10.1.0.5' },
       ),
     );
     expect(res.status).toBe(400);
@@ -196,7 +193,7 @@ describe('POST /oauth/token', () => {
           redirect_uri: TOKEN_REDIRECT_URI,
           code_verifier: 'v',
         },
-        { xForwardedFor: '10.1.0.6' },
+        { xRealIp: '10.1.0.6' },
       ),
     );
     expect(res.status).toBe(401);
@@ -217,7 +214,7 @@ describe('POST /oauth/token', () => {
             redirect_uri: TOKEN_REDIRECT_URI,
             code_verifier: 'v',
           },
-          { xForwardedFor: ip },
+          { xRealIp: ip },
         ),
       );
       expect(res.status, `request ${i + 1} of 20 should not be rate-limited`).not.toBe(429);
@@ -231,7 +228,7 @@ describe('POST /oauth/token', () => {
           redirect_uri: TOKEN_REDIRECT_URI,
           code_verifier: 'v',
         },
-        { xForwardedFor: ip },
+        { xRealIp: ip },
       ),
     );
     expect(limited.status).toBe(429);

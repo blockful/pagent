@@ -32,8 +32,14 @@ Extend the env schema with all auth-related variables and add the six new auth t
 - `users` table has unique indexes on `lower(email)` and `lower(handle)`.
 - Google identities have a unique non-null `google_sub` binding.
 - Authorization codes and refresh tokens persist per-grant family IDs.
+- The additive family-ID migration installs defaults before backfill and
+  serializes the backfill/`NOT NULL` transition; legacy auth codes are consumed
+  and legacy refresh rows are revoked so clients reauthenticate safely.
 - Magic links persist their authorize context as JSONB.
 - `sessions`, `auth_codes`, `refresh_tokens`, `magic_links` have `expires_at` indexes.
+- The server's periodic retention sweep deletes expired sessions, auth codes,
+  magic links, and refresh tokens; authorization reads independently enforce
+  expiry.
 - Existing tests continue to pass (no regressions).
 
 ## Dependencies

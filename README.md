@@ -87,7 +87,7 @@ Each app validates its environment at boot/build with Zod and fails loudly on mi
 |                                                   | `PAGE_TTL_MS`                                                                  | optional              | Coerced to number. Default `1800000` (30 min).                                                         |
 |                                                   | `RATE_LIMIT_MAX`                                                               | optional              | Positive integer. Default `30`.                                                                        |
 |                                                   | `RATE_LIMIT_WINDOW_MS`                                                         | optional              | Positive integer. Default `60000`.                                                                     |
-|                                                   | `TRUSTED_PROXY_MODE`                                                           | **production**        | Must be `railway`; trusts Railway's controlled leftmost `X-Forwarded-For` entry for rate limiting.     |
+|                                                   | `TRUSTED_PROXY_MODE`                                                           | **production**        | Must be `railway`; trusts Railway's `X-Real-IP` for rate limiting and ignores `X-Forwarded-For`.       |
 |                                                   | `REQUIRE_AUTH`                                                                 | optional              | Boolean. Default `false`; set `true` to protect page creation/results and enable the full OAuth flow.  |
 |                                                   | `JWT_SIGNING_KEY` / `JWT_PUBLIC_KEY`                                           | when auth is required | Base64url DER Ed25519 private/public key pair used to sign and verify access tokens.                   |
 |                                                   | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`                                    | when auth is required | Google OAuth credentials. `GOOGLE_REDIRECT_URI` defaults to `{API_PUBLIC_URL}/oauth/callback/google`.  |
@@ -231,7 +231,7 @@ To bypass in an emergency: `git push --no-verify` (don't make this a habit).
    - `PORT` — Railway sets this automatically; the server reads it.
    - `PAGE_TTL_MS` — optional; default 30 minutes.
    - `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` — optional. Per-IP rate limit on `POST /new`. Defaults: 30 / 60000 (30 req/min). Tune up for load tests.
-   - `TRUSTED_PROXY_MODE` — set to `railway` after confirming staging traffic reaches the API only through Railway ingress. **Required in production.**
+   - `TRUSTED_PROXY_MODE` — set to `railway` after confirming staging traffic reaches the API only through Railway ingress. This trusts Railway's `X-Real-IP` and ignores `X-Forwarded-For`. **Required in production.**
    - `REQUIRE_AUTH` — set to `true` to enforce authentication and scopes on protected page and MCP operations. Leave `false` only for the documented rollout grace period.
    - `JWT_SIGNING_KEY` / `JWT_PUBLIC_KEY` — base64url-encoded DER Ed25519 key pair. Required when `REQUIRE_AUTH=true`.
    - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — Google OAuth credentials. `GOOGLE_REDIRECT_URI` is optional and defaults to `${API_PUBLIC_URL}/oauth/callback/google`.
@@ -382,7 +382,7 @@ behaviour without touching code. `apps/api/.env.example` is the source of truth.
 | `ALLOWED_ORIGINS`             | _(required in prod)_      | Comma-separated origins the CORS middleware allows. Add an origin here and restart — no redeploy.         |
 | `RATE_LIMIT_MAX`              | `30`                      | Maximum requests per window per client IP on `POST /new`. Raise for load tests; restart picks it up.      |
 | `RATE_LIMIT_WINDOW_MS`        | `60000` (60 s)            | The rolling window for the rate limit above.                                                              |
-| `TRUSTED_PROXY_MODE`          | _(required in prod)_      | Set to `railway` to use Railway's controlled leftmost forwarded client IP for abuse limits.               |
+| `TRUSTED_PROXY_MODE`          | _(required in prod)_      | Set to `railway` to use Railway's `X-Real-IP` for abuse limits; `X-Forwarded-For` is ignored.             |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(unset = OTel disabled)_ | Grafana Cloud OTLP HTTP base URL. Set to enable traces; unset to disable. Restart required.               |
 | `LOG_LEVEL`                   | `info`                    | Pino log level: `fatal \| error \| warn \| info \| debug \| trace`. Lower = more noise. Restart required. |
 

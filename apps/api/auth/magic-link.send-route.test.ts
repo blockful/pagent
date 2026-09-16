@@ -34,6 +34,7 @@ import { app } from '../app.ts';
 import { env } from '../schemas.ts';
 import { postMagicSend, setupMagicLinkTest } from './magic-link-test-support.ts';
 import { AUTH_TRANSACTION_COOKIE_NAME } from './route-transaction.ts';
+import { magicSendGlobalLimiter } from './routes.ts';
 import { signStateJwt } from './state-jwt.ts';
 import { firstCallArgument } from './test-call-support.ts';
 
@@ -154,23 +155,17 @@ describe('POST /oauth/magic/send', () => {
 
   it('rate-limits varying recipient addresses from the same client IP', async () => {
     vi.mocked(db.insertMagicLink).mockResolvedValue();
-    const forwardedFor = '203.0.113.10';
+    const realIp = '203.0.113.10';
 
     for (let i = 0; i < 10; i++) {
       const res = await app.fetch(
-        postMagicSend(
-          { email: `recipient-${i}@blockful.io` },
-          { contentType: 'json', forwardedFor },
-        ),
+        postMagicSend({ email: `recipient-${i}@blockful.io` }, { contentType: 'json', realIp }),
       );
       expect(res.status, `request ${i + 1} should succeed`).toBe(200);
     }
 
     const limited = await app.fetch(
-      postMagicSend(
-        { email: 'recipient-over-limit@blockful.io' },
-        { contentType: 'json', forwardedFor },
-      ),
+      postMagicSend({ email: 'recipient-over-limit@blockful.io' }, { contentType: 'json', realIp }),
     );
     expect(limited.status).toBe(429);
     const body = (await limited.json()) as Record<string, unknown>;
@@ -178,7 +173,7 @@ describe('POST /oauth/magic/send', () => {
     expect(mockSendMail).toHaveBeenCalledTimes(10);
   });
 
-  it("uses Railway's leftmost client IP when trailing proxy hops change", async () => {
+  it("uses Railway's X-Real-IP when X-Forwarded-For changes", async () => {
     vi.mocked(db.insertMagicLink).mockResolvedValue();
     for (let i = 0; i < 10; i++) {
       const res = await app.fetch(
@@ -186,6 +181,7 @@ describe('POST /oauth/magic/send', () => {
           { email: `varying-chain-${i}@blockful.io` },
           {
             contentType: 'json',
+            realIp: '203.0.113.10',
             forwardedFor: `203.0.113.10, 192.0.2.${i + 1}`,
           },
         ),
@@ -198,6 +194,7 @@ describe('POST /oauth/magic/send', () => {
         { email: 'varying-chain-over-limit@blockful.io' },
         {
           contentType: 'json',
+          realIp: '203.0.113.10',
           forwardedFor: '203.0.113.10, 192.0.2.200, 198.51.100.7',
         },
       ),
@@ -213,7 +210,7 @@ describe('POST /oauth/magic/send', () => {
       const res = await app.fetch(
         postMagicSend(
           { email: `provider-${i}@blockful.io` },
-          { contentType: 'json', forwardedFor: `198.51.100.${i + 1}` },
+          { contentType: 'json', realIp: `198.51.100.${i + 1}` },
         ),
       );
       expect(res.status, `request ${i + 1} should succeed`).toBe(200);
@@ -222,13 +219,84 @@ describe('POST /oauth/magic/send', () => {
     const limited = await app.fetch(
       postMagicSend(
         { email: 'provider-over-limit@blockful.io' },
-        { contentType: 'json', forwardedFor: '198.51.100.201' },
+        { contentType: 'json', realIp: '198.51.100.201' },
       ),
     );
     expect(limited.status).toBe(429);
     const body = (await limited.json()) as Record<string, unknown>;
     expect(body.error).toBe('rate_limited');
     expect(mockSendMail).toHaveBeenCalledTimes(50);
+  });
+
+  it('does not charge a client-IP bucket when the provider safeguard is already full', async () => {
+    vi.mocked(db.insertMagicLink).mockResolvedValue();
+
+    for (let i = 0; i < 50; i++) {
+      const res = await app.fetch(
+        postMagicSend(
+          { email: `provider-cap-${i}@blockful.io` },
+          { contentType: 'json', realIp: `198.51.100.${i + 1}` },
+        ),
+      );
+      expect(res.status, `provider request ${i + 1} should succeed`).toBe(200);
+    }
+
+    const blockedIp = '203.0.113.200';
+    for (let i = 0; i < 10; i++) {
+      const res = await app.fetch(
+        postMagicSend(
+          { email: `blocked-provider-${i}@blockful.io` },
+          { contentType: 'json', realIp: blockedIp },
+        ),
+      );
+      expect(res.status, `blocked request ${i + 1} should not consume the IP bucket`).toBe(429);
+    }
+
+    magicSendGlobalLimiter.reset();
+
+    for (let i = 0; i < 10; i++) {
+      const res = await app.fetch(
+        postMagicSend(
+          { email: `allowed-after-reset-${i}@blockful.io` },
+          { contentType: 'json', realIp: blockedIp },
+        ),
+      );
+      expect(res.status, `IP request ${i + 1} should succeed after the global reset`).toBe(200);
+    }
+  });
+
+  it('does not charge an email bucket when the provider safeguard is already full', async () => {
+    vi.mocked(db.insertMagicLink).mockResolvedValue();
+
+    for (let i = 0; i < 50; i++) {
+      const res = await app.fetch(
+        postMagicSend(
+          { email: `provider-email-cap-${i}@blockful.io` },
+          { contentType: 'json', realIp: `198.51.100.${i + 1}` },
+        ),
+      );
+      expect(res.status, `provider request ${i + 1} should succeed`).toBe(200);
+    }
+
+    const blockedEmail = 'blocked-provider-email@blockful.io';
+    for (let i = 0; i < 5; i++) {
+      const res = await app.fetch(
+        postMagicSend(
+          { email: blockedEmail },
+          { contentType: 'json', realIp: `203.0.113.${i + 1}` },
+        ),
+      );
+      expect(res.status, `blocked request ${i + 1} should not consume the email bucket`).toBe(429);
+    }
+
+    magicSendGlobalLimiter.reset();
+
+    for (let i = 0; i < 5; i++) {
+      const res = await app.fetch(
+        postMagicSend({ email: blockedEmail }, { contentType: 'json', realIp: `192.0.2.${i + 1}` }),
+      );
+      expect(res.status, `email request ${i + 1} should succeed after the global reset`).toBe(200);
+    }
   });
 
   it('extracts authorize context from a signed state JWT', async () => {

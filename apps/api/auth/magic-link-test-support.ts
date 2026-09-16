@@ -13,10 +13,16 @@ export function sha256Hex(s: string): string {
 
 export function postMagicSend(
   body: Record<string, string>,
-  opts: { contentType?: 'json' | 'form'; cookie?: string; forwardedFor?: string } = {},
+  opts: {
+    contentType?: 'json' | 'form';
+    cookie?: string;
+    realIp?: string;
+    forwardedFor?: string;
+  } = {},
 ): Request {
   const headers: Record<string, string> = {};
   if (opts.cookie !== undefined) headers.cookie = opts.cookie;
+  if (opts.realIp !== undefined) headers['X-Real-IP'] = opts.realIp;
   if (opts.forwardedFor !== undefined) headers['X-Forwarded-For'] = opts.forwardedFor;
   let serialized: string;
   if (opts.contentType === 'form' || opts.contentType === undefined) {

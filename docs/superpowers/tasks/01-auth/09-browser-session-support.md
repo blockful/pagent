@@ -1,42 +1,41 @@
 # 09 — Browser session support
 
-## Description
+> Status: implemented. This checklist is retained as an as-built contract and
+> has been reconciled with the current runtime.
 
-Add browser-specific session endpoints (`POST /auth/logout`, `GET /auth/me`) and the browser session flow where the login page sets an httpOnly cookie after authentication. Support the `browser_session=1` query parameter for direct browser login without an MCP client.
+## As-built implementation
 
-## Files to create/modify
+- `apps/api/auth/route-session.ts` registers `GET /auth/me` and
+  `POST /auth/logout`. The profile endpoint requires a cookie-authenticated
+  session; logout deletes the server-side row when present and always clears
+  the browser cookie.
+- `apps/api/auth/route-login.ts`, `route-consent.ts`, and `route-magic.ts`
+  drive OAuth consent, Google, and Magic Link completion. A
+  `browser_session=1` authorization request starts a browser transaction and,
+  after verified authentication, creates a session instead of issuing an
+  authorization code.
+- `apps/api/auth/route-shared.ts` sets `pagent_session` with `HttpOnly`,
+  `SameSite=Lax`, `Path=/`, and the configured maximum age. `Secure` is set
+  in production.
+- `apps/api/server.ts` periodically deletes expired session, authorization
+  code, magic-link, and refresh-token rows. Session lookup independently
+  checks expiry, so that retention sweep cannot extend an expired session.
+- `routes-browser-session.test.ts`, `routes-session.test.ts`,
+  `google-callback.test.ts`, and `magic-link.verify-route.test.ts` exercise
+  session creation, profile lookup, logout, and browser-bound completion.
 
-- `apps/api/auth/routes.ts` — add routes:
-  - `GET /auth/me` — requires session cookie (via `resolveAuth()`), returns current user profile `{ id, handle, email, name, avatar_url }`. Returns 401 if no valid session.
-  - `POST /auth/logout` — requires session cookie, calls `deleteSession()`, clears cookie with `Set-Cookie: pagent_session=; Max-Age=0; ...`, returns 200.
-  - Modify `GET /oauth/authorize` — when `browser_session=1` is present (and no `client_id`): after successful authentication, set session cookie and redirect to `/` instead of issuing an auth code.
-- `apps/api/auth/routes.ts` — in the Google callback and Magic Link verification handlers: when the authorize context has `browser_session=1`, call `createSession()` and set the cookie:
-  - Cookie attributes: `HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000` (30 days).
-- `apps/api/auth/routes.test.ts` — add tests:
-  - `GET /auth/me` with valid session returns user profile.
-  - `GET /auth/me` without session returns 401.
-  - `POST /auth/logout` clears the session and cookie.
-  - Browser session flow (`browser_session=1`) sets cookie and redirects to `/`.
+## Invariants
 
-## Acceptance criteria
-
-- `pagent_session` cookie is set only for browser-initiated auth flows.
-- Cookie attributes: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, `Max-Age=2592000`.
-- `GET /auth/me` returns the user profile from the session.
-- `POST /auth/logout` deletes the DB session row and clears the cookie.
-- `browser_session=1` authorize flow works without `client_id`, `redirect_uri`, or `code_challenge`.
-- After browser login, redirect goes to `/` (not to a client redirect_uri).
-- Session creation stores IP address and User-Agent from the request.
-
-## Dependencies
-
-- **05** — Google OAuth callback must be working.
-- **06** — Magic Link verification must be working.
-- **08** — `resolveAuth()` middleware and session helpers must be working.
+- Browser-session authentication does not need OAuth client, redirect URI, or
+  PKCE parameters.
+- A browser transaction cookie binds the login completion to the initiating
+  browser before it can create a session or authorization code.
+- Session creation records the validated client IP when Railway trusted-proxy
+  mode is enabled, plus the request user agent when supplied.
 
 ## Relevant spec sections
 
-- Section 3.9 (Browser session endpoints — /auth/me, /auth/logout)
-- Section 4.4 (Browser session flow — cookie setting, browser_session=1 parameter)
-- Section 7.2 (Token storage — cookie attributes)
-- Section 7.4 (CSRF protection — SameSite=Lax, POST /auth/logout)
+- Section 3.9 (Browser session endpoints)
+- Section 4.4 (Browser session flow)
+- Section 7.2 (Token storage)
+- Section 7.4 (CSRF protection)

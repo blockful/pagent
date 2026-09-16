@@ -42,6 +42,14 @@ export class RateLimiter {
     this.windowMs = windowMs;
   }
 
+  peek(key: string, now: number = Date.now()): RateLimitResult {
+    const bucket = this.buckets.get(key);
+    if (!bucket || bucket.resetAt <= now) {
+      return this.resultFor(1, now + this.windowMs, now);
+    }
+    return this.resultFor(bucket.count + 1, bucket.resetAt, now);
+  }
+
   /** Increment the bucket for `key` and return whether the request is allowed. */
   check(key: string, now: number = Date.now()): RateLimitResult {
     if (++this.callsSinceSweep >= RateLimiter.SWEEP_INTERVAL) {
@@ -55,13 +63,7 @@ export class RateLimiter {
       this.buckets.set(key, b);
     }
     b.count += 1;
-    const allowed = b.count <= this.limit;
-    return {
-      allowed,
-      secondsUntilReset: Math.max(1, Math.ceil((b.resetAt - now) / 1000)),
-      remaining: Math.max(0, this.limit - b.count),
-      limit: this.limit,
-    };
+    return this.resultFor(b.count, b.resetAt, now);
   }
 
   /** Window length in whole seconds — useful for the RateLimit-Policy header. */
@@ -79,5 +81,14 @@ export class RateLimiter {
     for (const [k, b] of this.buckets) {
       if (b.resetAt <= now) this.buckets.delete(k);
     }
+  }
+
+  private resultFor(count: number, resetAt: number, now: number): RateLimitResult {
+    return {
+      allowed: count <= this.limit,
+      secondsUntilReset: Math.max(1, Math.ceil((resetAt - now) / 1000)),
+      remaining: Math.max(0, this.limit - count),
+      limit: this.limit,
+    };
   }
 }

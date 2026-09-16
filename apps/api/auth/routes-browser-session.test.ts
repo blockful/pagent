@@ -45,7 +45,7 @@ describe('Browser session login flow', () => {
   it('GET /oauth/authorize?browser_session=1 renders login page without other params', async () => {
     const res = await app.fetch(
       new Request(`${BASE}/oauth/authorize?browser_session=1`, {
-        headers: { 'x-forwarded-for': '198.51.100.99' },
+        headers: { 'x-real-ip': '198.51.100.99' },
       }),
     );
     expect(res.status).toBe(200);
@@ -73,7 +73,7 @@ describe('Browser session login flow', () => {
       new Request(`${BASE}/oauth/magic?token=browser-flow-token`, {
         headers: {
           'user-agent': 'MockBrowser/1.0',
-          'x-forwarded-for': '10.5.0.1, 100.64.0.2',
+          'x-real-ip': '10.5.0.1',
           cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${BROWSER_TRANSACTION_TOKEN}`,
         },
       }),
@@ -153,7 +153,7 @@ describe('Browser session login flow', () => {
           {
             headers: {
               'user-agent': 'MockBrowser/2.0',
-              'x-forwarded-for': '203.0.113.77, 100.64.0.3',
+              'x-real-ip': '203.0.113.77',
               cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${BROWSER_TRANSACTION_TOKEN}`,
             },
           },

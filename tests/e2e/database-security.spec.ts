@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
+import postgres from 'postgres';
 import * as db from '../../apps/api/db.ts';
 import { upsertUser as upsertAuthUser } from '../../apps/api/auth/user-provider.ts';
 
@@ -338,5 +339,114 @@ test('leaves no active successor when rotation races family revocation', async (
     }
   } finally {
     await db.shutdown();
+  }
+});
+
+test('revokes legacy refresh grants while upgrading nullable family columns', async () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl === undefined) throw new TypeError('DATABASE_URL is required');
+
+  const schema = `migration_${randomUUID().replaceAll('-', '')}`;
+  const admin = postgres(databaseUrl, { ssl: db.databaseSsl(databaseUrl), prepare: false });
+  const scopedUrl = new URL(databaseUrl);
+  scopedUrl.searchParams.set('options', `-c search_path=${schema}`);
+  const userId = randomUUID();
+  const activeTokenId = randomUUID();
+  const revokedTokenId = randomUUID();
+  const authCode = `legacy-code-${randomUUID()}`;
+
+  try {
+    await admin.unsafe(`create schema ${schema}`);
+    await admin.unsafe(`
+      create table ${schema}.auth_codes (
+        code text primary key,
+        user_id uuid not null,
+        client_id text not null,
+        redirect_uri text not null,
+        code_challenge text not null,
+        code_challenge_method text not null default 'S256',
+        scope text,
+        resource text,
+        created_at timestamptz not null default now(),
+        expires_at timestamptz not null,
+        consumed_at timestamptz
+      )
+    `);
+    await admin.unsafe(`
+      create table ${schema}.refresh_tokens (
+        id uuid primary key,
+        user_id uuid not null,
+        client_id text not null,
+        token_hash text not null unique,
+        scope text,
+        created_at timestamptz not null default now(),
+        expires_at timestamptz not null,
+        revoked_at timestamptz
+      )
+    `);
+    await admin`
+      insert into ${admin(`${schema}.auth_codes`)}
+        (code, user_id, client_id, redirect_uri, code_challenge, expires_at)
+      values (${authCode}, ${userId}, 'legacy-client', 'https://client.example/callback',
+              'legacy-challenge', now() + interval '10 minutes')
+    `;
+    await admin`
+      insert into ${admin(`${schema}.refresh_tokens`)}
+        (id, user_id, client_id, token_hash, expires_at, revoked_at)
+      values
+        (${activeTokenId}, ${userId}, 'legacy-client', 'legacy-active',
+         now() + interval '1 day', null),
+        (${revokedTokenId}, ${userId}, 'legacy-client', 'legacy-revoked',
+         now() + interval '1 day', now() - interval '1 hour')
+    `;
+
+    await db.init(scopedUrl.toString());
+    await db.shutdown();
+
+    const refreshRows = await admin<{ id: string; family_id: string; revoked_at: Date | null }[]>`
+      select id, family_id, revoked_at
+      from ${admin(`${schema}.refresh_tokens`)}
+      order by token_hash
+    `;
+    expect(refreshRows).toHaveLength(2);
+    expect(refreshRows.every((row) => row.family_id === row.id)).toBe(true);
+    expect(refreshRows.every((row) => row.revoked_at instanceof Date)).toBe(true);
+
+    const [migratedCode] = await admin<
+      { refresh_token_family_id: string; consumed_at: Date | null }[]
+    >`
+      select refresh_token_family_id, consumed_at
+      from ${admin(`${schema}.auth_codes`)}
+      where code = ${authCode}
+    `;
+    expect(migratedCode?.refresh_token_family_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(migratedCode?.consumed_at).toBeInstanceOf(Date);
+
+    const constraints = await admin<
+      {
+        table_name: string;
+        column_name: string;
+        is_nullable: string;
+        column_default: string | null;
+      }[]
+    >`
+      select table_name, column_name, is_nullable, column_default
+      from information_schema.columns
+      where table_schema = ${schema}
+        and (
+          (table_name = 'refresh_tokens' and column_name = 'family_id')
+          or (table_name = 'auth_codes' and column_name = 'refresh_token_family_id')
+        )
+      order by table_name
+    `;
+    expect(constraints).toHaveLength(2);
+    expect(constraints.every((column) => column.is_nullable === 'NO')).toBe(true);
+    expect(constraints.every((column) => column.column_default?.includes('gen_random_uuid'))).toBe(
+      true,
+    );
+  } finally {
+    await db.shutdown();
+    await admin.unsafe(`drop schema if exists ${schema} cascade`);
+    await admin.end({ timeout: 5 });
   }
 });

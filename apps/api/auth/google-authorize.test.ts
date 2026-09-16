@@ -291,8 +291,7 @@ describe('GET /oauth/authorize rate limit', () => {
   it('rate-limits at 30 per IP per minute (31st request → 429)', async () => {
     vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
     const ip = '198.51.100.42';
-    const req = () =>
-      new Request(authorizeUrl(VALID_AUTHORIZE), { headers: { 'x-forwarded-for': ip } });
+    const req = () => new Request(authorizeUrl(VALID_AUTHORIZE), { headers: { 'x-real-ip': ip } });
     for (let i = 0; i < 30; i++) {
       const res = await app.fetch(req());
       expect(res.status, `request ${i + 1} of 30 should be 200`).toBe(200);

@@ -103,14 +103,14 @@ export async function refreshToken(
 export async function revokeToken(
   token: string,
   _tokenTypeHint: string | undefined,
-  _clientId: string | undefined,
+  clientId: string | undefined,
 ): Promise<void> {
   if (!token) return;
   // Refresh token: opaque, identified by the `rt_` prefix. Hash and look up.
   if (token.startsWith(REFRESH_TOKEN_PREFIX)) {
     const row = await db.getRefreshTokenByHash(hashRefreshToken(token));
-    if (row && row.revoked_at === null) {
-      await db.revokeRefreshToken(row.id);
+    if (row && (clientId === undefined || row.client_id === clientId)) {
+      await db.revokeAllRefreshTokensForFamily(row.family_id);
     }
     return;
   }
