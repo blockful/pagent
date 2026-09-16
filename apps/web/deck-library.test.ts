@@ -6,6 +6,7 @@ import './deck-library.ts';
 
 const OWNER_ID = '9ea46b4d-58ae-4cdf-8de8-e41c255e628d';
 const DECK_ID = '13d26c02-a80c-4b56-b1fa-1a91642684bf';
+const SHARED_DECK_ID = '583c0ac4-5832-44a0-a13b-688b044b0208';
 
 describe('deck-library', () => {
   afterEach(() => {
@@ -43,6 +44,20 @@ describe('deck-library', () => {
               lastViewed: '2026-09-16T01:00:00.000Z',
               updatedAt: '2026-09-16T01:00:00.000Z',
             },
+            {
+              id: SHARED_DECK_ID,
+              title: 'Shared without analytics',
+              ownerId: OWNER_ID,
+              ownerEmail: 'owner@pagent.test',
+              latestSenderId: OWNER_ID,
+              latestSenderEmail: 'owner@pagent.test',
+              status: 'active',
+              accessMode: 'authenticated',
+              linkCount: 1,
+              uniqueViewers: null,
+              lastViewed: null,
+              updatedAt: '2026-09-16T01:00:00.000Z',
+            },
           ],
         });
       }),
@@ -56,6 +71,20 @@ describe('deck-library', () => {
         'Northstar renewal',
       );
     });
+    expect(library.shadowRoot?.querySelector('a.primary-link')?.getAttribute('href')).toBe(
+      `/pages/${DECK_ID}`,
+    );
+    expect(library.shadowRoot?.textContent).toContain('Pages');
+    expect(
+      Array.from(library.shadowRoot?.querySelectorAll('[data-label="Viewers"]') ?? []).map((cell) =>
+        cell.textContent?.trim(),
+      ),
+    ).toEqual(['2', 'Withheld']);
+    expect(
+      Array.from(library.shadowRoot?.querySelectorAll('[data-label="Last viewed"]') ?? []).map(
+        (cell) => cell.textContent?.trim(),
+      ),
+    ).toEqual([expect.not.stringContaining('Withheld'), 'Withheld']);
     expect(library.shadowRoot?.querySelector('[aria-busy="true"]')).toBeNull();
   });
 });

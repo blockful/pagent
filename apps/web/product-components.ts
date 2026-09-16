@@ -17,7 +17,9 @@ class ProductComponents extends LitElement {
             <div>
               <p class="eyebrow">Design system · product surfaces</p>
               <h1 class="display-title">Trustworthy by construction.</h1>
-              <p class="lede">The exact controls, states, and responsive records used by Decks.</p>
+              <p class="lede">
+                The exact controls, states, and responsive records used by presentation Pages.
+              </p>
             </div>
           </header>
           <section class="surface stack" aria-labelledby="actions-title">
@@ -67,7 +69,7 @@ class ProductComponents extends LitElement {
                 <strong>Identity note.</strong> Email-only access does not verify inbox ownership.
               </aside>
               <aside class="notice error">
-                <strong>Revoked.</strong> This link no longer returns deck content.
+                <strong>Revoked.</strong> This link no longer returns presentation content.
               </aside>
               <div class="surface stack" aria-busy="true">
                 <span class="loading-line"></span>
@@ -78,7 +80,7 @@ class ProductComponents extends LitElement {
           </section>
           <section class="surface stack">
             <h2>Tabs and responsive records</h2>
-            <div class="tabs" role="tablist" aria-label="Deck detail views">
+            <div class="tabs" role="tablist" aria-label="Presentation page detail views">
               <button class="tab" role="tab" aria-selected="true">Overview</button>
               <button class="tab" role="tab" aria-selected="false">Visitors</button>
               <button class="tab" role="tab" aria-selected="false">Slides</button>
@@ -88,7 +90,7 @@ class ProductComponents extends LitElement {
               <table>
                 <thead>
                   <tr>
-                    <th>Deck</th>
+                    <th>Page</th>
                     <th>Owner</th>
                     <th>Access</th>
                     <th>Viewers</th>
@@ -96,8 +98,8 @@ class ProductComponents extends LitElement {
                 </thead>
                 <tbody>
                   <tr>
-                    <td data-label="Deck">
-                      <a class="primary-link" href="/decks">Northstar renewal</a>
+                    <td data-label="Page">
+                      <a class="primary-link" href="/pages">Northstar renewal</a>
                     </td>
                     <td data-label="Owner">ana@example.com</td>
                     <td data-label="Access"><span class="badge unverified">Allowed email</span></td>

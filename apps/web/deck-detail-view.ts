@@ -1,77 +1,16 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import type { AuthUser, DeckDetail, DeckPreview } from './deck-types.ts';
+import { formatDate } from './deck-detail-preview-view.ts';
+import type { DeckMutation, DetailTab } from './deck-detail-page-state.ts';
+import type { AuthUser, DeckDetail } from './deck-types.ts';
 
-export type DetailTab = 'preview' | 'overview' | 'visitors' | 'slides' | 'links' | 'access';
-
-type PreviewInput = {
-  readonly preview: DeckPreview | null;
-  readonly detail: DeckDetail;
-  readonly slideIndex: number;
-  readonly canManage: boolean;
-  readonly onMove: (delta: number) => void;
-  readonly onRename: (event: Event) => void;
-};
-
-export function renderDeckPreview(input: PreviewInput): TemplateResult {
-  const slide = input.preview?.slides[input.slideIndex];
-  const slideCount = input.preview?.slides.length ?? 0;
-  return html`<div class="detail-grid">
-    <div class="stack">
-      <div class="slide-stage">
-        <div class="slide-canvas">${slide === undefined ? nothing : unsafeHTML(slide.html)}</div>
-      </div>
-      <div class="actions" aria-label="Preview navigation">
-        <button
-          class="button secondary"
-          type="button"
-          ?disabled=${input.slideIndex === 0}
-          @click=${() => input.onMove(-1)}
-        >
-          Previous
-        </button>
-        <span class="caption"
-          >Slide ${slideCount === 0 ? 0 : input.slideIndex + 1} of ${slideCount}</span
-        >
-        <button
-          class="button secondary"
-          type="button"
-          ?disabled=${input.slideIndex >= slideCount - 1}
-          @click=${() => input.onMove(1)}
-        >
-          Next
-        </button>
-      </div>
-    </div>
-    <aside class="stack">
-      ${input.canManage
-        ? html`<form class="surface stack" @submit=${input.onRename}>
-            <h2>Deck identity</h2>
-            <div class="field">
-              <label for="deck-title">Title</label
-              ><input id="deck-title" name="title" .value=${input.detail.title} />
-            </div>
-            <button class="button secondary" type="submit">Save title</button>
-          </form>`
-        : nothing}
-      <section class="surface stack">
-        <h2>Revision history</h2>
-        ${input.detail.revisions.map(
-          (revision) =>
-            html`<div>
-              <strong>Revision ${revision.revisionNumber}</strong><br /><span class="caption"
-                >${revision.slideCount} slides · ${revision.createdByEmail} ·
-                ${formatDate(revision.createdAt)}</span
-              >
-            </div>`,
-        )}
-      </section>
-    </aside>
-  </div>`;
-}
+export { formatDate, renderDeckPreview } from './deck-detail-preview-view.ts';
+export type { DeckPreviewInput } from './deck-detail-preview-view.ts';
+export type { DetailTab } from './deck-detail-page-state.ts';
 
 type DeleteDialogInput = {
   readonly title: string;
+  readonly deleting: boolean;
+  readonly mutationError: string | null;
   readonly onClose: () => void;
   readonly onDelete: () => void;
 };
@@ -85,9 +24,20 @@ export function renderDeleteDialog(input: DeleteDialogInput): TemplateResult {
         Every share link and open viewer session is revoked immediately. Retained analytics then
         follow the workspace deletion and retention policy.
       </p>
+      ${input.mutationError
+        ? html`<p class="notice error" role="alert">${input.mutationError}</p>`
+        : nothing}
       <div class="actions">
-        <button class="button secondary" @click=${input.onClose}>Cancel</button
-        ><button class="button destructive" @click=${input.onDelete}>Delete deck</button>
+        <button class="button secondary" ?disabled=${input.deleting} @click=${input.onClose}>
+          Cancel</button
+        ><button
+          class="button destructive"
+          ?disabled=${input.deleting}
+          aria-busy=${String(input.deleting)}
+          @click=${input.onDelete}
+        >
+          ${input.deleting ? 'Deleting…' : 'Delete page'}
+        </button>
       </div>
     </div>
   </dialog>`;
@@ -101,6 +51,8 @@ type LoadedDetailInput = {
   readonly analyticsDenied: boolean;
   readonly analyticsError: string | null;
   readonly canManage: boolean;
+  readonly mutation: DeckMutation | null;
+  readonly mutationError: string | null;
   readonly panel: (tab: DetailTab) => TemplateResult;
   readonly onTab: (tab: DetailTab) => void;
   readonly onTabKey: (event: KeyboardEvent) => void;
@@ -111,10 +63,12 @@ type LoadedDetailInput = {
 };
 
 export function renderLoadedDeckPage(input: LoadedDetailInput): TemplateResult {
-  return html`<a class="skip-link" href="#main">Skip to deck</a>
+  const mutationBusy = input.mutation !== null;
+  const archiving = input.mutation === 'archive';
+  return html`<a class="skip-link" href="#main">Skip to page</a>
     <div class="shell product-shell">
       <header class="topbar">
-        <a class="brand" href="/decks"><span class="brand-mark"></span>Pagent / Decks</a
+        <a class="brand" href="/pages"><span class="brand-mark"></span>Pagent / Pages</a
         ><span class="caption">${input.user?.email ?? ''}</span>
       </header>
       <product-navigation current="decks"></product-navigation>
@@ -122,7 +76,7 @@ export function renderLoadedDeckPage(input: LoadedDetailInput): TemplateResult {
         <header class="page-head">
           <div>
             <p class="eyebrow">
-              ${input.detail.clientLabel ?? 'Deck detail'} · revision
+              ${input.detail.clientLabel ?? 'Presentation page'} · revision
               ${input.detail.latestRevisionNumber}
             </p>
             <h1>${input.detail.title}</h1>
@@ -133,14 +87,34 @@ export function renderLoadedDeckPage(input: LoadedDetailInput): TemplateResult {
           </div>
           ${input.canManage
             ? html`<div class="actions">
-                <button class="button secondary" @click=${input.onArchive}>
-                  ${input.detail.status === 'archived' ? 'Restore' : 'Archive'}</button
-                ><button class="button destructive" @click=${input.onOpenDelete}>Delete</button>
+                <button
+                  class="button secondary"
+                  ?disabled=${mutationBusy}
+                  aria-busy=${String(archiving)}
+                  @click=${input.onArchive}
+                >
+                  ${archiving
+                    ? input.detail.status === 'archived'
+                      ? 'Restoring…'
+                      : 'Archiving…'
+                    : input.detail.status === 'archived'
+                      ? 'Restore'
+                      : 'Archive'}</button
+                ><button
+                  class="button destructive"
+                  ?disabled=${mutationBusy}
+                  @click=${input.onOpenDelete}
+                >
+                  Delete
+                </button>
               </div>`
             : nothing}
         </header>
+        ${input.mutationError
+          ? html`<p class="notice error" role="alert">${input.mutationError}</p>`
+          : nothing}
         ${input.analyticsDenied
-          ? html`<p class="notice">Analytics access is managed separately from deck content.</p>`
+          ? html`<p class="notice">Analytics access is managed separately from page content.</p>`
           : nothing}
         ${input.analyticsError
           ? html`<p class="notice error" role="alert">${input.analyticsError}</p>`
@@ -150,6 +124,8 @@ export function renderLoadedDeckPage(input: LoadedDetailInput): TemplateResult {
       ${input.canManage
         ? renderDeleteDialog({
             title: input.detail.title,
+            deleting: input.mutation === 'delete',
+            mutationError: input.mutationError,
             onClose: input.onCloseDelete,
             onDelete: input.onDelete,
           })
@@ -160,7 +136,7 @@ export function renderLoadedDeckPage(input: LoadedDetailInput): TemplateResult {
 type DeckTabsInput = Pick<LoadedDetailInput, 'tabs' | 'activeTab' | 'panel' | 'onTab' | 'onTabKey'>;
 
 export function renderDeckTabs(input: DeckTabsInput): TemplateResult {
-  return html`<div class="tabs" role="tablist" aria-label="Deck detail" @keydown=${input.onTabKey}>
+  return html`<div class="tabs" role="tablist" aria-label="Page detail" @keydown=${input.onTabKey}>
       ${input.tabs.map(
         (tab) =>
           html`<button
@@ -192,12 +168,6 @@ export function renderDeckTabs(input: DeckTabsInput): TemplateResult {
 
 function tabLabel(tab: DetailTab): string {
   if (tab === 'links') return 'Share links';
-  if (tab === 'access') return 'Access & settings';
+  if (tab === 'access') return 'Permissions';
   return tab[0]?.toUpperCase() + tab.slice(1);
-}
-
-export function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
-    new Date(value),
-  );
 }

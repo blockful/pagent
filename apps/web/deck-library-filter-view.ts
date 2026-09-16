@@ -17,13 +17,13 @@ type LibraryFiltersInput = {
 };
 
 export function renderLibraryFilters(input: LibraryFiltersInput): TemplateResult {
-  return html`<form class="toolbar" @submit=${input.onSubmit} aria-label="Filter decks">
+  return html`<form class="toolbar" @submit=${input.onSubmit} aria-label="Filter pages">
     <div class="field">
       <label for="deck-search">Search</label>
       <input
         id="deck-search"
         type="search"
-        placeholder="Deck or client"
+        placeholder="Page or client"
         .value=${input.query}
         @input=${input.onQuery}
       />

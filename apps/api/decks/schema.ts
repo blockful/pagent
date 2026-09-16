@@ -1,12 +1,12 @@
 import type postgres from 'postgres';
-import { initAnalyticsSchema } from './schema-analytics.ts';
-import { initDeckFoundationSchema } from './schema-foundation.ts';
-import { initSharingSchema } from './schema-sharing.ts';
+import { initialDeckSchemaMigration } from './migrations/0001-initial-deck-schema.ts';
+import { runDeckMigrations, type DeckMigration } from './schema-migrations.ts';
 
-export type Database = ReturnType<typeof postgres>;
+export type Database = ReturnType<typeof postgres> | postgres.TransactionSql;
+export type DatabasePool = ReturnType<typeof postgres>;
 
-export async function initDeckSchema(database: Database): Promise<void> {
-  await initDeckFoundationSchema(database);
-  await initSharingSchema(database);
-  await initAnalyticsSchema(database);
+const deckMigrations: readonly DeckMigration[] = [initialDeckSchemaMigration];
+
+export async function initDeckSchema(database: DatabasePool): Promise<void> {
+  await runDeckMigrations(database, deckMigrations);
 }

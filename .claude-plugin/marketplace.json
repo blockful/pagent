@@ -5,9 +5,9 @@
     {
       "name": "pagent",
       "source": "./",
-      "description": "Let your AI agent show you real browser UI — forms it reads your answer back from, plus dashboards and reports you just view. Instead of faking a form in chat, your agent prints a short link; you open it, fill it out, and it keeps going. Works in any MCP client. Free to try, no signup.",
+      "description": "Give AI agents exactly two tools: write browser pages and read responses or presentation analytics. Pages can be temporary forms and documents or durable, shareable presentations. Works in any MCP client.",
       "category": "productivity",
-      "tags": ["generative-ui", "agentic-ui", "a2ui", "mcp", "cursor"]
+      "tags": ["generative-ui", "agentic-ui", "presentations", "analytics", "mcp"]
     }
   ]
 }

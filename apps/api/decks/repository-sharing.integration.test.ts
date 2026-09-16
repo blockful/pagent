@@ -5,12 +5,14 @@ import { publishDeck } from './repository-decks.ts';
 import {
   createShareLink,
   decideAccessRequest,
+  getAccessRequestStatus,
   getShareMetadata,
   getViewerDeck,
   grantViewerAccess,
   requestAccess,
   revokeShareLink,
 } from './repository-sharing.ts';
+import { suspendWorkspaceMember } from './repository-workspace-admin.ts';
 import { initDeckSchema } from './schema.ts';
 import { integrationDatabaseUrl } from './test-database.ts';
 
@@ -180,5 +182,50 @@ integration('share-link access repository', () => {
       name: 'ViewerSessionUnavailableError',
       state: 'revoked',
     });
+  });
+
+  it('removes share-management authority when a link creator is suspended', async () => {
+    const sender = await db.upsertUser({
+      email: 'sender@pagent.test',
+      handle: 'sender',
+      name: 'Sender',
+      avatarUrl: null,
+    });
+    const workspaces = await db.database()<{ workspace_id: string }[]>`
+      select workspace_id from decks where id = ${deckId}
+    `;
+    const workspaceId = workspaces[0]?.workspace_id;
+    if (workspaceId === undefined) throw new TypeError('Missing deck workspace');
+    await db.database()`
+      insert into workspace_members (workspace_id, user_id, role, status)
+      values (${workspaceId}, ${sender.id}, 'member', 'active')
+    `;
+    const delegated = await createShareLink(ownerId, deckId, {
+      name: 'Delegated review',
+      access_mode: 'allowed_email',
+      allowed_emails: [],
+      allowed_domains: [],
+    });
+    await db.database()`
+      update share_links set creator_id = ${sender.id} where id = ${delegated.id}
+    `;
+    const requested = await requestAccess(delegated.token, 'outsider@example.test');
+
+    await suspendWorkspaceMember(ownerId, sender.id);
+
+    await expect(
+      decideAccessRequest({
+        userId: sender.id,
+        linkId: delegated.id,
+        requestId: requested.requestId,
+        decision: 'approved',
+      }),
+    ).rejects.toMatchObject({ name: 'DeckForbiddenError' });
+    await expect(revokeShareLink(sender.id, deckId, delegated.id)).rejects.toMatchObject({
+      name: 'DeckForbiddenError',
+    });
+    await expect(getAccessRequestStatus(delegated.token, requested.requestId)).resolves.toBe(
+      'pending',
+    );
   });
 });

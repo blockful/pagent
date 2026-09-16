@@ -37,8 +37,8 @@
     {
       "id": 2,
       "type": "bargauge",
-      "title": "Funnel: created → viewed → submitted — show_ui (24h)",
-      "description": "Top-of-funnel (created) → render (viewed) → activation (submitted), scoped to format=a2ui since only show_ui pages can submit. Instant queries — one bar per stage.",
+      "title": "Funnel: created → viewed → submitted — interactive Pages (24h)",
+      "description": "Top-of-funnel (created) → render (viewed) → activation (submitted), scoped to interactive Pages (format=a2ui) since only interactive Pages can submit. Instant queries — one bar per stage.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
       "options": {
@@ -86,7 +86,7 @@
       "id": 4,
       "type": "stat",
       "title": "Render → submit activation (24h)",
-      "description": "Of show_ui pages that rendered, the share that got a user submission. Scoped to format=a2ui (html pages cannot submit). Pre-deploy unlabeled submitted samples are excluded, so the first 24h after rollout under-reads slightly. Pre-v2 proxy — no per-user identity yet.",
+      "description": "Of interactive Pages that rendered, the share that got a user submission. Scoped to format=a2ui (document Pages cannot submit). Pre-deploy unlabeled submitted samples are excluded, so the first 24h after rollout under-reads slightly. Pre-v2 proxy — no per-user identity yet.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 6, "x": 0, "y": 14 },
       "fieldConfig": {
@@ -113,8 +113,8 @@
     {
       "id": 5,
       "type": "bargauge",
-      "title": "Renders by format (24h)",
-      "description": "show_ui (a2ui) vs show_html demand.",
+      "title": "Page views by type (24h)",
+      "description": "Interactive Pages (a2ui) vs document Pages (html) demand.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 6, "x": 6, "y": 14 },
       "options": {
@@ -139,7 +139,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
       "options": {
         "mode": "markdown",
-        "content": "**North-star: active renders.** `pagent_pages_viewed_total` counts a page fetch only while the page is still `open` — the renderer's post-submit polling of the same endpoint is excluded at the source (app.ts). show_html pages are view-only and stay open, so every view of them counts as a render.\n\n**Funnel + activation are a2ui-scoped** — only show_ui pages can submit, so mixing formats would structurally deflate activation as show_html usage grows.\n\n**Pre-v2 limitation:** true *weekly active renderers* and *repeat rate* need per-user identity. Those land in **stage 2**, after v2 auth adds `owner_id` — then add per-owner active-renderer and week-2 repeat panels here.\n\nDo **not** treat raw counts as adoption in isolation — watch the render→submit activation and the funnel shape."
+        "content": "**North-star: active Page views.** `pagent_pages_viewed_total` counts a Page fetch only while it is still `open` — the renderer's post-submit polling of the same endpoint is excluded at the source (app.ts). Document Pages are view-only and stay open, so every view of them counts as a render.\n\n**Funnel + activation are interactive-Page scoped** — only interactive Pages can submit, so mixing Page types would structurally deflate activation as document usage grows.\n\n**Pre-v2 limitation:** true *weekly active renderers* and *repeat rate* need per-user identity. Those land in **stage 2**, after v2 auth adds `owner_id` — then add per-owner active-renderer and week-2 repeat panels here.\n\nDo **not** treat raw counts as adoption in isolation — watch the render→submit activation and the funnel shape."
       }
     }
   ]

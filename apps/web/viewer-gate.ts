@@ -31,18 +31,20 @@ type GateInput = {
 export function renderViewerGate(input: GateInput): TemplateResult {
   if (input.state === 'loading')
     return html`<p class="eyebrow">Opening securely</p>
-      <h1>${input.metadata?.deckTitle ?? 'Loading deck…'}</h1>
+      <h1>${input.metadata?.deckTitle ?? 'Loading page…'}</h1>
       <span class="loading-line" style="width:min(420px,100%)"></span>`;
   if (input.state === 'expired' || input.state === 'revoked' || input.state === 'deleted')
     return html`<p class="eyebrow">${input.state}</p>
       <h1>This sharing link is ${input.state}.</h1>
       <p class="lede">
-        Deck content is no longer available from this link. Contact the sender for a current link.
+        Page content is no longer available from this link. Contact the sender for a current link.
       </p>`;
   if (input.state === 'pending')
     return html`<p class="eyebrow">Request pending</p>
       <h1>The sender is reviewing access.</h1>
-      <p class="lede">No deck content is shown until they approve this link-specific request.</p>
+      <p class="lede">
+        No presentation content is shown until they approve this link-specific request.
+      </p>
       <button class="button" @click=${input.onCheckRequest}>Check status</button>`;
   if (input.state === 'denied')
     return html`<p class="eyebrow">Access denied</p>
@@ -71,7 +73,7 @@ export function renderViewerGate(input: GateInput): TemplateResult {
         <button class="button" type="submit">Request access</button>
       </form>`;
   if (input.state === 'error')
-    return html`<p class="eyebrow">Could not open deck</p>
+    return html`<p class="eyebrow">Could not open page</p>
       <h1>Something went wrong.</h1>
       <p class="notice error" role="alert">${input.message}</p>`;
   return html`<p class="eyebrow">Shared by ${input.metadata?.senderEmail}</p>
@@ -83,7 +85,7 @@ export function renderViewerGate(input: GateInput): TemplateResult {
           @click=${input.onRequestAccess}
           aria-busy=${String(input.submitting)}
         >
-          Open deck
+          Open presentation
         </button>`
       : html`<form class="stack" @submit=${input.onSubmitEmail}>
           <div class="field">
@@ -98,9 +100,9 @@ export function renderViewerGate(input: GateInput): TemplateResult {
 
 function renderNotice(input: GateInput): TemplateResult {
   return html`<div class="notice">
-    <strong>Privacy & analytics.</strong> Pagent records slide engagement only after the deck is
-    visible and you interact. <a href="/privacy">Read the privacy notice</a>.${input.metadata
-      ?.analyticsConsentRequired
+    <strong>Privacy & analytics.</strong> Pagent records slide engagement only after the
+    presentation is visible and you interact. <a href="/privacy">Read the privacy notice</a>.${input
+      .metadata?.analyticsConsentRequired
       ? html`<label class="choice"
           ><input type="checkbox" .checked=${input.consent} @change=${input.onConsentChange} /><span
             >I consent to engagement analytics.</span

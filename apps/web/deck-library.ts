@@ -1,6 +1,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { ApiError, apiEmpty, apiJson, loginUrl } from './deck-api.ts';
 import { renderLibraryFilters } from './deck-library-filter-view.ts';
+import { renderDeckTable } from './deck-library-table-view.ts';
 import { authUserSchema, deckListSchema, type AuthUser, type DeckListItem } from './deck-types.ts';
 import { buildDeckListQuery } from './deck-ui-state.ts';
 import { productLayoutStyles } from './product-layout-styles.ts';
@@ -60,7 +61,7 @@ class DeckLibrary extends LitElement {
       await this.loadDecks();
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) this.unauthorized = true;
-      else this.error = error instanceof Error ? error.message : 'Could not load decks';
+      else this.error = error instanceof Error ? error.message : 'Could not load pages';
     } finally {
       this.loading = false;
     }
@@ -90,7 +91,7 @@ class DeckLibrary extends LitElement {
     try {
       await this.loadDecks();
     } catch (error) {
-      this.error = error instanceof Error ? error.message : 'Could not filter decks';
+      this.error = error instanceof Error ? error.message : 'Could not filter pages';
     } finally {
       this.loading = false;
     }
@@ -138,7 +139,7 @@ class DeckLibrary extends LitElement {
   render() {
     if (this.unauthorized) return this.renderSignedOut();
     return html`
-      <a class="skip-link" href="#main">Skip to decks</a>
+      <a class="skip-link" href="#main">Skip to pages</a>
       <div class="shell product-shell">
         ${this.renderTopbar()}
         <product-navigation current="decks"></product-navigation>
@@ -146,7 +147,7 @@ class DeckLibrary extends LitElement {
           <header class="page-head">
             <div>
               <p class="eyebrow">Durable presentations</p>
-              <h1>Decks</h1>
+              <h1>Pages</h1>
               <p class="lede">
                 Publish from your agent, control every audience, and read engagement without
                 guessing.
@@ -169,7 +170,7 @@ class DeckLibrary extends LitElement {
             onSender: (event) => this.updatePerson(event, 'sender'),
           })}
           ${this.error ? html`<p class="notice error" role="alert">${this.error}</p>` : nothing}
-          ${this.loading ? this.renderLoading() : this.renderDecks()}
+          ${this.loading ? this.renderLoading() : renderDeckTable(this.decks)}
         </main>
       </div>
     `;
@@ -190,82 +191,22 @@ class DeckLibrary extends LitElement {
       <main class="page">
         <section class="surface empty">
           <p class="eyebrow">Private workspace</p>
-          <h1>Sign in to manage decks.</h1>
+          <h1>Sign in to manage pages.</h1>
           <p class="lede">
             Your links, viewer identities, and analytics are only available to authorized workspace
             members.
           </p>
-          <a class="button" href=${loginUrl('/decks')}>Continue securely</a>
+          <a class="button" href=${loginUrl('/pages')}>Continue securely</a>
         </section>
       </main>
     </div>`;
   }
 
   private renderLoading() {
-    return html`<section class="surface stack" aria-busy="true" aria-label="Loading decks">
+    return html`<section class="surface stack" aria-busy="true" aria-label="Loading pages">
       ${[1, 2, 3, 4].map(() => html`<span class="loading-line"></span>`)}
     </section>`;
   }
-
-  private renderDecks() {
-    if (this.decks.length === 0) {
-      return html`<section class="surface empty">
-        <h2>No decks in this view</h2>
-        <p class="muted">
-          Publish with the <span class="mono">publish_deck</span> MCP tool, or change the filters
-          above.
-        </p>
-      </section>`;
-    }
-    return html`<div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Deck</th>
-            <th>Owner</th>
-            <th>Sender</th>
-            <th>Status</th>
-            <th>Access</th>
-            <th>Links</th>
-            <th>Viewers</th>
-            <th>Last viewed</th>
-            <th>Updated</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${this.decks.map((deck) => this.renderDeck(deck))}
-        </tbody>
-      </table>
-    </div>`;
-  }
-
-  private renderDeck(deck: DeckListItem) {
-    return html`<tr>
-      <td data-label="Deck">
-        <a class="primary-link" href=${`/decks/${deck.id}`}>${deck.title}</a>
-      </td>
-      <td data-label="Owner">${deck.ownerEmail}</td>
-      <td data-label="Sender">${deck.latestSenderEmail ?? '—'}</td>
-      <td data-label="Status"><span class=${`badge ${deck.status}`}>${deck.status}</span></td>
-      <td data-label="Access">${accessLabel(deck.accessMode)}</td>
-      <td data-label="Links" class="mono">${deck.linkCount}</td>
-      <td data-label="Viewers" class="mono">${deck.uniqueViewers}</td>
-      <td data-label="Last viewed">${formatDate(deck.lastViewed)}</td>
-      <td data-label="Updated">${formatDate(deck.updatedAt)}</td>
-    </tr>`;
-  }
-}
-
-function accessLabel(mode: DeckListItem['accessMode']): string {
-  if (mode === 'allowed_email') return 'Allowed email';
-  if (mode === 'authenticated') return 'Authenticated';
-  if (mode === 'anyone') return 'Anyone';
-  return 'Not shared';
-}
-
-function formatDate(value: string | null): string {
-  if (value === null) return '—';
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
 }
 
 customElements.define('deck-library', DeckLibrary);

@@ -96,7 +96,7 @@ function renderOverview(analytics: DeckAnalytics | null): TemplateResult {
   if (analytics === null) return html``;
   const overview = analytics.overview;
   return html`<div class="stack">
-    <section class="metric-grid" aria-label="Deck engagement overview">
+    <section class="metric-grid" aria-label="Page engagement overview">
       ${metric('Visits', overview.totalVisits)}${metric(
         'Unique viewers',
         overview.uniqueViewers,

@@ -186,6 +186,12 @@ export async function deleteViewerAnalytics(
         and lower(v.viewer_email) = ${normalized}
       returning v.id
     `;
+    await tx`
+      delete from viewer_sessions vs using share_links sl
+      where vs.share_link_id = sl.id and sl.deck_id = ${deckId}
+        and lower(vs.viewer_email) = ${normalized}
+        and not exists (select 1 from visits v where v.viewer_session_id = vs.id)
+    `;
     const emailHash = createHash('sha256').update(normalized).digest('hex');
     await tx`
       insert into audit_log (workspace_id, deck_id, actor_user_id, action, details)
@@ -223,11 +229,19 @@ export async function getAuditLog(userId: string, deckId: string): Promise<reado
 }
 
 export async function purgeExpiredAnalytics(): Promise<number> {
-  const rows = await db.database()<{ id: string }[]>`
-    delete from visits v using share_links sl, decks d, workspaces w
-    where v.share_link_id = sl.id and sl.deck_id = d.id and d.workspace_id = w.id
-      and v.started_at < now() - make_interval(days => w.analytics_retention_days)
-    returning v.id
-  `;
-  return rows.length;
+  return db.database().begin(async (tx) => {
+    const rows = await tx<{ id: string }[]>`
+      delete from visits v using share_links sl, decks d, workspaces w
+      where v.share_link_id = sl.id and sl.deck_id = d.id and d.workspace_id = w.id
+        and v.started_at < now() - make_interval(days => w.analytics_retention_days)
+      returning v.id
+    `;
+    await tx`
+      delete from viewer_sessions vs using share_links sl, decks d, workspaces w
+      where vs.share_link_id = sl.id and sl.deck_id = d.id and d.workspace_id = w.id
+        and vs.created_at < now() - make_interval(days => w.analytics_retention_days)
+        and not exists (select 1 from visits v where v.viewer_session_id = vs.id)
+    `;
+    return rows.length;
+  });
 }

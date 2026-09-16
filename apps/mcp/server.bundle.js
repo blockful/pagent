@@ -21489,12 +21489,12 @@ var HTML_MAX_BYTES = 1e6;
 
 // apps/api/mcp/tools.ts
 var InsufficientScopeError = class extends Error {
+  requiredScope;
   constructor(requiredScope) {
     super(`Insufficient OAuth scope: ${requiredScope} is required`);
-    this.requiredScope = requiredScope;
     this.name = "InsufficientScopeError";
+    this.requiredScope = requiredScope;
   }
-  requiredScope;
 };
 function ownerIdFromExtra(extra) {
   const sub = extra?.authInfo?.extra?.sub;
@@ -21558,7 +21558,9 @@ function registerPagentTools(server2, ops) {
       const publishInput = input.page_id === void 0 ? base : { ...base, update_deck_id: input.page_id };
       const written = await ops.writePresentation(publishInput, publisher);
       return {
-        content: [{ type: "text", text: `Presentation page ready: ${written.preview_url}` }],
+        content: [
+          { type: "text", text: `Presentation page ready: ${written.preview_url}` }
+        ],
         structuredContent: { type: "presentation", durable: true, ...written }
       };
     }
@@ -21738,7 +21740,7 @@ var restOps = {
     return analyticsResultSchema.parse(await res.json());
   }
 };
-var server = new McpServer({ name: "pagent", version: "0.0.1" });
+var server = new McpServer({ name: "pagent", version: "0.1.0" });
 registerPagentTools(server, restOps);
 if (pathToFileURL(process.argv[1]).href === import.meta.url) {
   await server.connect(new StdioServerTransport());

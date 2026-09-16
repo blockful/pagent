@@ -137,7 +137,14 @@ export async function revokeShareLink(
       update share_links sl set revoked_at = now(), updated_at = now()
       from decks d
       where sl.id = ${linkId} and sl.deck_id = ${deckId} and d.id = sl.deck_id
-        and d.deleted_at is null and (d.owner_id = ${userId} or sl.creator_id = ${userId})
+        and d.deleted_at is null and (
+          d.owner_id = ${userId}
+          or sl.creator_id = ${userId} and exists (
+            select 1 from workspace_members wm
+            where wm.workspace_id = d.workspace_id and wm.user_id = ${userId}
+              and wm.status = 'active'
+          )
+        )
       returning d.workspace_id
     `;
     const workspaceId = rows[0]?.workspace_id;

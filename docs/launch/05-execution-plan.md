@@ -1,5 +1,9 @@
 # Pagent Launch — Execution Plan
 
+> **Historical execution snapshot (superseded 2026-09-16).** Do not use this as
+> the current engineering plan. It predates the Page model, durable
+> presentation analytics, `/admin`, and the exact `write`/`read` MCP contract.
+
 > 2026-06-04. The "what we need to do" plan: everything from here to launched, sequenced. Built on [01 audit](./01-current-state-audit.md), [02 copy list](./02-copy-and-app-change-list.md), [03 research](./03-research-agent-tool-launches.md), [04 GTM plan](./04-gtm-launch-plan.md).
 >
 > **For workers:** the code workstreams (A, B) can be expanded into detailed TDD implementation plans under `docs/superpowers/plans/` and executed via `superpowers:subagent-driven-development`. The GTM/ops workstreams (D–G) are operational checklists, not code.

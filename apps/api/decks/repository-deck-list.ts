@@ -18,7 +18,7 @@ export type DeckListItem = {
   readonly status: 'active' | 'archived';
   readonly accessMode: 'anyone' | 'allowed_email' | 'authenticated' | null;
   readonly linkCount: number;
-  readonly uniqueViewers: number;
+  readonly uniqueViewers: number | null;
   readonly lastViewed: Date | null;
   readonly updatedAt: Date;
 };
@@ -40,7 +40,7 @@ export async function listDecks(
       status: 'active' | 'archived';
       access_mode: 'anyone' | 'allowed_email' | 'authenticated' | null;
       link_count: string;
-      unique_viewers: string;
+      unique_viewers: string | null;
       last_viewed: Date | null;
       updated_at: Date;
     }[]
@@ -49,16 +49,18 @@ export async function listDecks(
       latest_link.creator_id as latest_sender_id,
       sender.email as latest_sender_email, d.status, latest_link.access_mode,
       (select count(*) from share_links sl where sl.deck_id = d.id)::text as link_count,
-      (
+      case when analytics_access.can_view_all or analytics_access.can_view_own then (
         select count(distinct coalesce(lower(v.viewer_email), v.viewer_session_id::text))
         from visits v join share_links sl on sl.id = v.share_link_id
         where sl.deck_id = d.id and v.excluded = false
-      )::text as unique_viewers,
-      (
+          and (analytics_access.can_view_all or sl.creator_id = ${userId})
+      )::text else null end as unique_viewers,
+      case when analytics_access.can_view_all or analytics_access.can_view_own then (
         select max(v.started_at) from visits v
         join share_links sl on sl.id = v.share_link_id
         where sl.deck_id = d.id and v.excluded = false
-      ) as last_viewed,
+          and (analytics_access.can_view_all or sl.creator_id = ${userId})
+      ) else null end as last_viewed,
       d.updated_at
     from decks d
     join users owner on owner.id = d.owner_id
@@ -68,6 +70,33 @@ export async function listDecks(
       order by sl.created_at desc limit 1
     ) latest_link on true
     left join users sender on sender.id = latest_link.creator_id
+    left join lateral (
+      select
+        d.owner_id = ${userId} or exists (
+          select 1 from workspace_members wm
+          where wm.workspace_id = d.workspace_id and wm.user_id = ${userId}
+            and wm.status = 'active' and (
+              d.analytics_visibility = 'workspace'
+              or d.analytics_visibility = 'selected' and exists (
+                select 1 from deck_analytics_subjects das
+                where das.deck_id = d.id and das.subject_type = 'user'
+                  and das.subject_id = ${userId}
+              )
+              or d.analytics_visibility = 'team' and exists (
+                select 1 from deck_analytics_subjects das
+                join teams t on t.id = das.subject_id and t.workspace_id = d.workspace_id
+                join team_members tm on tm.team_id = t.id and tm.user_id = ${userId}
+                where das.deck_id = d.id and das.subject_type = 'team'
+              )
+            )
+        ) as can_view_all,
+        exists (
+          select 1 from workspace_members wm
+          join share_links own_link on own_link.deck_id = d.id and own_link.creator_id = wm.user_id
+          where wm.workspace_id = d.workspace_id and wm.user_id = ${userId}
+            and wm.status = 'active'
+        ) as can_view_own
+    ) analytics_access on true
     where d.deleted_at is null
       and (${filters.owner ?? null}::uuid is null or d.owner_id = ${filters.owner ?? null})
       and (${filters.sender ?? null}::uuid is null or latest_link.creator_id = ${filters.sender ?? null})
@@ -75,11 +104,14 @@ export async function listDecks(
         ${filters.scope} = 'mine' and d.owner_id = ${userId}
         or ${filters.scope} = 'shared' and exists (
           select 1 from deck_collaborators dc
-          where dc.deck_id = d.id and dc.user_id = ${userId}
+          join workspace_members wm
+            on wm.workspace_id = d.workspace_id and wm.user_id = dc.user_id
+          where dc.deck_id = d.id and dc.user_id = ${userId} and wm.status = 'active'
         )
         or ${filters.scope} = 'team' and exists (
           select 1 from workspace_members wm
-          where wm.workspace_id = d.workspace_id and wm.user_id = ${userId} and wm.status = 'active'
+          where wm.workspace_id = d.workspace_id and wm.user_id = ${userId}
+            and wm.status = 'active' and wm.role in ('owner', 'admin')
         )
       )
       and (
@@ -113,7 +145,7 @@ export async function listDecks(
     status: row.status,
     accessMode: row.access_mode,
     linkCount: Number(row.link_count),
-    uniqueViewers: Number(row.unique_viewers),
+    uniqueViewers: row.unique_viewers === null ? null : Number(row.unique_viewers),
     lastViewed: row.last_viewed,
     updatedAt: row.updated_at,
   }));

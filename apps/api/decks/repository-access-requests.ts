@@ -63,7 +63,14 @@ export async function decideAccessRequest(input: AccessDecisionInput): Promise<v
       from share_links sl, decks d
       where ar.id = ${requestId} and ar.share_link_id = ${linkId}
         and sl.id = ar.share_link_id and d.id = sl.deck_id and d.deleted_at is null
-        and (d.owner_id = ${userId} or sl.creator_id = ${userId})
+        and (
+          d.owner_id = ${userId}
+          or sl.creator_id = ${userId} and exists (
+            select 1 from workspace_members wm
+            where wm.workspace_id = d.workspace_id and wm.user_id = ${userId}
+              and wm.status = 'active'
+          )
+        )
       returning d.id as deck_id, d.workspace_id
     `;
     const row = rows[0];

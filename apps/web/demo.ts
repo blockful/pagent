@@ -1,7 +1,8 @@
 /**
- * Always-on, zero-install demo at /demo. Renders both Pagent tools side by side
- * with no backend page: a live `show_ui` A2UI form (the result is shown inline
- * instead of POSTed to an agent) and a sandboxed `show_html` dashboard.
+ * Always-on, zero-install demo at /demo. Renders two Pagent Page types side by
+ * side with no backend page: a live interactive Page written with `write` (the
+ * result is shown inline instead of POSTed to an agent) and a sandboxed
+ * document Page.
  *
  * Reuses the same building blocks as the real renderer:
  *  - v0_9.MessageProcessor + basicCatalog + <a2ui-surface> (see components-showcase.ts / main.ts)
@@ -17,7 +18,7 @@ import { createSandboxedIframe } from './html-renderer.ts';
 
 /**
  * A small but real A2UI surface — the kind of thing an agent emits via
- * show_ui. Built as a typed function (same shape as showcase-spec.ts) so tsc
+ * `write`. Built as a typed function (same shape as showcase-spec.ts) so tsc
  * checks the literal against the A2UI message types — no `as unknown as`.
  */
 function buildDemoFormSpec() {
@@ -61,14 +62,12 @@ function buildDemoFormSpec() {
     },
   ];
 
-  const V = 'v0.9' as const;
   return [
-    { version: V, createSurface: { surfaceId: 'demo', catalogId: basicCatalog.id } },
-    { version: V, updateComponents: { surfaceId: 'demo', components } },
-  ];
+    { version: 'v0.9', createSurface: { surfaceId: 'demo', catalogId: basicCatalog.id } },
+    { version: 'v0.9', updateComponents: { surfaceId: 'demo', components } },
+  ] satisfies v0_9.A2uiMessage[];
 }
 
-/** A small static dashboard — the kind of thing an agent emits via show_html. */
 const DEMO_DASHBOARD_HTML = `<style>
   body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 20px; color: #1b1b1b; background: #fff; }
   h1 { font-size: 18px; margin: 0 0 2px; }
@@ -83,7 +82,7 @@ const DEMO_DASHBOARD_HTML = `<style>
   .h4 { height: 96% } .h5 { height: 70% } .h6 { height: 88% }
 </style>
 <h1>Test results — last run</h1>
-<p class="sub">Rendered by your agent with show_html</p>
+<p class="sub">Rendered by your agent as a document Page</p>
 <div class="row">
   <div class="stat"><div class="v">142</div><div class="l">passed</div></div>
   <div class="stat"><div class="v">3</div><div class="l">failed</div></div>
@@ -237,10 +236,10 @@ class PagentDemo extends SignalWatcher(LitElement) {
       <h1 class="demo-title">See what your agent can show you</h1>
       <div class="grid">
         <section class="panel">
-          <h2><span class="k">show_ui</span> — ask, read the answer back</h2>
+          <h2><span class="k">write</span> — interactive Page, then read the answer back</h2>
           <p class="hint">
-            A real Pagent form. Fill it in and submit — in a live session your agent receives the
-            result and continues.
+            A real Pagent interactive Page. Fill it in and submit — in a live session your agent
+            reads the response and continues.
           </p>
           ${surfaces.map(([, s]) => html`<a2ui-surface .surface=${s}></a2ui-surface>`)}
           ${this.submitted
@@ -251,9 +250,9 @@ ${JSON.stringify(this.submitted, null, 2)}</pre
             : nothing}
         </section>
         <section class="panel">
-          <h2><span class="k">show_html</span> — show a dashboard, view-only</h2>
+          <h2><span class="k">write</span> — document Page, view-only</h2>
           <p class="hint">
-            Agents can also render rich, sandboxed visualizations you just look at — no JavaScript,
+            Agents can also write rich, sandboxed document Pages you just look at — no JavaScript,
             fully isolated.
           </p>
           <div class="dash">${this.dashboardFrame}</div>

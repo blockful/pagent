@@ -13,17 +13,18 @@ const ALL_DIRECTIVES = [
 ] as const;
 
 describe('buildCsp', () => {
-  it("includes 'self' for connect-src when VITE_API_URL is unset", () => {
+  it('includes only fixed application origins when VITE_API_URL is unset', () => {
     const csp = buildCsp(undefined);
     expect(csp).toContain("connect-src 'self'");
-    // Must not accidentally include extra origins.
     const connectDir = csp.split('; ').find((d) => d.startsWith('connect-src'));
-    expect(connectDir).toBe("connect-src 'self'");
+    expect(connectDir).toBe("connect-src 'self' https://fonts.googleapis.com");
   });
 
   it('includes API origin for connect-src when VITE_API_URL is set', () => {
     const csp = buildCsp('https://api.pagent.link');
-    expect(csp).toContain("connect-src 'self' https://api.pagent.link");
+    expect(csp).toContain(
+      "connect-src 'self' https://api.pagent.link https://fonts.googleapis.com",
+    );
   });
 
   it('strips path and query from VITE_API_URL (uses origin only)', () => {
@@ -33,10 +34,10 @@ describe('buildCsp', () => {
     expect(csp).not.toContain('?x=1');
   });
 
-  it("falls back to 'self' on malformed VITE_API_URL", () => {
+  it('falls back to fixed application origins on malformed VITE_API_URL', () => {
     const csp = buildCsp('not a url');
     const connectDir = csp.split('; ').find((d) => d.startsWith('connect-src'));
-    expect(connectDir).toBe("connect-src 'self'");
+    expect(connectDir).toBe("connect-src 'self' https://fonts.googleapis.com");
   });
 
   it('contains all required directives regardless of VITE_API_URL value', () => {

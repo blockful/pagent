@@ -1,9 +1,24 @@
-import { LitElement, html, type PropertyValues } from 'lit';
+import { LitElement, type PropertyValues } from 'lit';
 import { ApiError, apiEmpty, apiJson, loginUrl } from './deck-api.ts';
 import './deck-analytics-panel.ts';
 import './deck-access-panel.ts';
 import './deck-sharing-panel.ts';
-import { renderDeckPreview, renderLoadedDeckPage, type DetailTab } from './deck-detail-view.ts';
+import {
+  renderDeckDetailPanel,
+  renderLoadingDeckDetailPage,
+  renderUnauthorizedDeckDetailPage,
+  renderUnavailableDeckDetailPage,
+} from './deck-detail-page-view.ts';
+import {
+  availableDeckDetailTabs,
+  canManageDeck,
+  createDeckDetailPageState,
+  deckDetailPageProperties,
+  tabFromHash,
+  type DeckMutation,
+  type DetailTab,
+} from './deck-detail-page-state.ts';
+import { renderLoadedDeckPage } from './deck-detail-view.ts';
 import {
   analyticsSchema,
   authUserSchema,
@@ -18,23 +33,8 @@ import { productLayoutStyles } from './product-layout-styles.ts';
 import { productStyles } from './product-styles.ts';
 import { nextPreviewIndex, nextRovingTab } from './deck-ui-state.ts';
 
-const tabs: readonly DetailTab[] = ['preview', 'overview', 'visitors', 'slides', 'links', 'access'];
-
 class DeckDetailPage extends LitElement {
-  static properties = {
-    deckId: { type: String },
-    user: { state: true },
-    detail: { state: true },
-    preview: { state: true },
-    analytics: { state: true },
-    activeTab: { state: true },
-    loading: { state: true },
-    unauthorized: { state: true },
-    error: { state: true },
-    analyticsDenied: { state: true },
-    analyticsError: { state: true },
-    previewIndex: { state: true },
-  };
+  static properties = { ...deckDetailPageProperties, accessDenied: { state: true } };
   static styles = [productStyles, productLayoutStyles];
 
   declare deckId: string;
@@ -45,25 +45,19 @@ class DeckDetailPage extends LitElement {
   declare activeTab: DetailTab;
   declare loading: boolean;
   declare unauthorized: boolean;
+  declare accessDenied: boolean;
   declare error: string | null;
   declare analyticsDenied: boolean;
   declare analyticsError: string | null;
   declare previewIndex: number;
+  declare mutation: DeckMutation | null;
+  declare mutationError: string | null;
 
   constructor() {
     super();
     this.deckId = '';
-    this.user = null;
-    this.detail = null;
-    this.preview = null;
-    this.analytics = null;
-    this.activeTab = tabFromHash();
-    this.loading = true;
-    this.unauthorized = false;
-    this.error = null;
-    this.analyticsDenied = false;
-    this.analyticsError = null;
-    this.previewIndex = 0;
+    Object.assign(this, createDeckDetailPageState(location.hash));
+    this.accessDenied = false;
   }
 
   connectedCallback(): void {
@@ -87,12 +81,13 @@ class DeckDetailPage extends LitElement {
   }
 
   private onHashChange = (): void => {
-    this.activeTab = tabFromHash();
+    this.activeTab = tabFromHash(location.hash);
   };
 
   private async load(): Promise<void> {
     this.loading = true;
     this.error = null;
+    this.accessDenied = false;
     this.analyticsDenied = false;
     this.analyticsError = null;
     try {
@@ -119,7 +114,10 @@ class DeckDetailPage extends LitElement {
       if (!this.availableTabs().includes(this.activeTab)) this.chooseTab('preview');
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) this.unauthorized = true;
-      else this.error = error instanceof Error ? error.message : 'Could not load deck';
+      else {
+        this.accessDenied = error instanceof ApiError && error.status === 403;
+        this.error = 'Page unavailable';
+      }
     } finally {
       this.loading = false;
     }
@@ -140,14 +138,11 @@ class DeckDetailPage extends LitElement {
   }
 
   private availableTabs(): readonly DetailTab[] {
-    const analyticsTabs: readonly DetailTab[] =
-      this.analytics === null ? [] : ['overview', 'visitors', 'slides'];
-    const managementTabs: readonly DetailTab[] = this.canManage() ? ['links', 'access'] : [];
-    return ['preview', ...analyticsTabs, ...managementTabs];
+    return availableDeckDetailTabs(this.analytics !== null, this.canManage());
   }
 
   private canManage(): boolean {
-    return this.user !== null && this.detail !== null && this.user.id === this.detail.ownerId;
+    return canManageDeck(this.user, this.detail);
   }
 
   private movePreview(delta: number): void {
@@ -160,70 +155,94 @@ class DeckDetailPage extends LitElement {
 
   private async rename(event: Event): Promise<void> {
     event.preventDefault();
+    if (this.mutation !== null) return;
     if (!(event.currentTarget instanceof HTMLFormElement)) return;
     const title = new FormData(event.currentTarget).get('title');
-    if (typeof title !== 'string' || title.trim().length === 0) return;
-    await apiEmpty(`/v1/decks/${this.deckId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ title }),
-    });
-    await this.load();
+    if (typeof title !== 'string' || title.trim().length === 0) {
+      this.mutationError = 'Enter a title before saving.';
+      return;
+    }
+    this.mutation = 'rename';
+    this.mutationError = null;
+    try {
+      await apiEmpty(`/v1/decks/${this.deckId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: title.trim() }),
+      });
+      if (this.detail !== null) this.detail = { ...this.detail, title: title.trim() };
+    } catch (error) {
+      this.mutationError = error instanceof Error ? error.message : 'Could not save title.';
+    } finally {
+      this.mutation = null;
+    }
   }
 
   private async toggleArchive(): Promise<void> {
+    if (this.mutation !== null || this.detail === null) return;
     const action = this.detail?.status === 'archived' ? 'restore' : 'archive';
-    await apiEmpty(`/v1/decks/${this.deckId}/${action}`, { method: 'POST' });
-    await this.load();
+    this.mutation = 'archive';
+    this.mutationError = null;
+    try {
+      await apiEmpty(`/v1/decks/${this.deckId}/${action}`, { method: 'POST' });
+      this.detail = {
+        ...this.detail,
+        status: action === 'archive' ? 'archived' : 'active',
+      };
+    } catch (error) {
+      this.mutationError =
+        error instanceof Error
+          ? error.message
+          : action === 'archive'
+            ? 'Could not archive page.'
+            : 'Could not restore page.';
+    } finally {
+      this.mutation = null;
+    }
   }
 
   private openDelete(): void {
+    this.mutationError = null;
     const dialog = this.renderRoot.querySelector('#delete-dialog');
     if (dialog instanceof HTMLDialogElement) dialog.showModal();
   }
 
   private closeDelete(): void {
+    if (this.mutation === 'delete') return;
     const dialog = this.renderRoot.querySelector('#delete-dialog');
     if (dialog instanceof HTMLDialogElement) dialog.close();
   }
 
   private async deleteDeck(): Promise<void> {
-    await apiEmpty(`/v1/decks/${this.deckId}`, { method: 'DELETE' });
-    location.assign('/decks');
+    if (this.mutation !== null) return;
+    this.mutation = 'delete';
+    this.mutationError = null;
+    try {
+      await apiEmpty(`/v1/decks/${this.deckId}`, { method: 'DELETE' });
+      location.assign('/pages');
+    } catch (error) {
+      this.mutationError = error instanceof Error ? error.message : 'Could not delete page.';
+    } finally {
+      this.mutation = null;
+    }
   }
 
   render() {
-    if (this.unauthorized)
-      return html`<section class="shell">
-        <main class="page">
-          <div class="surface empty">
-            <h1>Sign in to view this deck.</h1>
-            <a class="button" href=${loginUrl(location.pathname)}>Continue securely</a>
-          </div>
-        </main>
-      </section>`;
-    if (this.loading)
-      return html`<section class="shell">
-        <main class="page">
-          <div class="surface stack" aria-busy="true">
-            ${[1, 2, 3, 4].map(() => html`<span class="loading-line"></span>`)}
-          </div>
-        </main>
-      </section>`;
+    if (this.unauthorized) return renderUnauthorizedDeckDetailPage(loginUrl(location.pathname));
+    if (this.loading) return renderLoadingDeckDetailPage();
     if (this.error || this.detail === null)
-      return html`<section class="shell">
-        <main class="page">
-          <p class="notice error" role="alert">${this.error ?? 'Deck unavailable'}</p>
-        </main>
-      </section>`;
+      return renderUnavailableDeckDetailPage(this.accessDenied);
+    const detail = this.detail;
     return renderLoadedDeckPage({
       user: this.user,
-      detail: this.detail,
+      detail,
       tabs: this.availableTabs(),
       activeTab: this.activeTab,
       analyticsDenied: this.analyticsDenied,
       analyticsError: this.analyticsError,
       canManage: this.canManage(),
-      panel: (tab) => this.renderPanel(tab),
+      mutation: this.mutation,
+      mutationError: this.mutationError,
+      panel: (tab) => this.renderPanel(tab, detail),
       onTab: (tab) => this.chooseTab(tab),
       onTabKey: (event) => this.onTabKey(event),
       onArchive: () => void this.toggleArchive(),
@@ -233,32 +252,20 @@ class DeckDetailPage extends LitElement {
     });
   }
 
-  private renderPanel(tab: DetailTab) {
-    if (this.detail === null) return html``;
-    if (tab === 'preview')
-      return renderDeckPreview({
-        preview: this.preview,
-        detail: this.detail,
-        slideIndex: this.previewIndex,
-        canManage: this.canManage(),
-        onMove: (delta) => this.movePreview(delta),
-        onRename: (event) => void this.rename(event),
-      });
-    if (tab === 'links')
-      return html`<deck-sharing-panel .deckId=${this.deckId}></deck-sharing-panel>`;
-    if (tab === 'access')
-      return html`<deck-access-panel .deckId=${this.deckId}></deck-access-panel>`;
-    return html`<deck-analytics-panel
-      .analytics=${this.analytics}
-      .deckId=${this.deckId}
-      .view=${tab}
-    ></deck-analytics-panel>`;
+  private renderPanel(tab: DetailTab, detail: DeckDetail) {
+    return renderDeckDetailPanel(tab, {
+      deckId: this.deckId,
+      detail,
+      preview: this.preview,
+      analytics: this.analytics,
+      previewIndex: this.previewIndex,
+      canManage: this.canManage(),
+      renaming: this.mutation === 'rename',
+      mutationError: this.mutationError,
+      onMove: (delta) => this.movePreview(delta),
+      onRename: (event) => void this.rename(event),
+    });
   }
-}
-
-function tabFromHash(): DetailTab {
-  const value = location.hash.replace('#', '');
-  return tabs.find((tab) => tab === value) ?? 'preview';
 }
 
 customElements.define('deck-detail-page', DeckDetailPage);

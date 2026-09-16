@@ -1,20 +1,30 @@
-# PRD: Pagent v0.1.0 Deck Sharing and Engagement Analytics
+# PRD: Pagent v0.1.0 Secure Presentation Pages and Engagement Analytics
 
-**Status:** Draft for product review  
+**Status:** Binding implementation contract
 **Target release:** v0.1.0  
 **Date:** 2026-09-15  
 **Product:** Pagent  
-**Working name:** Decks
+**Working name:** Presentation pages
+
+> **Binding clarification — 2026-09-16:** Page is Pagent's single product
+> primitive. A presentation (historically called a Deck in this document and
+> in internal storage) is a durable, revisioned page type. Agents receive
+> exactly two MCP tools: `write` creates interactive, document, or presentation
+> pages; `read` retrieves an interactive response or authorized presentation
+> analytics. The former tool names are removed with no compatibility aliases.
 
 ## 1. Executive summary
 
-Pagent v0.1.0 turns an agent-generated presentation into a durable, controlled client-facing deck. A sender can publish a deck, create one or more share links, decide who may open each link, and understand how each recipient engaged with the proposal.
+Pagent v0.1.0 turns an agent-generated presentation into a durable, controlled
+client-facing page. A sender can publish the presentation page, create one or
+more share links, decide who may open each link, and understand how each
+recipient engaged with the proposal.
 
 The release adds four connected capabilities:
 
-1. **Controlled deck sharing:** public links, allowed-email access, or creator-required authentication.
+1. **Controlled page sharing:** public links, allowed-email access, or creator-required authentication.
 2. **Viewer engagement analytics:** who viewed, active time, slides viewed, most-engaged slide, completion, and drop-off.
-3. **Deck management:** one dashboard to preview decks, manage links and access, revoke sharing, and inspect engagement.
+3. **Page management:** one dashboard to preview presentation pages, manage links and access, revoke sharing, and inspect engagement.
 4. **Internal analytics permissions:** analytics can remain private or be shared with selected people, teams, or the verified workspace/domain.
 
 Viewer access and internal analytics access are intentionally separate. Giving a client access to a deck never grants access to its analytics. Sharing analytics with a colleague never changes who can view the client deck.
@@ -24,14 +34,15 @@ Viewer access and internal analytics access are intentionally separate. Giving a
 These are recommended defaults, not hidden assumptions:
 
 - This scope is large enough to be **v0.1.0**, not v0.0.2.
-- A **Deck** is a new durable product object. Existing Pagent Pages remain short-lived agent-to-user interactions.
+- **Page** is the only product primitive. Interactive and document pages are temporary; presentation pages are durable, revisioned, shareable, and analyzable.
+- The legacy word **Deck** remains in internal REST routes, database names, and some historical requirement IDs. It is an implementation detail, not a second public object.
 - A deck may have multiple named share links, for example `Acme proposal` and `Board review`, so access and analytics can be managed per audience.
 - Each share link lets its creator choose the friction level: anyone with the link, a matching allowed email with no verification, or authenticated access.
 - Allowed-email access intentionally trusts the address a viewer enters. It is a convenience gate, not proof of identity, so Pagent labels those viewers as **Unverified** in analytics.
 - For stronger protection, the creator can require authentication through a one-time code, magic link, Google sign-in, or an existing Pagent session.
 - Private analytics are visible to the deck owner and the creator of the relevant share link. Workspace administrators see metadata but do not silently bypass private viewer-level analytics.
 - Deck content is retained until deleted. Viewer-level analytics are retained for 12 months by default, subject to workspace policy.
-- The first release supports agent-generated decks with explicit slide boundaries. It does not infer reliable slide analytics from arbitrary legacy HTML pages.
+- The first release supports agent-generated presentation pages with explicit slide boundaries. It does not infer reliable slide analytics from arbitrary temporary document pages.
 
 ## 3. Problem
 
@@ -87,7 +98,8 @@ The current model is not sufficient for this feature:
 ### 5.3 Technical goals
 
 - Reuse the current auth, HTML sanitization, and Postgres foundations.
-- Keep existing `show_ui` and `show_html` behavior backward compatible.
+- Expose exactly `write` and `read` over both MCP transports, with no legacy tool aliases.
+- Keep page-type behavior simple: temporary interactive/document pages and durable presentation pages.
 - Store raw engagement events separately from operational telemetry.
 - Define analytics precisely enough that dashboard numbers are reproducible.
 
@@ -102,13 +114,15 @@ The current model is not sufficient for this feature:
 - CRM, Slack, or email automation integrations.
 - AI-generated engagement scores or claims about buyer intent.
 - Public analytics pages for external clients.
-- Analytics for arbitrary legacy `show_html` pages without explicit slide boundaries.
+- Analytics for arbitrary document pages without explicit slide boundaries.
 
 ## 7. Terminology
 
 | Term                     | Definition                                                                          |
 | ------------------------ | ----------------------------------------------------------------------------------- |
-| **Deck**                 | Durable presentation owned by a Pagent user or workspace.                           |
+| **Page**                 | Pagent's public product primitive.                                                  |
+| **Presentation page**    | Durable, revisioned Page owned by a Pagent user or workspace.                       |
+| **Deck**                 | Legacy/internal name for a presentation page.                                       |
 | **Slide**                | Ordered, stable unit within a deck, identified by an immutable slide ID.            |
 | **Deck revision**        | Immutable snapshot of deck content.                                                 |
 | **Share link**           | Revocable URL for a deck, with its own name, access policy, expiry, and analytics.  |
@@ -118,7 +132,9 @@ The current model is not sufficient for this feature:
 | **Viewer access policy** | Rule controlling who may open a share link.                                         |
 | **Analytics visibility** | Rule controlling which authenticated workspace members may inspect engagement data. |
 
-In the product UI, use **slide** for a page within a presentation. Reserve **Page** for the existing Pagent runtime object.
+In product UI and agent-facing contracts, use **Page** for the artifact and
+**slide** for an ordered unit within a presentation page. Do not present Deck as
+a separate object model.
 
 ## 8. Primary users and jobs
 
@@ -183,7 +199,7 @@ sequenceDiagram
 
 ### 9.3 Review engagement
 
-1. The sender opens **Decks** and sees last viewed, unique viewers, average active time, and completion.
+1. The sender opens **Pages** and sees last viewed, unique viewers, average active time, and completion.
 2. The sender opens a deck and selects **Analytics**.
 3. The overview shows visits over time, average completion, top slide by active time, and drop-off distribution.
 4. The sender selects a viewer to see each visit, slide sequence, active time per slide, furthest slide reached, and last slide viewed.
@@ -199,22 +215,35 @@ sequenceDiagram
 
 ## 10. Product model
 
-### 10.1 Decks are durable, Pages remain ephemeral
+### 10.1 One Page primitive, lifecycle by type
 
-A Deck must not inherit the current 30-minute Page lifecycle. Publishing creates a durable deck and an immutable initial revision. Existing Pagent Pages continue to serve short-lived forms and HTML artifacts.
+Interactive and document pages use the short-lived Page lifecycle. A
+presentation page is durable and publishing creates an immutable initial
+revision. The different retention and permission rules do not create a second
+agent-facing object model.
 
-Agent-facing creation should expose a deck-specific operation, tentatively `publish_deck`, with:
+Agent-facing creation uses `write` with a required `type` discriminator:
 
-- Deck title.
-- Ordered slides with stable IDs, optional titles, and sanitized HTML content.
-- Optional deck description and client/account label.
-- Optional update target for creating a new revision of an existing deck.
+- `interactive`: an A2UI specification for a temporary, single-response page.
+- `document`: sanitized HTML for a temporary, view-only page.
+- `presentation`: title, ordered slides with stable IDs and sanitized HTML,
+  plus optional description, client/account label, or `page_id` update target.
 
-The exact MCP/API schema is an engineering design decision, but explicit slide boundaries are a product requirement.
+Agent-facing retrieval uses `read`. It returns a temporary interactive response
+or authorized presentation analytics based on `page_id`; callers may set
+`include` explicitly. Durable writes and analytics reads require authentication.
+Temporary writes and response reads may be anonymous only while rollout grace
+mode is enabled. Requests that present invalid or expired Bearer credentials
+fail closed with `401`; grace-mode callers choosing anonymous access omit the
+`Authorization` header.
 
-### 10.2 One deck, multiple share links
+Explicit slide boundaries remain a product requirement. MCP advertises only
+`write` and `read`; link management and governance stay in the authenticated
+web/REST surfaces.
 
-A sender may create multiple links for the same deck. Each link has its own:
+### 10.2 One presentation page, multiple share links
+
+A sender may create multiple links for the same presentation page. Each link has its own:
 
 - Name/client label.
 - Creator/sender.
@@ -222,11 +251,11 @@ A sender may create multiple links for the same deck. Each link has its own:
 - Expiration and revocation state.
 - Visit and viewer analytics.
 
-Analytics can be viewed per link or aggregated across the deck. This lets a sender compare audiences without duplicating content.
+Analytics can be viewed per link or aggregated across the presentation page. This lets a sender compare audiences without duplicating content.
 
 ### 10.3 Revisions
 
-- Editing or republishing a deck creates a new immutable revision.
+- Editing or republishing a presentation page creates a new immutable revision.
 - By default, active share links follow the latest published revision.
 - Historical visits retain the revision ID viewed, so slide analytics remain interpretable.
 - Reordering or deleting slides never rewrites historical event meaning.
@@ -241,18 +270,19 @@ Priority meanings:
 - **P1:** Strongly desired, may follow immediately after launch.
 - **P2:** Future consideration.
 
-### 11.1 Deck library and management
+### 11.1 Page library and management
 
-| ID    | Priority | Requirement                                                                                                                      |
-| ----- | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| DM-01 | P0       | Authenticated users can open a **Decks** dashboard containing decks they own and decks shared with them internally.              |
-| DM-02 | P0       | The list shows deck title, owner, latest sender, status, access mode, link count, unique viewers, last viewed, and last updated. |
-| DM-03 | P0       | Users can search by deck title, link/client name, owner, or sender.                                                              |
-| DM-04 | P0       | Users can filter by Mine, Shared with me, Team/workspace, active, expired, and revoked.                                          |
-| DM-05 | P0       | A deck detail screen contains Preview, Analytics, Share links, and Settings/Access.                                              |
-| DM-06 | P0       | Owners can rename, archive, restore, and delete a deck. Deletion requires confirmation and revokes all links immediately.        |
-| DM-07 | P0       | Users can preview the exact latest deck revision without generating analytics.                                                   |
-| DM-08 | P1       | Users can duplicate a deck or create a new client-specific link from the list.                                                   |
+| ID    | Priority | Requirement                                                                                                                                                 |
+| ----- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DM-01 | P0       | Authenticated users can open a **Pages** dashboard containing presentation pages they own and pages shared with them internally.                            |
+| DM-02 | P0       | The list shows page title, owner, latest sender, status, access mode, link count, unique viewers, last viewed, and last updated.                            |
+| DM-03 | P0       | Users can search by page title, link/client name, owner, or sender.                                                                                         |
+| DM-04 | P0       | Users can filter by Mine, Shared with me, Team/workspace, active, expired, and revoked.                                                                     |
+| DM-05 | P0       | A presentation-page detail screen contains Preview, Analytics, Share links, and Settings/Access.                                                            |
+| DM-06 | P0       | Owners can rename, archive, restore, and delete a page. Deletion requires confirmation and revokes all links immediately.                                   |
+| DM-07 | P0       | Users can preview the exact latest presentation revision without generating analytics.                                                                      |
+| DM-08 | P1       | Users can duplicate a presentation page or create a new client-specific link from the list.                                                                 |
+| DM-09 | P0       | Workspace administrators can open `/admin` for membership, policy, audit, and page-metadata governance without implicit content or viewer-analytics access. |
 
 ### 11.2 External viewer access
 
@@ -370,21 +400,21 @@ Furthest slide reached and completion must both be shown. A viewer who jumps dir
 
 ## 12. Information architecture
 
-### 12.1 Decks list
+### 12.1 Pages list
 
 ```text
-Decks
+Pages
   Filters: Mine | Shared with me | Team | Archived
-  Search: deck, client/link, owner, sender
+  Search: page, client/link, owner, sender
 
-  Deck                 Owner       Sender       Access       Viewers  Last viewed
+  Page                 Owner       Sender       Access       Viewers  Last viewed
   Acme proposal        Ana         Marco        Allowlist    4        2h ago
   Series A deck        Ana         Ana          Public       18       1d ago
 ```
 
 Primary row actions: Preview, Analytics, Share, More.
 
-### 12.2 Deck detail
+### 12.2 Presentation-page detail
 
 ```text
 Acme proposal                                      [Preview] [Share]
@@ -399,9 +429,19 @@ Overview | Visitors | Slides | Share links | Access & settings
 - **Share links:** client/link name, sender, access mode, expiry, status, views, actions.
 - **Access & settings:** internal collaborators, analytics visibility, retention, archive/delete.
 
+### 12.3 Workspace admin
+
+`/admin` is an authenticated workspace surface for membership, roles,
+retention/consent policy, audit activity, and presentation-page metadata.
+Administrators do not gain private page content or viewer-level analytics by
+visiting this surface; those still require an explicit grant.
+
 ## 13. Conceptual data model
 
-This is a product-level model, not a final migration design.
+This is a product-level model, not a final migration design. The `decks`,
+`deck_revisions`, and related names below are internal persistence terms for
+durable presentation pages; they do not add another MCP tool or public product
+primitive.
 
 | Entity                   | Key fields and purpose                                                                              |
 | ------------------------ | --------------------------------------------------------------------------------------------------- |
@@ -515,11 +555,11 @@ Research was performed against first-party product and help documentation availa
 
 ## 17. Release scope and sequencing
 
-### Phase A: Durable deck foundation
+### Phase A: Durable presentation-page foundation
 
-- Deck, revision, and slide model.
-- Agent publishing contract with explicit slide boundaries.
-- Deck library, preview, ownership, and archive/delete.
+- Durable presentation-page, revision, and slide model.
+- `write` publishing contract with explicit slide boundaries and `read` analytics contract.
+- Page library, preview, ownership, and archive/delete.
 - Workspace and minimal team membership required for internal permissions.
 
 ### Phase B: Controlled sharing
@@ -532,7 +572,7 @@ Research was performed against first-party product and help documentation availa
 ### Phase C: Analytics
 
 - Human-visit detection, activity heartbeats, slide engagement, and aggregation.
-- Deck overview, Visitors, Slides, and visit detail.
+- Presentation-page overview, Visitors, Slides, and visit detail.
 - Filters and sender attribution.
 
 ### Phase D: Internal collaboration
@@ -547,34 +587,37 @@ All four phases are part of v0.1.0. They may ship behind feature flags, but the 
 
 The release is ready when all of the following are observable in production or a production-equivalent environment:
 
-1. An authenticated owner can publish a 10-slide deck, find it in Decks, and preview it without generating a client visit.
-2. The owner can create separate public, Allowed email, and Authenticated viewer links for the same deck.
-3. A viewer entering a matching address on an Allowed email link reaches the deck without a verification code, magic link, or sign-in and is labeled Unverified in analytics.
-4. A viewer entering a non-allowed address cannot receive deck content.
-5. A viewer on an Authenticated viewer link cannot receive deck content before authenticating as an allowed email/user.
-6. A non-allowed viewer can request access, and an approved request continues under the link creator's selected authentication setting.
-7. Revoking a link prevents an already-open browser from fetching additional protected deck content after its next authorization check.
-8. A client can navigate the full deck on desktop and mobile using mouse/touch and keyboard controls.
-9. After a real visit, the sender can see the viewer and identity-confidence label, active time, viewed slides, top slide, furthest slide, last slide, and completion.
-10. Skipping from slide 1 to slide 10 reports furthest slide 10 without reporting 100% completion.
-11. Leaving a deck open in a background tab does not continue increasing active time.
-12. Link preview bots and owner preview sessions do not appear as client visits.
-13. A private deck's viewer analytics are denied to an ungranted workspace member at both UI and API layers.
-14. Changing analytics visibility to Selected people, Team, or Workspace/domain grants only the previewed authenticated audience.
-15. The deck list identifies owner and sender and can be filtered by them.
-16. Permission changes, access decisions, link revocation, and analytics exports are present in the audit log.
-17. Deleting a deck revokes every share link and removes future access to content and analytics according to the retention/deletion policy.
+1. Both MCP transports advertise exactly `write` and `read`; none of the former tool names are registered as aliases.
+2. During grace mode, an anonymous caller can write and read a temporary interactive page; durable presentation writes and analytics reads still reject unauthenticated callers.
+3. An authenticated owner can use `write` to publish a 10-slide presentation page, find it in Pages, and preview it without generating a client visit.
+4. The owner can create separate Anyone, Allowed email, and Authenticated viewer links for the same presentation page.
+5. A viewer entering a matching address on an Allowed email link reaches the page without a verification code, magic link, or sign-in and is labeled Unverified in analytics.
+6. A viewer entering a non-allowed address cannot receive presentation content.
+7. A viewer on an Authenticated viewer link cannot receive presentation content before authenticating as an allowed email/user.
+8. A non-allowed viewer can request access, and an approved request continues under the link creator's selected authentication setting.
+9. Revoking a link prevents an already-open browser from fetching additional protected presentation content after its next authorization check.
+10. A client can navigate the full presentation on desktop and mobile using mouse/touch and keyboard controls.
+11. After a real visit, the sender can use the page analytics UI or authorized `read` to see identity confidence, active time, viewed slides, top slide, furthest slide, last slide, and completion.
+12. Skipping from slide 1 to slide 10 reports furthest slide 10 without reporting 100% completion.
+13. Leaving a presentation page open in a background tab does not continue increasing active time.
+14. Link preview bots and owner preview sessions do not appear as client visits.
+15. A private presentation page's viewer analytics are denied to an ungranted workspace member at both UI and API layers.
+16. Changing analytics visibility to Selected people, Team, or Workspace/domain grants only the previewed authenticated audience.
+17. The Pages list identifies owner and sender and can be filtered by them.
+18. Permission changes, access decisions, link revocation, and analytics exports are present in the audit log.
+19. `/admin` exposes workspace membership, policy, audit, and page metadata without silently exposing private content or viewer-level analytics.
+20. Deleting a presentation page revokes every share link and removes future access to content and analytics according to the retention/deletion policy.
 
 ## 19. Risks and mitigations
 
 | Risk                                              | Impact                                                    | Mitigation                                                                                                      |
 | ------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Arbitrary HTML has no stable slide boundaries.    | Per-slide analytics are inaccurate or impossible.         | Require structured slides for Decks and keep legacy HTML outside slide analytics.                               |
+| Arbitrary HTML has no stable slide boundaries.    | Per-slide analytics are inaccurate or impossible.         | Require structured presentation slides and keep temporary document HTML outside slide analytics.                |
 | Email entry is mistaken for authentication.       | A viewer who knows an allowed address may impersonate it. | Label Allowed email as Unverified, warn the creator, and recommend Authenticated viewer for confidential decks. |
 | Background tabs inflate engagement.               | Senders make decisions from misleading data.              | Visibility, activity, heartbeat, and idle rules; server-side duration validation.                               |
 | Link scanners create false views.                 | Noisy notifications and inflated metrics.                 | Create visits only after visible client execution and human-like interaction/heartbeat.                         |
 | Workspace admins conflict with private analytics. | Loss of sender/client trust.                              | Metadata-only admin visibility by default; require explicit analytics grant.                                    |
-| Deck updates corrupt historical slide metrics.    | Old visits become uninterpretable.                        | Immutable revisions and stable slide IDs in every event.                                                        |
+| Presentation updates corrupt historical metrics.  | Old visits become uninterpretable.                        | Immutable revisions and stable slide IDs in every event.                                                        |
 | Client analytics contain personal data.           | Regulatory and trust exposure.                            | Clear notice/consent control, minimal collection, retention, deletion, audit, and legal review.                 |
 | The release attempts to build a full data room.   | Delayed delivery and unclear product.                     | Limit v0.1.0 to one deck per share link and defer multi-document rooms.                                         |
 
@@ -598,4 +641,4 @@ These questions do not block the draft, but should be resolved before engineerin
 - Watermarks and NDA gates.
 - Multi-document client rooms.
 - Engagement summaries generated by an agent with explicit analytics permission.
-- MCP tools to list owned decks, create/revoke links, and retrieve authorized analytics.
+- Optional fields on `write`/`read` for additional authorized automation; the public MCP surface remains exactly two tools.

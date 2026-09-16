@@ -40,6 +40,22 @@ Pagent feels like a quiet editorial workspace: warm paper, precise typography, a
 - Error, warning, and success surfaces must retain 4.5:1 text contrast.
 - New colors are added here before use.
 
+### Landing semantic aliases
+
+The landing page consumes the core `--pg-*` palette, font, and spacing tokens directly. Its
+editorial hero and dark install/terminal specimens add only the following `--pg-home-*` aliases;
+they are intentionally local to `<home-page>` and must not become a second product palette.
+Opacity variants derive from colocated `*-rgb` channel tokens rather than introducing more colors.
+Each companion mirrors its source color for `rgba(var(...), alpha)`; the highlight is alpha-only.
+
+| Role               | Tokens                                                                                                                                                                                                  | Contract                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Editorial neutrals | `--pg-home-highlight-rgb` (`255, 255, 255`), `--pg-home-copy` (`#3a352d`)                                                                                                                               | Alpha-only paper highlights and long-form hero copy                                             |
+| Terminal states    | `--pg-home-terminal-label` (`#b4ac9b`), `--pg-home-terminal-muted` (`#8c8478`), `--pg-home-terminal-success` (`#9bc78a`), `--pg-home-terminal-copied` (`#b6dca5`), `--pg-home-terminal-url` (`#f6c89f`) | Legible syntax and state colors on the dark install specimens; never used as product status ink |
+| Editorial type     | `--pg-home-type-terminal`, `--pg-home-type-lede`, `--pg-home-type-display`                                                                                                                              | Shared terminal sizing and the landing's high-contrast serif hero scale                         |
+| Editorial radii    | `--pg-home-radius-action`, `--pg-home-radius-panel`                                                                                                                                                     | Reused action/terminal and install-panel geometry                                               |
+| Editorial depth    | `--pg-home-shadow-pulse`, `--pg-home-shadow-pulse-wide`, `--pg-home-shadow-status`, `--pg-home-shadow-panel`, `--pg-home-shadow-terminal`                                                               | The only landing shadow recipes; all are derived from core colors                               |
+
 ## 3. Typography
 
 ### Scale
@@ -58,9 +74,9 @@ Pagent feels like a quiet editorial workspace: warm paper, precise typography, a
 
 ### Font Stack
 
-- UI and body: `Outfit, system-ui, -apple-system, sans-serif`.
-- Display serif: `Instrument Serif, Georgia, Times New Roman, serif`.
-- Metadata and code: `JetBrains Mono, ui-monospace, monospace`.
+- UI and body (`--pg-font-ui`): `Outfit, system-ui, -apple-system, sans-serif`.
+- Display serif (`--pg-font-display`): `Instrument Serif, Georgia, Times New Roman, serif`.
+- Metadata and code (`--pg-font-metadata`): `JetBrains Mono, ui-monospace, monospace`.
 
 ### Rules
 
@@ -72,7 +88,8 @@ Pagent feels like a quiet editorial workspace: warm paper, precise typography, a
 
 ### Base Unit
 
-All spacing derives from 4px.
+Structural spacing derives from 4px and uses `--pg-space-*`. Isolated landing-page optical values
+may remain literal when they do not represent a reusable spacing decision.
 
 | Token           | Value  | Usage                         |
 | --------------- | ------ | ----------------------------- |
@@ -100,7 +117,7 @@ All spacing derives from 4px.
 ### Product shell
 
 - **Structure**: skip link, landmark header, navigation, main content, optional contextual actions.
-- **Variants**: library, detail, fullscreen viewer.
+- **Variants**: page library, detail, workspace admin, fullscreen viewer.
 - **Spacing**: `--pg-space-4` through `--pg-space-8`.
 - **States**: narrow navigation, authenticated user, loading, unauthenticated redirect.
 - **Accessibility**: one `main`, visible skip link, current page marked with `aria-current`.
@@ -150,7 +167,7 @@ All spacing derives from 4px.
 ### Data table and responsive record list
 
 - **Structure**: caption, headers, rows, row actions; narrow view becomes labeled records.
-- **Variants**: deck library, visitors, slides, links, audit log.
+- **Variants**: page library, visitors, slides, links, audit log, admin metadata.
 - **Spacing**: `--pg-space-3` and `--pg-space-4`.
 - **States**: loading, empty, filtered-empty, error, selected row.
 - **Accessibility**: semantic table on wide screens; labels remain programmatically associated in narrow records.
@@ -160,7 +177,7 @@ All spacing derives from 4px.
 ### Tabs
 
 - **Structure**: tablist, tabs, one active panel.
-- **Variants**: deck Overview, Visitors, Slides, Share links, Access & settings.
+- **Variants**: presentation page Overview, Visitors, Slides, Share links, Access & settings.
 - **Spacing**: `--pg-space-3` and `--pg-space-4`.
 - **States**: default, hover, focus, selected, disabled.
 - **Accessibility**: arrow-key navigation, Home/End, `aria-controls`, URL-addressable selection.
@@ -173,13 +190,13 @@ All spacing derives from 4px.
 - **Variants**: share-link editor, access decision, delete confirmation, analytics audience preview.
 - **Spacing**: `--pg-space-4` through `--pg-space-6`.
 - **States**: opening, ready, submitting, error, success.
-- **Accessibility**: focus trap, Escape closes non-destructive dialogs, return focus to trigger, destructive confirmation names the deck.
+- **Accessibility**: focus trap, Escape closes non-destructive dialogs, return focus to trigger, destructive confirmation names the page.
 - **Motion**: 200ms opacity/transform; reduced motion uses immediate state.
 - **Layout**: imposter over backdrop, max inline size constrained to viewport.
 
 ### Access gate
 
-- **Structure**: deck/sender identity, privacy and tracking notice, access control, help/request action.
+- **Structure**: presentation page and sender identity, privacy and tracking notice, access control, help/request action.
 - **Variants**: Allowed email, Authenticated viewer, pending, denied, expired, revoked.
 - **Spacing**: `--pg-space-4` through `--pg-space-8`.
 - **States**: idle, submitting, mismatch, request pending, authentication required, unavailable.
@@ -189,7 +206,7 @@ All spacing derives from 4px.
 
 ### Presentation frame and controls
 
-- **Structure**: deck identity, slide viewport, previous/next, current count, fullscreen, optional filmstrip.
+- **Structure**: presentation page identity, slide viewport, previous/next, current count, fullscreen, optional filmstrip.
 - **Variants**: owner preview and tracked viewer.
 - **Spacing**: `--pg-space-2` through `--pg-space-4`.
 - **States**: loading, ready, first/last slide, fullscreen, offline tracking queue.
@@ -206,6 +223,15 @@ All spacing derives from 4px.
 - **Accessibility**: visible units, no color-only series, descriptive summary, table fallback.
 - **Motion**: none required; data updates use polite announcements.
 - **Layout**: frame within a surface card.
+
+### Workspace admin
+
+- **Structure**: workspace identity, member and role summary, presentation page metadata, retention/consent policy, audit activity.
+- **Variants**: overview, members, governance, audit log.
+- **States**: loading, empty, filtered-empty, partial permission, error.
+- **Accessibility**: governance actions state their scope and consequence; metadata-only access never implies content or viewer-analytics access.
+- **Motion**: none beyond standard dialog and focus feedback.
+- **Layout**: product shell with compact tables that become labeled records on narrow screens.
 
 ## 6. Motion & Interaction
 
@@ -244,7 +270,7 @@ The strategy is borders-first with very restrained shadows for dialogs only.
 - Every flow is operable by keyboard at 200% zoom and at 375px width.
 - Identity confidence, link status, and analytics states are expressed in words, not color alone.
 - Access errors remain generic enough to avoid audience enumeration while still explaining the next action.
-- Viewer tracking never blocks navigation and analytics consent is disclosed before the deck opens.
+- Viewer tracking never blocks navigation and analytics consent is disclosed before the presentation page opens.
 - Charts always have an equivalent textual/table representation.
 - Focus is visible and restored after dialogs; validation is announced without clearing user input.
 

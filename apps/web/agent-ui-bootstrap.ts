@@ -15,7 +15,7 @@ export function mountAgentUI(pageId: string): void {
   const root = document.getElementById('app');
   if (root === null) throw new TypeError('Missing #app mount point');
   const pathname = location.pathname;
-  const deckDetailMatch = /^\/decks\/([0-9a-f-]{36})\/?$/i.exec(pathname);
+  const deckDetailMatch = /^\/(?:decks|pages)\/([0-9a-f-]{36})\/?$/i.exec(pathname);
   const shareMatch = /^\/share\/([^/]+)\/?$/.exec(pathname);
 
   if (pathname === '/_components') {
@@ -31,7 +31,12 @@ export function mountAgentUI(pageId: string): void {
     void import('./demo').then(() => {
       root.appendChild(document.createElement('pagent-demo'));
     });
-  } else if (pathname === '/decks' || pathname === '/decks/') {
+  } else if (
+    pathname === '/decks' ||
+    pathname === '/decks/' ||
+    pathname === '/pages' ||
+    pathname === '/pages/'
+  ) {
     root.classList.add('is-home');
     void Promise.all([import('./product-navigation.ts'), import('./deck-library.ts')]).then(() => {
       root.appendChild(document.createElement('deck-library'));
@@ -60,6 +65,13 @@ export function mountAgentUI(pageId: string): void {
     void Promise.all([import('./product-navigation.ts'), import('./privacy-page.ts')]).then(() => {
       root.appendChild(document.createElement('privacy-page'));
     });
+  } else if (pathname === '/admin' || pathname === '/admin/') {
+    root.classList.add('is-home');
+    void Promise.all([import('./product-navigation.ts'), import('./workspace-admin.ts')]).then(
+      () => {
+        root.appendChild(document.createElement('workspace-admin'));
+      },
+    );
   } else if (!pageId) {
     root.classList.add('is-home');
     root.appendChild(document.createElement('home-page'));

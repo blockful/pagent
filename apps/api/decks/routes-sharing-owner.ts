@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AuthVariables } from '../auth/middleware.ts';
-import { requireAuth } from '../auth/middleware.ts';
+import { requireAuth, requirePageScopeForMethod } from '../auth/middleware.ts';
 import { createShareLinkBodySchema, deckIdSchema, shareLinkIdSchema } from './domain.ts';
 import { accessDecisionBodySchema } from './http-schemas.ts';
 import { DeckForbiddenError } from './repository-decks.ts';
@@ -17,7 +17,7 @@ type SharingContext = Context<{ Variables: AuthVariables }>;
 const requestIdSchema = z.string().uuid();
 export const ownerSharingRoutes = new Hono<{ Variables: AuthVariables }>();
 
-ownerSharingRoutes.use('/decks/*', requireAuth());
+ownerSharingRoutes.use('/decks/*', requireAuth(), requirePageScopeForMethod());
 
 ownerSharingRoutes.post('/decks/:deckId/share-links', async (c) => {
   const deckId = deckIdSchema.safeParse(c.req.param('deckId'));

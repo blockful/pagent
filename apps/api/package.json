@@ -1,9 +1,9 @@
 {
   "name": "@pagent/api",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "REST + state-machine service for pagent",
+  "description": "Page lifecycle, sharing, and analytics service for Pagent",
   "main": "server.ts",
   "scripts": {
     "dev": "node --watch --env-file=.env --experimental-strip-types --import ./instrument.mjs --import ./tracing.ts server.ts",

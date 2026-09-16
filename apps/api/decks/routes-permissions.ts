@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AuthVariables } from '../auth/middleware.ts';
-import { requireAuth } from '../auth/middleware.ts';
+import { requireAuth, requirePageScopeForMethod } from '../auth/middleware.ts';
 import { analyticsVisibilitySchema, deckIdSchema } from './domain.ts';
 import {
   deleteViewerAnalytics,
@@ -47,7 +47,7 @@ const viewerDeletionBodySchema = z.object({ email: z.string().trim().email() }).
 const memberIdSchema = z.string().uuid();
 
 export const permissionRoutes = new Hono<{ Variables: AuthVariables }>();
-permissionRoutes.use('/decks/*', requireAuth());
+permissionRoutes.use('/decks/*', requireAuth(), requirePageScopeForMethod());
 
 permissionRoutes.post('/decks/:deckId/access/members', async (c) => {
   const deckId = deckIdSchema.safeParse(c.req.param('deckId'));

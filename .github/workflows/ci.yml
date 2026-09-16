@@ -64,7 +64,9 @@ jobs:
             pagent_deck_permissions_d3a0_test \
             pagent_deck_sharing_d3a0_test \
             pagent_deck_routes_sharing_d3a0_test \
-            pagent_deck_repository_d3a0_test
+            pagent_deck_repository_d3a0_test \
+            pagent_launch_acceptance_d3a0_test \
+            pagent_workspace_admin_d3a0_test
           do
             createdb --host=127.0.0.1 --port=5432 --username=postgres "$database"
           done

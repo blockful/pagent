@@ -2,11 +2,7 @@ import type { ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AnySchema, ZodRawShapeCompat } from '@modelcontextprotocol/sdk/server/zod-compat.js';
 import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import {
-  deckIdSchema,
-  publishDeckBodySchema,
-  type PublishDeckBody,
-} from '../decks/domain.ts';
+import { deckIdSchema, publishDeckBodySchema, type PublishDeckBody } from '../decks/domain.ts';
 import { HTML_MAX_BYTES } from '../limits.ts';
 
 export type PageState = 'open' | 'submitted' | 'received';
@@ -59,9 +55,12 @@ type ToolExtra = {
 };
 
 class InsufficientScopeError extends Error {
-  constructor(readonly requiredScope: string) {
+  readonly requiredScope: string;
+
+  constructor(requiredScope: string) {
     super(`Insufficient OAuth scope: ${requiredScope} is required`);
     this.name = 'InsufficientScopeError';
+    this.requiredScope = requiredScope;
   }
 }
 
@@ -167,7 +166,9 @@ export function registerPagentTools(server: PagentToolRegistrar, ops: PageOps): 
         input.page_id === undefined ? base : { ...base, update_deck_id: input.page_id };
       const written = await ops.writePresentation(publishInput, publisher);
       return {
-        content: [{ type: 'text' as const, text: `Presentation page ready: ${written.preview_url}` }],
+        content: [
+          { type: 'text' as const, text: `Presentation page ready: ${written.preview_url}` },
+        ],
         structuredContent: { type: 'presentation', durable: true, ...written },
       };
     },
@@ -216,7 +217,9 @@ function ephemeralWriteResponse(type: 'interactive' | 'document', page: Ephemera
   };
 }
 
-function responseText(outcome: Exclude<ResponseReadOutcome, { readonly kind: 'not_found' }>): string {
+function responseText(
+  outcome: Exclude<ResponseReadOutcome, { readonly kind: 'not_found' }>,
+): string {
   if (outcome.format === 'html') return 'This document page is view-only and has no response.';
   if (outcome.result === null) return `No response yet (state: ${outcome.state}).`;
   return `Response: ${JSON.stringify(outcome.result)}`;

@@ -1,5 +1,11 @@
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { initialDeckSchemaMigration } from './migrations/0001-initial-deck-schema.ts';
+import {
+  DeckMigrationHistoryError,
+  runDeckMigrations,
+  type DeckMigration,
+} from './schema-migrations.ts';
 import { initDeckSchema } from './schema.ts';
 import { integrationDatabaseUrl } from './test-database.ts';
 
@@ -39,6 +45,7 @@ integration('deck database schema', () => {
       'deck_slides',
       'decks',
       'engagement_events',
+      'deck_schema_migrations',
       'share_link_audience',
       'share_links',
       'slide_engagement',
@@ -60,6 +67,87 @@ integration('deck database schema', () => {
 
     // Then
     expect(rows.map((row) => row.table_name)).toEqual(expect.arrayContaining(expected));
+  });
+
+  it('records the applied deck schema version', async () => {
+    const expectedMigration = { version: 1, name: 'initial_deck_schema' };
+
+    const rows = await sql<{ version: number; name: string }[]>`
+      select version, name from deck_schema_migrations order by version
+    `;
+
+    expect(rows).toEqual([expectedMigration]);
+  });
+
+  it('preserves existing deck data when baselining a pre-ledger deployment', async () => {
+    const owner = await sql<{ id: string }[]>`
+      insert into users (email) values ('legacy-owner@pagent.test') returning id
+    `;
+    const ownerId = owner[0]?.id;
+    expect(ownerId).toBeDefined();
+    if (ownerId === undefined) return;
+    const workspace = await sql<{ id: string }[]>`
+      insert into workspaces (name) values ('Legacy workspace') returning id
+    `;
+    const workspaceId = workspace[0]?.id;
+    expect(workspaceId).toBeDefined();
+    if (workspaceId === undefined) return;
+    await sql`
+      insert into decks (workspace_id, owner_id, title)
+      values (${workspaceId}, ${ownerId}, 'Legacy deck')
+    `;
+    await sql`drop table deck_schema_migrations`;
+
+    await initDeckSchema(sql);
+
+    const rows = await sql<{ title: string }[]>`
+      select title from decks where title = 'Legacy deck'
+    `;
+    expect(rows).toEqual([{ title: 'Legacy deck' }]);
+  });
+
+  it('serializes concurrent startup into one applied migration', async () => {
+    await sql`drop table deck_schema_migrations`;
+
+    await Promise.all([initDeckSchema(sql), initDeckSchema(sql)]);
+
+    const rows = await sql<{ count: number }[]>`
+      select count(*)::integer as count from deck_schema_migrations
+    `;
+    expect(rows).toEqual([{ count: 1 }]);
+  });
+
+  it('rolls back schema and ledger changes when a migration fails', async () => {
+    class PlannedMigrationError extends Error {}
+    const failingMigration = {
+      version: 2,
+      name: 'planned_failure',
+      async up(database) {
+        await database`create table migration_should_roll_back (id integer primary key)`;
+        throw new PlannedMigrationError('planned migration failure');
+      },
+    } satisfies DeckMigration;
+
+    const migration = runDeckMigrations(sql, [initialDeckSchemaMigration, failingMigration]);
+
+    await expect(migration).rejects.toBeInstanceOf(PlannedMigrationError);
+    const rows = await sql<{ table_name: string | null }[]>`
+      select to_regclass('public.migration_should_roll_back')::text as table_name
+    `;
+    expect(rows).toEqual([{ table_name: null }]);
+    const ledger = await sql<{ version: number }[]>`
+      select version from deck_schema_migrations order by version
+    `;
+    expect(ledger).toEqual([{ version: 1 }]);
+  });
+
+  it('rejects divergent applied migration history', async () => {
+    await sql`update deck_schema_migrations set name = 'tampered_history' where version = 1`;
+
+    const migration = initDeckSchema(sql);
+
+    await expect(migration).rejects.toBeInstanceOf(DeckMigrationHistoryError);
+    await sql`update deck_schema_migrations set name = 'initial_deck_schema' where version = 1`;
   });
 
   it('rejects raw bearer tokens from the share-link persistence shape', async () => {

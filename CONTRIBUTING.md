@@ -36,14 +36,20 @@ npm run dev   # API on :8787, renderer on :8788
 ```
 apps/api/        REST service (Hono). Deployed on Railway.
 apps/web/        Vite renderer. Deployed on Vercel.
-apps/mcp/        stdio MCP server: show_ui + check_result.
-skills/pagent/   Drop-in skill teaching the polling pattern.
+apps/mcp/        stdio MCP server: exactly `write` + `read`.
+skills/pagent/   Drop-in skill teaching page creation, polling, and analytics.
 .claude-plugin/  Claude Code plugin manifest + marketplace entry.
 .mcp.json        Plugin's MCP server registration.
 ```
 
 The repo doubles as a Claude Code plugin. The `skills/` directory lives at the
 root because the plugin loader expects it next to `.claude-plugin/`.
+
+The public MCP contract is deliberately small: `write` creates a page and
+`read` retrieves its response or presentation analytics. Interactive and
+document pages are temporary; presentation pages are durable. REST routes and
+the internal `deck_*` persistence model are implementation details, not extra
+agent tools.
 
 ---
 
@@ -119,6 +125,7 @@ npm run test:e2e      # Chromium + production-mode API against PostgreSQL
 
 | Area                        | Also touch                                                                                                |
 | --------------------------- | --------------------------------------------------------------------------------------------------------- |
+| MCP tool definitions        | Keep exactly `write` and `read`, update `skills/pagent/SKILL.md`, then rebuild and commit the bundle.     |
 | `apps/mcp/server.ts`        | Run `npm run build:mcp`, commit the regenerated `server.bundle.js`. CI will fail if the bundle is stale.  |
 | API request/response shapes | Update Zod schemas in `apps/api/schemas.ts`, the API section in `README.md`, **and** `docs/openapi.yaml`. |
 | Env vars                    | Update `apps/api/schemas.ts` `envSchema`, `apps/api/.env.example`, **and** the README deploy section.     |

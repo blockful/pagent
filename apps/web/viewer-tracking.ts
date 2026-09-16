@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { apiEmpty, apiJson } from './deck-api.ts';
+import { ApiError, apiEmpty, apiJson } from './deck-api.ts';
 
 const startVisitSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('started'), visitId: z.string().uuid() }),
@@ -32,6 +32,16 @@ type QueuedEvent = {
   readonly keepalive?: boolean;
 };
 
+type PendingEvent = {
+  readonly event: EngagementEvent;
+  readonly keepalive: boolean;
+  attempts: number;
+};
+
+const MAX_QUEUED_EVENTS = 20;
+const MAX_EVENTS_PER_REQUEST = 10;
+const MAX_DELIVERY_ATTEMPTS = 3;
+
 export class EngagementTracker {
   private readonly sessionToken: string;
   private readonly currentSlideId: () => string | null;
@@ -42,8 +52,10 @@ export class EngagementTracker {
   private lastActivityAt = Date.now();
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private slideTimer: ReturnType<typeof setTimeout> | null = null;
-  private queue: EngagementEvent[] = [];
+  private queue: PendingEvent[] = [];
   private starting = false;
+  private deliveryInFlight = false;
+  private closeRecorded = false;
 
   constructor(input: TrackerInput) {
     this.sessionToken = input.sessionToken;
@@ -74,13 +86,14 @@ export class EngagementTracker {
   }
 
   close(): void {
-    if (this.visitId !== null)
-      void this.enqueue({
-        eventType: 'close',
-        slideId: this.currentSlideId() ?? undefined,
-        visibleDurationMs: 0,
-        keepalive: true,
-      });
+    if (this.visitId === null || this.closeRecorded) return;
+    this.closeRecorded = true;
+    void this.enqueue({
+      eventType: 'close',
+      slideId: this.currentSlideId() ?? undefined,
+      visibleDurationMs: 0,
+      keepalive: true,
+    });
   }
 
   stop(): void {
@@ -129,6 +142,10 @@ export class EngagementTracker {
 
   private async enqueue(input: QueuedEvent): Promise<void> {
     if (this.visitId === null) return;
+    if (this.queue.length >= MAX_QUEUED_EVENTS) {
+      if (input.eventType !== 'close') return;
+      this.queue.pop();
+    }
     const event: EngagementEvent = {
       id: crypto.randomUUID(),
       eventType: input.eventType,
@@ -140,22 +157,39 @@ export class EngagementTracker {
       tabVisible: document.visibilityState === 'visible',
       recentlyActive: Date.now() - this.lastActivityAt <= 60_000,
     };
-    this.queue = [...this.queue, event];
-    const pending = this.queue;
+    this.queue.push({ event, keepalive: input.keepalive === true, attempts: 0 });
+    await this.deliverPending();
+  }
+
+  private async deliverPending(): Promise<void> {
+    if (this.deliveryInFlight || this.visitId === null) return;
+    this.deliveryInFlight = true;
     try {
-      await apiEmpty(`/v1/viewer/visits/${this.visitId}/events`, {
-        method: 'POST',
-        keepalive: input.keepalive,
-        headers: { 'x-viewer-session': this.sessionToken },
-        body: JSON.stringify({ events: pending }),
-      });
-      this.queue = this.queue.filter((queued) => !pending.some((sent) => sent.id === queued.id));
-    } catch (error) {
-      // Network and API failures intentionally leave the batch queued. A later event retries the
-      // same idempotency keys, while non-Error throws still surface as programming defects.
-      if (!(error instanceof Error)) throw error;
+      while (this.queue.length > 0) {
+        const batch = this.queue.slice(0, MAX_EVENTS_PER_REQUEST);
+        try {
+          await apiEmpty(`/v1/viewer/visits/${this.visitId}/events`, {
+            method: 'POST',
+            keepalive: batch.some((pending) => pending.keepalive),
+            headers: { 'x-viewer-session': this.sessionToken },
+            body: JSON.stringify({ events: batch.map((pending) => pending.event) }),
+          });
+          this.queue.splice(0, batch.length);
+        } catch (error) {
+          if (!isExpectedDeliveryError(error)) throw error;
+          for (const pending of batch) pending.attempts += 1;
+          this.queue = this.queue.filter((pending) => pending.attempts < MAX_DELIVERY_ATTEMPTS);
+          return;
+        }
+      }
+    } finally {
+      this.deliveryInFlight = false;
     }
   }
+}
+
+function isExpectedDeliveryError(error: unknown): error is ApiError | TypeError {
+  return error instanceof ApiError || error instanceof TypeError;
 }
 
 function deviceClass(): 'mobile' | 'tablet' | 'desktop' {

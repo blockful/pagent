@@ -1,5 +1,12 @@
 # Agent UI Session
 
+> **Superseded historical document — pre-rename V0 design.** The current
+> product model has exactly two public MCP tools, `write` and `read`; every
+> `write` output is a Page. A presentation (historically called a deck) is a
+> durable, revisioned, shareable, analyzable Page. The original tool names and
+> flows below are retained as historical context; use [README.md](../README.md)
+> for the active contract.
+
 **TL;DR**
 Give your terminal agent a UI. The agent posts a form spec, prints a URL, and waits. You open it, fill the form, submit. The agent reads the result and continues.
 

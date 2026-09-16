@@ -8,13 +8,13 @@
  * @returns A complete CSP header value string, directives joined with "; ".
  */
 export function buildCsp(apiUrl: string | undefined): string {
-  let connectSrc = "'self'";
+  const googleFontsStylesheetOrigin = 'https://fonts.googleapis.com';
+  let connectSrc = `'self' ${googleFontsStylesheetOrigin}`;
   if (apiUrl) {
     try {
-      connectSrc = `'self' ${new URL(apiUrl).origin}`;
+      connectSrc = `'self' ${new URL(apiUrl).origin} ${googleFontsStylesheetOrigin}`;
     } catch {
-      // VITE_API_URL is malformed — fall back to 'self' only.
-      // The dev server doesn't need this (Vite proxies API routes same-origin).
+      connectSrc = `'self' ${googleFontsStylesheetOrigin}`;
     }
   }
   return [

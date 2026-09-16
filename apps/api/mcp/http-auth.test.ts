@@ -181,6 +181,26 @@ describe('Bearer auth gating', () => {
     await res.body?.cancel();
   });
 
+  it('rejects an invalid optional Bearer instead of silently downgrading identity', async () => {
+    const spy = vi.spyOn(jwt, 'verifyAccessToken').mockRejectedValue(new Error('expired'));
+    try {
+      const res = await fetch(mcpUrl, {
+        method: 'POST',
+        headers: {
+          Accept: MCP_ACCEPT,
+          'Content-Type': 'application/json',
+          authorization: 'Bearer expired.jwt.token',
+        },
+        body: INITIALIZE_BODY,
+      });
+      expect(res.status).toBe(401);
+      expect(res.headers.get('WWW-Authenticate')).toContain('error="invalid_token"');
+      expect((await parseJson(res, errorResponseSchema)).error).toBe('invalid_token');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('verifies an optional Bearer token during the auth grace period', async () => {
     const claims = accessTokenClaims('page:create', 'grace-period-user');
     const spy = vi.spyOn(jwt, 'verifyAccessToken').mockResolvedValue(claims);

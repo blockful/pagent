@@ -64,14 +64,12 @@ class DeckViewer extends LitElement {
     super.connectedCallback();
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('pagehide', this.onPageHide);
-    document.addEventListener('visibilitychange', this.onVisibilityChange);
     void this.load();
   }
 
   disconnectedCallback(): void {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('pagehide', this.onPageHide);
-    document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.observer?.disconnect();
     this.tracker?.stop();
     super.disconnectedCallback();
@@ -229,9 +227,6 @@ class DeckViewer extends LitElement {
   };
 
   private onPageHide = (): void => this.tracker?.close();
-  private onVisibilityChange = (): void => {
-    if (document.visibilityState === 'hidden') this.tracker?.close();
-  };
   private handleError(error: unknown): void {
     const failure = viewerFailure(error);
     this.state = failure.state;

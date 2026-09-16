@@ -8,6 +8,7 @@ import {
   type ShareLink,
 } from './deck-types.ts';
 import { viewerAccessSchema } from './viewer-types.ts';
+import { parseShareLinkFormData } from './deck-sharing-form-data.ts';
 import { renderSharingPanel } from './deck-sharing-view.ts';
 import { productLayoutStyles } from './product-layout-styles.ts';
 import { productStyles } from './product-styles.ts';
@@ -23,6 +24,11 @@ class DeckSharingPanel extends LitElement {
     saving: { state: true },
     error: { state: true },
     createdUrl: { state: true },
+    revokeCandidate: { state: true },
+    revoking: { state: true },
+    previewingLinkId: { state: true },
+    requestsLoading: { state: true },
+    decidingRequestId: { state: true },
   };
   static styles = [productStyles, productLayoutStyles];
 
@@ -35,6 +41,11 @@ class DeckSharingPanel extends LitElement {
   declare saving: boolean;
   declare error: string | null;
   declare createdUrl: string | null;
+  declare revokeCandidate: ShareLink | null;
+  declare revoking: boolean;
+  declare previewingLinkId: string | null;
+  declare requestsLoading: boolean;
+  declare decidingRequestId: string | null;
 
   constructor() {
     super();
@@ -47,6 +58,11 @@ class DeckSharingPanel extends LitElement {
     this.saving = false;
     this.error = null;
     this.createdUrl = null;
+    this.revokeCandidate = null;
+    this.revoking = false;
+    this.previewingLinkId = null;
+    this.requestsLoading = false;
+    this.decidingRequestId = null;
   }
 
   connectedCallback(): void {
@@ -56,6 +72,7 @@ class DeckSharingPanel extends LitElement {
 
   private async loadLinks(): Promise<void> {
     this.loading = true;
+    this.error = null;
     try {
       this.links = (await apiJson(`/v1/decks/${this.deckId}/share-links`, shareLinksSchema)).links;
     } catch (error) {
@@ -81,26 +98,7 @@ class DeckSharingPanel extends LitElement {
   private async saveLink(event: Event): Promise<void> {
     event.preventDefault();
     if (!(event.currentTarget instanceof HTMLFormElement)) return;
-    const data = new FormData(event.currentTarget);
-    const name = value(data, 'name');
-    const audience = value(data, 'audience');
-    const requireAuth = data.get('require_auth') === 'on';
-    const values = value(data, 'allowed')
-      .split(/[\n,]/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-    const allowedEmails = values.filter((entry) => entry.includes('@') && !entry.startsWith('@'));
-    const allowedDomains = values.filter((entry) => !entry.includes('@') || entry.startsWith('@'));
-    const expiry = value(data, 'expires_at');
-    const accessMode =
-      audience === 'anyone' ? 'anyone' : requireAuth ? 'authenticated' : 'allowed_email';
-    const body = {
-      name,
-      access_mode: accessMode,
-      allowed_emails: audience === 'anyone' ? [] : allowedEmails,
-      allowed_domains: audience === 'anyone' ? [] : allowedDomains,
-      ...(expiry ? { expires_at: new Date(expiry).toISOString() } : {}),
-    };
+    const body = parseShareLinkFormData(new FormData(event.currentTarget));
     this.saving = true;
     this.error = null;
     try {
@@ -126,42 +124,99 @@ class DeckSharingPanel extends LitElement {
     }
   }
 
-  private async revoke(link: ShareLink): Promise<void> {
-    if (!window.confirm(`Revoke “${link.name}” now? Open viewer sessions will stop immediately.`))
-      return;
-    await apiEmpty(`/v1/decks/${this.deckId}/share-links/${link.id}/revoke`, { method: 'POST' });
-    await this.loadLinks();
+  private async openRevoke(link: ShareLink): Promise<void> {
+    if (this.revoking) return;
+    this.revokeCandidate = link;
+    this.error = null;
+    await this.updateComplete;
+    const dialog = this.renderRoot.querySelector('#revoke-dialog');
+    if (dialog instanceof HTMLDialogElement) dialog.showModal();
+  }
+
+  private closeRevoke(): void {
+    if (this.revoking) return;
+    this.revokeCandidate = null;
+    const dialog = this.renderRoot.querySelector('#revoke-dialog');
+    if (dialog instanceof HTMLDialogElement) dialog.close();
+  }
+
+  private async confirmRevoke(): Promise<void> {
+    const link = this.revokeCandidate;
+    if (link === null || this.revoking) return;
+    this.revoking = true;
+    this.error = null;
+    try {
+      await apiEmpty(`/v1/decks/${this.deckId}/share-links/${link.id}/revoke`, { method: 'POST' });
+      this.revokeCandidate = null;
+      const dialog = this.renderRoot.querySelector('#revoke-dialog');
+      if (dialog instanceof HTMLDialogElement) dialog.close();
+      await this.loadLinks();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : 'Could not revoke link.';
+    } finally {
+      this.revoking = false;
+    }
   }
 
   private async preview(link: ShareLink): Promise<void> {
-    const access = await apiJson(
-      `/v1/decks/${this.deckId}/share-links/${link.id}/preview`,
-      viewerAccessSchema,
-      { method: 'POST' },
-    );
-    if (access.kind !== 'granted') return;
-    sessionStorage.setItem('pagent-owner-preview', access.sessionToken);
-    location.assign('/view');
+    if (this.previewingLinkId !== null) return;
+    this.previewingLinkId = link.id;
+    this.error = null;
+    try {
+      const access = await apiJson(
+        `/v1/decks/${this.deckId}/share-links/${link.id}/preview`,
+        viewerAccessSchema,
+        { method: 'POST' },
+      );
+      if (access.kind !== 'granted') {
+        this.error = 'Could not open the owner preview. Try again.';
+        return;
+      }
+      sessionStorage.setItem('pagent-owner-preview', access.sessionToken);
+      location.assign('/view');
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : 'Could not open the owner preview.';
+    } finally {
+      this.previewingLinkId = null;
+    }
   }
 
   private async showRequests(link: ShareLink): Promise<void> {
+    if (this.requestsLoading) return;
     this.requestLinkId = link.id;
-    this.requests = (
-      await apiJson(
-        `/v1/decks/${this.deckId}/share-links/${link.id}/requests`,
-        accessRequestsSchema,
-      )
-    ).requests;
+    this.requests = [];
+    this.requestsLoading = true;
+    this.error = null;
+    try {
+      this.requests = (
+        await apiJson(
+          `/v1/decks/${this.deckId}/share-links/${link.id}/requests`,
+          accessRequestsSchema,
+        )
+      ).requests;
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : 'Could not load access requests.';
+    } finally {
+      this.requestsLoading = false;
+    }
   }
 
   private async decide(request: AccessRequest, decision: 'approved' | 'denied'): Promise<void> {
-    if (this.requestLinkId === null) return;
-    await apiEmpty(
-      `/v1/decks/${this.deckId}/share-links/${this.requestLinkId}/requests/${request.id}`,
-      { method: 'POST', body: JSON.stringify({ decision }) },
-    );
+    if (this.requestLinkId === null || this.decidingRequestId !== null) return;
+    this.decidingRequestId = request.id;
+    this.error = null;
     const link = this.links.find((candidate) => candidate.id === this.requestLinkId);
-    if (link !== undefined) await this.showRequests(link);
+    try {
+      await apiEmpty(
+        `/v1/decks/${this.deckId}/share-links/${this.requestLinkId}/requests/${request.id}`,
+        { method: 'POST', body: JSON.stringify({ decision }) },
+      );
+      if (link !== undefined) await this.showRequests(link);
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : 'Could not update access request.';
+    } finally {
+      this.decidingRequestId = null;
+    }
   }
 
   private async copyCreated(): Promise<void> {
@@ -178,20 +233,22 @@ class DeckSharingPanel extends LitElement {
       saving: this.saving,
       error: this.error,
       createdUrl: this.createdUrl,
+      revokeCandidate: this.revokeCandidate,
+      revoking: this.revoking,
+      previewingLinkId: this.previewingLinkId,
+      requestsLoading: this.requestsLoading,
+      decidingRequestId: this.decidingRequestId,
       onOpenEditor: (link) => void this.openEditor(link),
       onCloseEditor: () => this.closeEditor(),
       onSaveLink: (event) => void this.saveLink(event),
-      onRevoke: (link) => void this.revoke(link),
+      onOpenRevoke: (link) => void this.openRevoke(link),
+      onCloseRevoke: () => this.closeRevoke(),
+      onConfirmRevoke: () => void this.confirmRevoke(),
       onPreview: (link) => void this.preview(link),
       onShowRequests: (link) => void this.showRequests(link),
       onDecide: (request, decision) => void this.decide(request, decision),
       onCopyCreated: () => void this.copyCreated(),
     });
   }
-}
-
-function value(data: FormData, key: string): string {
-  const result = data.get(key);
-  return typeof result === 'string' ? result.trim() : '';
 }
 customElements.define('deck-sharing-panel', DeckSharingPanel);

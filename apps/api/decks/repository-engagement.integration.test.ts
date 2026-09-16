@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as db from '../db.ts';
+import { deleteViewerAnalytics, purgeExpiredAnalytics } from './repository-access-settings.ts';
 import { getDeckAnalytics } from './repository-analytics.ts';
 import { publishDeck } from './repository-decks.ts';
 import { ingestEngagement, startVisit } from './repository-engagement.ts';
@@ -16,6 +17,7 @@ integration('viewer engagement repository', () => {
   const setup = postgres(databaseUrl ?? '', { ssl: false, prepare: false });
   let ownerId = '';
   let deckId = '';
+  let allowedToken = '';
   let viewerSessionToken = '';
   let slideIds: readonly string[] = [];
 
@@ -54,6 +56,7 @@ integration('viewer engagement repository', () => {
       allowed_emails: ['buyer@northstar.example'],
       allowed_domains: [],
     });
+    allowedToken = link.token;
     const access = await grantViewerAccess({
       token: link.token,
       email: 'buyer@northstar.example',
@@ -172,5 +175,69 @@ integration('viewer engagement repository', () => {
     });
     expect(analytics.overview.averageActiveTimeMs).toBeGreaterThan(0);
     expect(analytics.overview.averageActiveTimeMs).toBeLessThanOrEqual(20_000);
+  });
+
+  it('deletes retained viewer identity with personal analytics', async () => {
+    const removed = await deleteViewerAnalytics(ownerId, deckId, ' BUYER@NORTHSTAR.EXAMPLE ');
+
+    const [visits, sessions] = await Promise.all([
+      db.database()<{ count: number }[]>`
+        select count(*)::integer as count from visits v
+        join share_links sl on sl.id = v.share_link_id
+        where sl.deck_id = ${deckId} and lower(v.viewer_email) = 'buyer@northstar.example'
+      `,
+      db.database()<{ count: number }[]>`
+        select count(*)::integer as count from viewer_sessions vs
+        join share_links sl on sl.id = vs.share_link_id
+        where sl.deck_id = ${deckId} and lower(vs.viewer_email) = 'buyer@northstar.example'
+      `,
+    ]);
+
+    expect(removed).toBe(1);
+    expect(visits[0]?.count).toBe(0);
+    expect(sessions[0]?.count).toBe(0);
+  });
+
+  it('purges orphaned viewer identity when its analytics exceed workspace retention', async () => {
+    const access = await grantViewerAccess({
+      token: allowedToken,
+      email: 'buyer@northstar.example',
+    });
+    expect(access.kind).toBe('granted');
+    if (access.kind !== 'granted') return;
+    const started = await startVisit(access.sessionToken, {
+      visible: true,
+      interacted: true,
+      analyticsConsent: true,
+      deviceClass: 'desktop',
+      browserFamily: 'Chromium',
+      countryCode: null,
+    });
+    expect(started.kind).toBe('started');
+    await db.database()`
+      update workspaces set analytics_retention_days = 30
+      where id = (select workspace_id from decks where id = ${deckId})
+    `;
+    await db.database()`
+      update visits set started_at = now() - interval '31 days',
+        last_activity_at = now() - interval '31 days'
+      where id = ${started.kind === 'started' ? started.visitId : null}
+    `;
+    await db.database()`
+      update viewer_sessions set created_at = now() - interval '31 days'
+      where token_hash in (
+        select vs.token_hash from viewer_sessions vs
+        join share_links sl on sl.id = vs.share_link_id
+        where sl.deck_id = ${deckId} and lower(vs.viewer_email) = 'buyer@northstar.example'
+      )
+    `;
+
+    await expect(purgeExpiredAnalytics()).resolves.toBe(1);
+    const sessions = await db.database()<{ count: number }[]>`
+      select count(*)::integer as count from viewer_sessions vs
+      join share_links sl on sl.id = vs.share_link_id
+      where sl.deck_id = ${deckId} and lower(vs.viewer_email) = 'buyer@northstar.example'
+    `;
+    expect(sessions[0]?.count).toBe(0);
   });
 });

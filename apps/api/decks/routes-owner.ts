@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AuthVariables } from '../auth/middleware.ts';
-import { requireAuth } from '../auth/middleware.ts';
+import { requireAuth, requirePageScopeForMethod } from '../auth/middleware.ts';
 import {
   analyticsQuerySchema,
   analyticsUrlQuerySchema,
@@ -32,7 +32,8 @@ const deckMutationSchema = z
 export const ownerDeckRoutes = new Hono<{ Variables: AuthVariables }>();
 type DeckContext = Context<{ Variables: AuthVariables }>;
 
-ownerDeckRoutes.use('/decks/*', requireAuth());
+ownerDeckRoutes.use('/decks', requireAuth(), requirePageScopeForMethod());
+ownerDeckRoutes.use('/decks/*', requireAuth(), requirePageScopeForMethod());
 
 ownerDeckRoutes.post('/decks', async (c) => {
   const parsed = publishDeckBodySchema.safeParse(await c.req.json().catch(() => null));

@@ -22,7 +22,11 @@ function makeServer() {
 }
 
 const defaultOps: PageOps = {
-  writeInteractive: async () => ({ id: 'a'.repeat(32), url: 'https://pagent.link/a', expires_at: 1 }),
+  writeInteractive: async () => ({
+    id: 'a'.repeat(32),
+    url: 'https://pagent.link/a',
+    expires_at: 1,
+  }),
   writeDocument: async () => ({ id: 'b'.repeat(32), url: 'https://pagent.link/b', expires_at: 2 }),
   writePresentation: async () => ({
     page_id: '00000000-0000-4000-8000-000000000001',
@@ -79,10 +83,7 @@ describe('registerPagentTools', () => {
       },
     });
 
-    const interactive = await tool(tools, 'write').handler(
-      { type: 'interactive', spec: [] },
-      auth,
-    );
+    const interactive = await tool(tools, 'write').handler({ type: 'interactive', spec: [] }, auth);
     const document = await tool(tools, 'write').handler(
       { type: 'document', html: '<h1>Report</h1>' },
       auth,

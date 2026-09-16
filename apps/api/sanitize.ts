@@ -1,5 +1,5 @@
 /**
- * Server-side HTML sanitization for the html page format.
+ * Server-side sanitization for document Pages (HTML format).
  *
  * Runs once on POST /new before storage. Returns the cleaned HTML plus
  * dropped-tag and dropped-attr counts (logged as forensic signal).
@@ -21,8 +21,8 @@ const FORBID_TAGS = [
   'link', // no external stylesheets
   'base', // we inject our own <base> in the renderer scaffold
   'meta', // no <meta http-equiv=refresh>; renderer injects its own meta-CSP
-  // show_html is view-only: remove data-entry and submission controls while
-  // preserving their text nodes where DOMPurify permits it.
+  // Document Pages are view-only: remove data-entry and submission controls
+  // while preserving their text nodes where DOMPurify permits it.
   'form',
   'input',
   'button',

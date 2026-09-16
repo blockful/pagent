@@ -147,7 +147,13 @@ export async function listAccessRequests(
     from access_requests ar join share_links sl on sl.id = ar.share_link_id
     join decks d on d.id = sl.deck_id
     where d.id = ${deckId} and sl.id = ${linkId} and d.deleted_at is null
-      and (d.owner_id = ${userId} or sl.creator_id = ${userId})
+      and (
+        d.owner_id = ${userId}
+        or sl.creator_id = ${userId} and exists (
+          select 1 from workspace_members wm where wm.workspace_id = d.workspace_id
+            and wm.user_id = ${userId} and wm.status = 'active'
+        )
+      )
     order by ar.created_at desc
   `;
   const allowed = await db.database()<{ allowed: boolean }[]>`

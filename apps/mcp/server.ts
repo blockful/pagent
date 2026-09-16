@@ -155,7 +155,7 @@ const restOps: PageOps = {
   },
 };
 
-const server = new McpServer({ name: 'pagent', version: '0.0.1' });
+const server = new McpServer({ name: 'pagent', version: '0.1.0' });
 registerPagentTools(server, restOps);
 
 // Boot guard — only start the stdio transport when run directly, so tests

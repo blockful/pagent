@@ -76,7 +76,7 @@ class ProductNavigation extends LitElement {
     }
   `;
 
-  declare current: 'decks' | 'privacy' | '';
+  declare current: 'decks' | 'privacy' | 'admin' | '';
 
   constructor() {
     super();
@@ -86,11 +86,11 @@ class ProductNavigation extends LitElement {
   render() {
     return html`<nav aria-label="Product">
       <span class="label">Workspace</span>
-      ${this.link('/decks', 'Decks', 'decks')}${this.link(
+      ${this.link('/pages', 'Pages', 'decks')}${this.link(
         '/privacy',
         'Privacy',
         'privacy',
-      )}${this.link('/', 'Publish guide', '')}
+      )}${this.link('/admin', 'Admin', 'admin')}${this.link('/', 'Publish guide', '')}
     </nav>`;
   }
 

@@ -28,6 +28,7 @@ import { verifyAccessToken } from './jwt.ts';
 import {
   resolveAuth,
   requireAuth,
+  requirePageScopeForMethod,
   requireScope,
   type AuthVariables,
   SESSION_COOKIE_NAME,
@@ -59,7 +60,24 @@ function makeTestApp() {
   app.get('/me', (c) => c.json(c.var.user));
   app.get('/private', requireAuth(), (c) => c.json({ ok: true, user: c.var.user }));
   app.get('/create', requireScope('page:create'), (c) => c.json({ ok: true }));
+  app.get('/page-scoped', requirePageScopeForMethod(), (c) => c.json({ ok: true }));
+  app.post('/page-scoped', requirePageScopeForMethod(), (c) => c.json({ ok: true }));
   return app;
+}
+
+function bearerClaims(scope: string) {
+  return {
+    sub: 'scoped-user',
+    email: 'scoped@example.com',
+    handle: 'scoped',
+    client_id: 'mcp-cli',
+    scope,
+    iss: 'http://test.local',
+    aud: 'http://test.local',
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    iat: Math.floor(Date.now() / 1000),
+    jti: `jti-${scope}`,
+  };
 }
 
 beforeEach(() => {
@@ -130,18 +148,9 @@ describe('requireAuth', () => {
 
 describe('requireScope', () => {
   it('returns 403 with an OAuth challenge when a Bearer lacks the required scope', async () => {
-    (verifyAccessToken as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      sub: 'read-only-user',
-      email: 'reader@example.com',
-      handle: 'reader',
-      client_id: 'mcp-cli',
-      scope: 'page:read',
-      iss: 'http://test.local',
-      aud: 'http://test.local',
-      exp: Math.floor(Date.now() / 1000) + 3600,
-      iat: Math.floor(Date.now() / 1000),
-      jti: 'jti-read-only',
-    });
+    (verifyAccessToken as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      bearerClaims('page:read'),
+    );
     const app = makeTestApp();
     const res = await app.fetch(
       new Request(`${BASE}/create`, { headers: { authorization: 'Bearer valid.jwt' } }),
@@ -176,5 +185,71 @@ describe('requireScope', () => {
     const app = makeTestApp();
     const res = await app.fetch(new Request(`${BASE}/create`));
     expect(res.status).toBe(200);
+  });
+});
+
+describe('requirePageScopeForMethod', () => {
+  it('allows a read-scoped Bearer to read but not mutate', async () => {
+    (verifyAccessToken as ReturnType<typeof vi.fn>).mockResolvedValue(bearerClaims('page:read'));
+    const app = makeTestApp();
+
+    expect(
+      (
+        await app.fetch(
+          new Request(`${BASE}/page-scoped`, {
+            headers: { authorization: 'Bearer read.jwt' },
+          }),
+        )
+      ).status,
+    ).toBe(200);
+
+    const mutation = await app.fetch(
+      new Request(`${BASE}/page-scoped`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer read.jwt' },
+      }),
+    );
+    expect(mutation.status).toBe(403);
+    expect(mutation.headers.get('WWW-Authenticate')).toContain('scope="page:create"');
+  });
+
+  it('allows a create-scoped Bearer to mutate but not read', async () => {
+    (verifyAccessToken as ReturnType<typeof vi.fn>).mockResolvedValue(bearerClaims('page:create'));
+    const app = makeTestApp();
+
+    const read = await app.fetch(
+      new Request(`${BASE}/page-scoped`, {
+        headers: { authorization: 'Bearer create.jwt' },
+      }),
+    );
+    expect(read.status).toBe(403);
+    expect(read.headers.get('WWW-Authenticate')).toContain('scope="page:read"');
+
+    expect(
+      (
+        await app.fetch(
+          new Request(`${BASE}/page-scoped`, {
+            method: 'POST',
+            headers: { authorization: 'Bearer create.jwt' },
+          }),
+        )
+      ).status,
+    ).toBe(200);
+  });
+
+  it('keeps browser session requests independent of OAuth scopes', async () => {
+    (lookupSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'browser-user',
+      email: 'browser@example.com',
+      handle: 'browser',
+      authMethod: 'cookie',
+    });
+    const app = makeTestApp();
+    const headers = { cookie: `${SESSION_COOKIE_NAME}=valid-browser-session` };
+
+    expect((await app.fetch(new Request(`${BASE}/page-scoped`, { headers }))).status).toBe(200);
+    expect(
+      (await app.fetch(new Request(`${BASE}/page-scoped`, { method: 'POST', headers }))).status,
+    ).toBe(200);
   });
 });

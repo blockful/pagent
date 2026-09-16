@@ -1,14 +1,14 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import type { AccessSettings, AnalyticsAudience, AuditEvent } from './deck-types.ts';
+import type { AccessSettings, AnalyticsAudience } from './deck-types.ts';
 
 type AccessPanelViewInput = {
   readonly settings: AccessSettings | null;
-  readonly audit: readonly AuditEvent[];
   readonly visibility: AccessSettings['analyticsVisibility'];
   readonly subjectIds: readonly string[];
   readonly contentIds: readonly string[];
   readonly audience: AnalyticsAudience | null;
   readonly loading: boolean;
+  readonly saving: 'audience' | 'content' | 'preview' | null;
   readonly error: string | null;
   readonly message: string | null;
   readonly onVisibilityChange: (event: Event) => void;
@@ -17,9 +17,6 @@ type AccessPanelViewInput = {
   readonly onPreviewAudience: () => void;
   readonly onSaveAudience: () => void;
   readonly onSaveContent: () => void;
-  readonly onAddMember: (event: Event) => void;
-  readonly onRemoveMember: (memberId: string, email: string) => void;
-  readonly onSavePolicy: (event: Event) => void;
 };
 
 export function renderAccessPanel(input: AccessPanelViewInput): TemplateResult {
@@ -36,11 +33,13 @@ export function renderAccessPanel(input: AccessPanelViewInput): TemplateResult {
     <div class="detail-grid">
       <section class="surface stack">
         <p class="eyebrow">Separate permission</p>
-        <h2>View deck content</h2>
+        <h2>View page content</h2>
         <p class="muted">Content access never grants analytics or link management.</p>
         ${renderMembers(input)}
         <div class="actions">
-          <button class="button" @click=${input.onSaveContent}>Save content access</button>
+          <button class="button" ?disabled=${input.saving !== null} @click=${input.onSaveContent}>
+            ${input.saving === 'content' ? 'Saving…' : 'Save content access'}
+          </button>
         </div>
       </section>
       <section class="surface stack">
@@ -57,121 +56,56 @@ export function renderAccessPanel(input: AccessPanelViewInput): TemplateResult {
         </div>
         ${renderSubjects(input)}
         <div class="actions">
-          <button class="button secondary" @click=${input.onPreviewAudience}>
-            Preview named audience</button
+          <button
+            class="button secondary"
+            ?disabled=${input.saving !== null}
+            @click=${input.onPreviewAudience}
+          >
+            ${input.saving === 'preview' ? 'Previewing…' : 'Preview named audience'}</button
           ><button
             class="button"
-            ?disabled=${input.audience === null}
+            ?disabled=${input.audience === null || input.saving !== null}
             @click=${input.onSaveAudience}
           >
-            Save audience
+            ${input.saving === 'audience' ? 'Saving…' : 'Save audience'}
           </button>
         </div>
         ${input.audience
           ? html`<div class="notice">
               <strong>Effective audience</strong><br />${input.audience.audience
                 .map((member) => member.email)
-                .join(', ') || 'Deck owner only'}
+                .join(', ') || 'Page owner only'}
             </div>`
           : nothing}
       </section>
     </div>
-    <div class="detail-grid">
-      <form class="surface stack" @submit=${input.onAddMember}>
-        <h2>Add workspace member</h2>
-        <div class="field">
-          <label for="member-email">Existing Pagent account email</label
-          ><input id="member-email" name="email" type="email" required />
-        </div>
-        <div class="field">
-          <label for="member-role">Role</label
-          ><select id="member-role" name="role">
-            <option value="member">Member</option>
-            <option value="admin">Admin</option>
-          </select>
-        </div>
-        <button class="button" type="submit">Add member</button>
-      </form>
-      <form class="surface stack" @submit=${input.onSavePolicy}>
-        <h2>Privacy & retention</h2>
-        <label class="choice"
-          ><input
-            type="checkbox"
-            name="consent"
-            ?checked=${input.settings.analyticsConsentRequired}
-          /><span
-            ><strong>Require analytics consent</strong><br /><small
-              >Declining never blocks access; only a minimal audit event remains.</small
-            ></span
-          ></label
-        >
-        <div class="field">
-          <label for="retention">Retention days</label
-          ><input
-            id="retention"
-            name="retention"
-            type="number"
-            min="30"
-            max="2555"
-            .value=${String(input.settings.analyticsRetentionDays)}
-          />
-        </div>
-        <button class="button" type="submit">Save policy</button>
-      </form>
-    </div>
-    <section class="surface stack">
-      <h2>Audit log</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Action</th>
-              <th>Actor</th>
-              <th>When</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${input.audit.map(
-              (event) =>
-                html`<tr>
-                  <td data-label="Action" class="mono">${event.action}</td>
-                  <td data-label="Actor">${event.actorEmail ?? 'Viewer / system'}</td>
-                  <td data-label="When">${formatDate(event.createdAt)}</td>
-                </tr>`,
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <p class="notice">
+      Workspace members, retention, and audit history are managed in <a href="/admin">Admin</a>.
+    </p>
   </div>`;
 }
 
 function renderMembers(input: AccessPanelViewInput): TemplateResult {
-  return html`${input.settings?.members
-    .filter((member) => member.role !== 'owner')
-    .map(
-      (member) =>
-        html`<div class="page-head">
-          <label class="choice"
-            ><input
-              type="checkbox"
-              .value=${member.id}
-              ?checked=${input.contentIds.includes(member.id)}
-              @change=${input.onToggleContent}
-            /><span
-              ><strong>${member.email}</strong><br /><small
-                >${member.role} · ${member.status}</small
-              ></span
-            ></label
-          >
-          <button
-            class="button quiet"
-            @click=${() => input.onRemoveMember(member.id, member.email)}
-          >
-            Remove
-          </button>
-        </div>`,
-    )}`;
+  const members = input.settings?.members.filter((member) => member.role !== 'owner') ?? [];
+  if (members.length === 0) {
+    return html`<p class="notice">No workspace members are available. Add them in Admin first.</p>`;
+  }
+  return html`${members.map(
+    (member) =>
+      html`<label class="choice"
+        ><input
+          type="checkbox"
+          .value=${member.id}
+          ?checked=${input.contentIds.includes(member.id)}
+          ?disabled=${member.status !== 'active'}
+          @change=${input.onToggleContent}
+        /><span
+          ><strong>${member.email}</strong><br /><small
+            >${member.role} · ${member.status}</small
+          ></span
+        ></label
+      >`,
+  )}`;
 }
 
 function renderSubjects(input: AccessPanelViewInput): TemplateResult {
@@ -202,10 +136,4 @@ function renderSubjects(input: AccessPanelViewInput): TemplateResult {
         >`,
     )}
   </div>`;
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
-    new Date(value),
-  );
 }

@@ -1,5 +1,12 @@
 # PRD — Pagent
 
+> **Superseded V0 specification — historical record.** The active product
+> model is documented in [README.md](README.md): the public MCP exposes exactly
+> two tools, `write` and `read`, and every `write` output is a Page. A
+> presentation (historically called a deck) is a durable, revisioned,
+> shareable, analyzable Page. The endpoint and tool names below intentionally
+> preserve the pre-rename design and are not the current public contract.
+
 ## Problem
 
 Terminal-bound AI agents (Claude Code, Cursor, Aider, ChatGPT CLI, custom

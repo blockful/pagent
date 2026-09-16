@@ -33,6 +33,21 @@ describe('visit summary metrics', () => {
 });
 
 describe('trusted heartbeat intervals', () => {
+  it('rejects just below the visibility threshold and accepts exactly 50 percent', () => {
+    // Given
+    const base = {
+      previousAcceptedAt: new Date('2026-09-15T12:00:10.000Z'),
+      eventAt: new Date('2026-09-15T12:00:15.000Z'),
+      serverReceivedAt: new Date('2026-09-15T12:00:16.000Z'),
+      tabVisible: true,
+      recentlyActive: true,
+    };
+
+    // When / Then
+    expect(deriveAcceptedInterval({ ...base, visibleRatio: 0.49 })).toBe(0);
+    expect(deriveAcceptedInterval({ ...base, visibleRatio: 0.5 })).toBe(5_000);
+  });
+
   it('caps an accepted active interval at the ten-second heartbeat ceiling', () => {
     // Given
     const input = {

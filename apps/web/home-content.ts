@@ -1,4 +1,5 @@
 import { html } from 'lit';
+import { loginUrl } from './deck-api.ts';
 
 export const MCP_URL = 'https://api.pagent.link/mcp';
 
@@ -12,25 +13,29 @@ export const renderHomeContent = (copied: boolean, onCopy: () => Promise<void>) 
     <div class="container">
       <nav class="nav">
         <span class="badge"><span class="dot"></span>Pagent</span>
-        <span><a class="nav-link" href="/demo">Live demo</a> &nbsp;/&nbsp; v0.9 A2UI</span>
+        <span><a class="nav-link" href="/demo">Live demo</a> &nbsp;/&nbsp; read + write</span>
       </nav>
 
       <header class="hero">
-        <p class="eyebrow">Generative UI · for any AI agent</p>
-        <h1>Your AI agent can't show you a UI.<br /><em>Now it can.</em></h1>
+        <p class="eyebrow">Two tools · every AI agent</p>
+        <h1>Give your agent a page. <br /><em>Keep it when it matters.</em></h1>
         <p class="lede">
-          Pagent lets any terminal agent render real browser UI — interactive
-          <strong>forms</strong> it reads your answer back from, and rich
-          <strong>dashboards</strong> you just look at. Your agent posts a spec, prints a short
-          link, and waits. You open it, do the thing, and the conversation keeps going.
+          Pagent gives agents two tools: <strong>write pages</strong> and
+          <strong>read pages</strong>. A page can be interactive or view-only. Interactive and
+          document pages are temporary and free with no signup.
+        </p>
+        <p class="lede lede-followup">
           <strong
-            >Works in Claude Code, Cursor, Codex, Cline — any MCP client. Free, no signup.</strong
+            >A presentation is a durable page with ordered slides, secure sharing, and engagement
+            analytics. It lives in your signed-in workspace.</strong
           >
         </p>
 
-        <a class="demo-cta" href="/demo"
-          >Try the live demo — no install <span class="arrow">→</span></a
-        >
+        <div class="hero-actions" role="group" aria-label="Get started">
+          <a class="workspace-cta" href="/pages">Open workspace <span class="arrow">→</span></a>
+          <a class="demo-cta" href="/demo">Try a temporary page — no signup</a>
+          <a class="sign-in-cta" href=${loginUrl('/pages')}>Sign in</a>
+        </div>
 
         <div class="install" id="install" aria-labelledby="install-label">
           <div class="install-head">
@@ -79,7 +84,7 @@ export const renderHomeContent = (copied: boolean, onCopy: () => Promise<void>) 
         <div class="terminal" aria-hidden="true">
           <div>
             <span class="prompt">›</span
-            ><span class="dim">"ask me my favorite color via a UI"</span>
+            ><span class="dim">"ask me my favorite color on a temporary page"</span>
           </div>
           <div>
             <span class="prompt">↳</span><span class="url">https://pagent.link/4f2a…b13c</span>
@@ -87,7 +92,7 @@ export const renderHomeContent = (copied: boolean, onCopy: () => Promise<void>) 
           <div class="rule"></div>
           <div>
             <span class="prompt">›</span
-            ><span class="dim">"show me a dashboard of the test results"</span>
+            ><span class="dim">"turn these results into a presentation page"</span>
           </div>
           <div>
             <span class="prompt">↳</span><span class="url">https://pagent.link/9c1d…7e2a</span
@@ -96,33 +101,32 @@ export const renderHomeContent = (copied: boolean, onCopy: () => Promise<void>) 
         </div>
       </header>
 
-      <p class="section-label"><span>How it works</span><span>three steps</span></p>
+      <p class="section-label"><span>One page model</span><span>two tools</span></p>
 
       <section class="steps">
         <article class="step">
           <div class="step-num">i.</div>
-          <h3>Install in your agent</h3>
+          <h3>Connect once</h3>
           <p>
             Copy the prompt from the <a href="#install" class="step-link">panel above</a> into any
-            agent chat. The agent installs the MCP (<code>show_ui</code>, <code>check_result</code>)
-            and reads the skill that teaches it when to reach for a form.
+            agent chat. Pagent gives it exactly two MCP tools: <code>write</code> and
+            <code>read</code>.
           </p>
         </article>
         <article class="step">
           <div class="step-num">ii.</div>
-          <h3>Ask your agent</h3>
+          <h3>Write the right page</h3>
           <p>
-            Try:
-            <code>"Use the pagent skill to ask me my favorite color via a UI form."</code> The skill
-            teaches the agent the polling pattern; the MCP gives it the tools.
+            Quick pages expire. Sign in when a page should stay in your workspace, become a
+            presentation, or be shared securely. Either kind can be interactive or view-only.
           </p>
         </article>
         <article class="step">
           <div class="step-num">iii.</div>
-          <h3>Open. Submit. Continue.</h3>
+          <h3>Read what happened</h3>
           <p>
-            The agent prints a URL. You open it, fill the form, submit.
-            <code>check_result</code> hands the answer back and the conversation keeps going.
+            <code>read</code> returns page state and submitted answers. Durable presentation pages
+            also surface visits, slide activity, and drop-off analytics in your workspace.
           </p>
         </article>
       </section>

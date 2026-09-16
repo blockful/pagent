@@ -4,10 +4,8 @@ import { renderAccessPanel } from './deck-access-view.ts';
 import {
   accessSettingsSchema,
   analyticsAudienceSchema,
-  auditLogSchema,
   type AccessSettings,
   type AnalyticsAudience,
-  type AuditEvent,
 } from './deck-types.ts';
 import { productLayoutStyles } from './product-layout-styles.ts';
 import { productStyles } from './product-styles.ts';
@@ -18,12 +16,12 @@ class DeckAccessPanel extends LitElement {
   static properties = {
     deckId: { type: String },
     settings: { state: true },
-    audit: { state: true },
     visibility: { state: true },
     subjectIds: { state: true },
     contentIds: { state: true },
     audience: { state: true },
     loading: { state: true },
+    saving: { state: true },
     error: { state: true },
     message: { state: true },
   };
@@ -31,12 +29,12 @@ class DeckAccessPanel extends LitElement {
 
   declare deckId: string;
   declare settings: AccessSettings | null;
-  declare audit: readonly AuditEvent[];
   declare visibility: Visibility;
   declare subjectIds: readonly string[];
   declare contentIds: readonly string[];
   declare audience: AnalyticsAudience | null;
   declare loading: boolean;
+  declare saving: 'audience' | 'content' | 'preview' | null;
   declare error: string | null;
   declare message: string | null;
 
@@ -44,12 +42,12 @@ class DeckAccessPanel extends LitElement {
     super();
     this.deckId = '';
     this.settings = null;
-    this.audit = [];
     this.visibility = 'private';
     this.subjectIds = [];
     this.contentIds = [];
     this.audience = null;
     this.loading = true;
+    this.saving = null;
     this.error = null;
     this.message = null;
   }
@@ -61,13 +59,10 @@ class DeckAccessPanel extends LitElement {
 
   private async load(): Promise<void> {
     this.loading = true;
+    this.error = null;
     try {
-      const [settings, audit] = await Promise.all([
-        apiJson(`/v1/decks/${this.deckId}/access`, accessSettingsSchema),
-        apiJson(`/v1/decks/${this.deckId}/audit`, auditLogSchema),
-      ]);
+      const settings = await apiJson(`/v1/decks/${this.deckId}/access`, accessSettingsSchema);
       this.settings = settings;
-      this.audit = audit.events;
       this.visibility = settings.analyticsVisibility;
       this.contentIds = settings.members
         .filter((member) => member.canViewContent)
@@ -115,83 +110,80 @@ class DeckAccessPanel extends LitElement {
   }
 
   private async previewAudience(): Promise<void> {
-    this.audience = await apiJson(
-      `/v1/decks/${this.deckId}/access/analytics/preview`,
-      analyticsAudienceSchema,
-      {
-        method: 'POST',
-        body: JSON.stringify({ scope: this.visibility, subjectIds: this.subjectIds }),
+    await this.runMutation(
+      'preview',
+      async () => {
+        this.audience = await apiJson(
+          `/v1/decks/${this.deckId}/access/analytics/preview`,
+          analyticsAudienceSchema,
+          {
+            method: 'POST',
+            body: JSON.stringify({ scope: this.visibility, subjectIds: this.subjectIds }),
+          },
+        );
       },
+      'Audience preview ready.',
+      false,
     );
   }
 
   private async saveAudience(): Promise<void> {
-    await apiJson(`/v1/decks/${this.deckId}/access/analytics`, analyticsAudienceSchema, {
-      method: 'PUT',
-      body: JSON.stringify({ scope: this.visibility, subjectIds: this.subjectIds }),
-    });
-    this.message = 'Analytics audience updated immediately.';
-    await this.load();
+    await this.runMutation(
+      'audience',
+      async () => {
+        await apiJson(`/v1/decks/${this.deckId}/access/analytics`, analyticsAudienceSchema, {
+          method: 'PUT',
+          body: JSON.stringify({ scope: this.visibility, subjectIds: this.subjectIds }),
+        });
+      },
+      'Analytics audience updated immediately.',
+      true,
+    );
   }
 
   private async saveContent(): Promise<void> {
-    await apiEmpty(`/v1/decks/${this.deckId}/access/collaborators`, {
-      method: 'PUT',
-      body: JSON.stringify({ memberIds: this.contentIds }),
-    });
-    this.message = 'Deck content collaborators updated.';
-    await this.load();
+    await this.runMutation(
+      'content',
+      async () => {
+        await apiEmpty(`/v1/decks/${this.deckId}/access/collaborators`, {
+          method: 'PUT',
+          body: JSON.stringify({ memberIds: this.contentIds }),
+        });
+      },
+      'Page content collaborators updated.',
+      true,
+    );
   }
 
-  private async addMember(event: Event): Promise<void> {
-    event.preventDefault();
-    if (!(event.currentTarget instanceof HTMLFormElement)) return;
-    const data = new FormData(event.currentTarget);
-    await apiJson(`/v1/decks/${this.deckId}/access/members`, memberSchema, {
-      method: 'POST',
-      body: JSON.stringify({ email: field(data, 'email'), role: field(data, 'role') }),
-    });
-    event.currentTarget.reset();
-    this.message = 'Workspace member added.';
-    await this.load();
-  }
-
-  private async removeMember(memberId: string, email: string): Promise<void> {
-    if (
-      !window.confirm(
-        `Remove ${email} from this workspace? Their deck and analytics access ends immediately.`,
-      )
-    )
-      return;
-    await apiEmpty(`/v1/decks/${this.deckId}/access/members/${memberId}`, { method: 'DELETE' });
-    this.message = 'Member access removed immediately.';
-    await this.load();
-  }
-
-  private async savePolicy(event: Event): Promise<void> {
-    event.preventDefault();
-    if (!(event.currentTarget instanceof HTMLFormElement)) return;
-    const data = new FormData(event.currentTarget);
-    await apiEmpty(`/v1/decks/${this.deckId}/access/policy`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        consentRequired: data.get('consent') === 'on',
-        retentionDays: Number(field(data, 'retention')),
-      }),
-    });
-    this.message = 'Privacy and retention policy saved.';
-    await this.load();
+  private async runMutation(
+    saving: 'audience' | 'content' | 'preview',
+    mutation: () => Promise<void>,
+    success: string,
+    reload: boolean,
+  ): Promise<void> {
+    this.saving = saving;
+    this.error = null;
+    this.message = null;
+    try {
+      await mutation();
+      this.message = success;
+      if (reload) await this.load();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : 'Could not save page permissions';
+    } finally {
+      this.saving = null;
+    }
   }
 
   render() {
     return renderAccessPanel({
       settings: this.settings,
-      audit: this.audit,
       visibility: this.visibility,
       subjectIds: this.subjectIds,
       contentIds: this.contentIds,
       audience: this.audience,
       loading: this.loading,
+      saving: this.saving,
       error: this.error,
       message: this.message,
       onVisibilityChange: (event) => this.changeVisibility(event),
@@ -200,23 +192,11 @@ class DeckAccessPanel extends LitElement {
       onPreviewAudience: () => void this.previewAudience(),
       onSaveAudience: () => void this.saveAudience(),
       onSaveContent: () => void this.saveContent(),
-      onAddMember: (event) => void this.addMember(event),
-      onRemoveMember: (memberId, email) => void this.removeMember(memberId, email),
-      onSavePolicy: (event) => void this.savePolicy(event),
     });
   }
 }
 
-const memberSchema = accessSettingsSchema.shape.members.element.pick({
-  id: true,
-  email: true,
-  handle: true,
-});
 function toggle(values: readonly string[], id: string, checked: boolean): readonly string[] {
   return checked ? [...new Set([...values, id])] : values.filter((value) => value !== id);
-}
-function field(data: FormData, key: string): string {
-  const value = data.get(key);
-  return typeof value === 'string' ? value.trim() : '';
 }
 customElements.define('deck-access-panel', DeckAccessPanel);

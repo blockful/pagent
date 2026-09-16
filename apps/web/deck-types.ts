@@ -21,7 +21,7 @@ export const deckListItemSchema = z.object({
   status: z.enum(['active', 'archived']),
   accessMode: z.enum(['anyone', 'allowed_email', 'authenticated']).nullable(),
   linkCount: z.number().int(),
-  uniqueViewers: z.number().int(),
+  uniqueViewers: z.number().int().nullable(),
   lastViewed: nullableDateSchema,
   updatedAt: dateSchema,
 });

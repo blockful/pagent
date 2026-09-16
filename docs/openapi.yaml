@@ -716,6 +716,75 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error500'
 
+  /v1/workspace:
+    get:
+      operationId: getWorkspaceAdmin
+      tags: [Workspace]
+      summary: Get the current owner or admin workspace governance view
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        '200':
+          description: Workspace policy, page metadata, membership, teams, and recent audit activity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkspaceAdminView' }
+        '401': { description: Authentication required. }
+        '403': { description: Active owner or admin membership required. }
+
+  /v1/workspace/members:
+    post:
+      operationId: addWorkspaceMember
+      tags: [Workspace]
+      summary: Add or reactivate an existing Pagent user
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkspaceMemberRequest' }
+      responses:
+        '201':
+          description: Active workspace membership.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkspaceMember' }
+        '400': { description: Invalid email or role. }
+        '401': { description: Authentication required. }
+        '403': { description: Active owner or admin membership required. }
+        '404': { description: No existing Pagent user has that email. }
+
+  /v1/workspace/members/{memberId}:
+    delete:
+      operationId: suspendWorkspaceMember
+      tags: [Workspace]
+      summary: Suspend a non-owner workspace member and revoke page grants
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      parameters:
+        - { name: memberId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Member suspended. }
+        '401': { description: Authentication required. }
+        '403':
+          { description: Cannot remove an owner, yourself, or a member outside this workspace. }
+        '404': { description: Invalid member identifier. }
+
+  /v1/workspace/policy:
+    put:
+      operationId: updateWorkspacePolicy
+      tags: [Workspace]
+      summary: Update analytics consent and retention policy
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkspacePolicyRequest' }
+      responses:
+        '204': { description: Policy updated. }
+        '400': { description: Invalid policy. }
+        '401': { description: Authentication required. }
+        '403': { description: Active owner or admin membership required. }
+
   /v1/decks:
     get:
       operationId: listDecks
@@ -1609,6 +1678,104 @@ components:
         minimum: 1
 
   schemas:
+    WorkspaceMember:
+      type: object
+      additionalProperties: false
+      required: [id, email, handle, role, status]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        handle: { type: [string, 'null'] }
+        role: { type: string, enum: [owner, admin, member] }
+        status: { type: string, enum: [active, suspended, left] }
+
+    WorkspaceAdminView:
+      type: object
+      additionalProperties: false
+      required: [workspace, pages, members, teams, recentAuditEvents]
+      properties:
+        workspace:
+          type: object
+          additionalProperties: false
+          required:
+            [
+              id,
+              name,
+              role,
+              verifiedDomains,
+              analyticsConsentRequired,
+              analyticsRetentionDays,
+              pageCount,
+            ]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            role: { type: string, enum: [owner, admin] }
+            verifiedDomains: { type: array, items: { type: string } }
+            analyticsConsentRequired: { type: boolean }
+            analyticsRetentionDays: { type: integer, minimum: 30, maximum: 2555 }
+            pageCount: { type: integer, minimum: 0 }
+        pages:
+          type: array
+          maxItems: 100
+          description: Recent durable page metadata. Slide content and viewer analytics are never included.
+          items:
+            $ref: '#/components/schemas/WorkspacePageMetadata'
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/WorkspaceMember' }
+        teams:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name, memberIds]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              memberIds: { type: array, items: { type: string, format: uuid } }
+        recentAuditEvents:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, action, actorEmail, details, createdAt]
+            properties:
+              id: { type: string, format: uuid }
+              action: { type: string }
+              actorEmail: { type: [string, 'null'], format: email }
+              details: {}
+              createdAt: { type: string, format: date-time }
+
+    WorkspacePageMetadata:
+      type: object
+      additionalProperties: false
+      required: [id, title, status, ownerEmail, latestSenderEmail, linkCount, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        status: { type: string, enum: [active, archived] }
+        ownerEmail: { type: string, format: email }
+        latestSenderEmail: { type: [string, 'null'], format: email }
+        linkCount: { type: integer, minimum: 0 }
+        updatedAt: { type: string, format: date-time }
+
+    WorkspaceMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [email, role]
+      properties:
+        email: { type: string, format: email }
+        role: { type: string, enum: [admin, member] }
+
+    WorkspacePolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [consentRequired, retentionDays]
+      properties:
+        consentRequired: { type: boolean }
+        retentionDays: { type: integer, minimum: 30, maximum: 2555 }
+
     PublishDeckRequest:
       type: object
       additionalProperties: false

@@ -125,3 +125,10 @@ export function requireScope(
     return next();
   };
 }
+
+export function requirePageScopeForMethod(): MiddlewareHandler<{ Variables: AuthVariables }> {
+  const requireRead = requireScope('page:read');
+  const requireWrite = requireScope('page:create');
+  return (c, next) =>
+    (c.req.method === 'GET' || c.req.method === 'HEAD' ? requireRead : requireWrite)(c, next);
+}
