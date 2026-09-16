@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AuthCodeRow } from '../db/auth-codes.ts';
 import {
   CLIENT_ID,
   CLIENT_INFO,
@@ -35,12 +36,30 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+function storedAuthCode(codeChallenge: string, overrides: Partial<AuthCodeRow> = {}): AuthCodeRow {
+  return {
+    code: 'auth-code-abc',
+    user_id: USER_ROW.id,
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    scope: SCOPE,
+    resource: null,
+    created_at: new Date(Date.now() - 60_000),
+    expires_at: new Date(Date.now() + 60_000),
+    consumed_at: null,
+    ...overrides,
+  };
+}
+
 describe('exchangeAuthCode', () => {
   it('exchanges a valid code + verifier for a JWT access token + refresh token', async () => {
     const verifier = 'test-verifier-string-with-enough-entropy-12345';
     const challenge = pkceChallenge(verifier);
 
     vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
+    vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce(storedAuthCode(challenge));
     vi.mocked(db.consumeAuthCode).mockResolvedValueOnce({
       userId: USER_ROW.id,
       clientId: CLIENT_ID,
@@ -93,15 +112,7 @@ describe('exchangeAuthCode', () => {
     const challenge = pkceChallenge(verifier);
 
     vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
-    vi.mocked(db.consumeAuthCode).mockResolvedValueOnce({
-      userId: USER_ROW.id,
-      clientId: CLIENT_ID,
-      redirectUri: REDIRECT_URI,
-      codeChallenge: challenge,
-      codeChallengeMethod: 'S256',
-      scope: SCOPE,
-      resource: null,
-    });
+    vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce(storedAuthCode(challenge));
 
     await expect(
       exchangeAuthCode('auth-code-abc', CLIENT_ID, REDIRECT_URI, verifier.slice(0, -1) + 'X'),
@@ -109,12 +120,12 @@ describe('exchangeAuthCode', () => {
       code: 'invalid_grant',
     });
 
+    expect(db.consumeAuthCode).not.toHaveBeenCalled();
     expect(db.insertRefreshToken).not.toHaveBeenCalled();
   });
 
   it('rejects unknown / expired authorization code with invalid_grant', async () => {
     vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
-    vi.mocked(db.consumeAuthCode).mockResolvedValueOnce(null);
     vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce(null);
 
     await expect(
@@ -122,29 +133,41 @@ describe('exchangeAuthCode', () => {
     ).rejects.toMatchObject({
       code: 'invalid_grant',
     });
+    expect(db.consumeAuthCode).not.toHaveBeenCalled();
   });
 
   it('detects auth code replay and revokes the issued refresh-token family', async () => {
     vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
-    vi.mocked(db.consumeAuthCode).mockResolvedValueOnce(null);
-    vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce({
-      code: 'replay-code',
-      user_id: USER_ROW.id,
-      client_id: CLIENT_ID,
-      redirect_uri: REDIRECT_URI,
-      code_challenge: 'irrelevant',
-      code_challenge_method: 'S256',
-      scope: SCOPE,
-      resource: null,
-      created_at: new Date(Date.now() - 60_000),
-      expires_at: new Date(Date.now() + 60_000),
-      consumed_at: new Date(Date.now() - 30_000),
-    });
+    vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce(
+      storedAuthCode('irrelevant', {
+        code: 'replay-code',
+        consumed_at: new Date(Date.now() - 30_000),
+      }),
+    );
 
     await expect(
       exchangeAuthCode('replay-code', CLIENT_ID, REDIRECT_URI, 'verifier'),
     ).rejects.toMatchObject({ code: 'invalid_grant' });
 
+    expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(USER_ROW.id, CLIENT_ID);
+    expect(db.consumeAuthCode).not.toHaveBeenCalled();
+  });
+
+  it('revokes the refresh-token family when a concurrent exchange wins consumption', async () => {
+    const verifier = 'test-verifier-string-with-enough-entropy-12345';
+    const challenge = pkceChallenge(verifier);
+    const stored = storedAuthCode(challenge, { code: 'raced-code' });
+    vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
+    vi.mocked(db.getAuthCodeForReplay)
+      .mockResolvedValueOnce(stored)
+      .mockResolvedValueOnce({ ...stored, consumed_at: new Date() });
+    vi.mocked(db.consumeAuthCode).mockResolvedValueOnce(null);
+
+    await expect(
+      exchangeAuthCode('raced-code', CLIENT_ID, REDIRECT_URI, verifier),
+    ).rejects.toMatchObject({ code: 'invalid_grant' });
+
+    expect(db.consumeAuthCode).toHaveBeenCalledOnce();
     expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(USER_ROW.id, CLIENT_ID);
   });
 
@@ -164,21 +187,28 @@ describe('exchangeAuthCode', () => {
     const verifier = 'test-verifier-string-with-enough-entropy-12345';
     const challenge = pkceChallenge(verifier);
     vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
-    vi.mocked(db.consumeAuthCode).mockResolvedValueOnce({
-      userId: USER_ROW.id,
-      clientId: CLIENT_ID,
-      redirectUri: REDIRECT_URI,
-      codeChallenge: challenge,
-      codeChallengeMethod: 'S256',
-      scope: SCOPE,
-      resource: null,
-    });
+    vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce(storedAuthCode(challenge));
 
     await expect(
       exchangeAuthCode('code', CLIENT_ID, 'http://attacker.example.com/cb', verifier),
     ).rejects.toMatchObject({
       code: 'invalid_grant',
     });
+    expect(db.consumeAuthCode).not.toHaveBeenCalled();
+  });
+
+  it('rejects a registered client_id mismatch without consuming the code', async () => {
+    const verifier = 'test-verifier-string-with-enough-entropy-12345';
+    const challenge = pkceChallenge(verifier);
+    const otherClientId = '22222222-3333-4444-5555-666666666666';
+    vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
+    vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce(storedAuthCode(challenge));
+
+    await expect(
+      exchangeAuthCode('auth-code-abc', otherClientId, REDIRECT_URI, verifier),
+    ).rejects.toMatchObject({ code: 'invalid_grant' });
+
+    expect(db.consumeAuthCode).not.toHaveBeenCalled();
   });
 
   it('rejects missing required parameters with invalid_request', async () => {

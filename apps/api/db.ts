@@ -33,8 +33,12 @@ export type {
   RefreshTokenSuccessor,
 } from './db/refresh-tokens.ts';
 
-export { insertMagicLink, verifyAndConsumeMagicLink } from './db/magic-links.ts';
-export type { MagicLinkAuthorizeContext, MagicLinkInsert } from './db/magic-links.ts';
+export {
+  getActiveMagicLink,
+  insertMagicLink,
+  verifyAndConsumeMagicLink,
+} from './db/magic-links.ts';
+export type { MagicLinkAuthorizeContext, MagicLinkInsert, MagicLinkRow } from './db/magic-links.ts';
 
 export {
   deleteSessionByTokenHash,

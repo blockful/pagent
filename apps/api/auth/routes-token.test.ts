@@ -65,6 +65,19 @@ describe('POST /oauth/token', () => {
     const verifier = 'integration-test-verifier-with-enough-entropy';
     const challenge = pkceS256(verifier);
     vi.mocked(db.getOAuthClientById).mockResolvedValue(TOKEN_CLIENT_ROW);
+    vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce({
+      code: 'test-auth-code',
+      user_id: TOKEN_USER_ROW.id,
+      client_id: TOKEN_CLIENT_ID,
+      redirect_uri: TOKEN_REDIRECT_URI,
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      scope: 'page:create',
+      resource: null,
+      created_at: new Date(Date.now() - 60_000),
+      expires_at: new Date(Date.now() + 60_000),
+      consumed_at: null,
+    });
     vi.mocked(db.consumeAuthCode).mockResolvedValueOnce({
       userId: TOKEN_USER_ROW.id,
       clientId: TOKEN_CLIENT_ID,

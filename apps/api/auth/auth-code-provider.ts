@@ -51,14 +51,12 @@ export async function createAuthCode(
  * PKCE per RFC 7636.
  *
  * Sequence:
- *   1. Atomically consume the code (UPDATE ... WHERE consumed_at IS NULL).
- *   2. If the code was unknown / expired / already consumed → invalid_grant.
- *      For the "already consumed" case (detectable via a second SELECT) we
- *      also revoke any refresh tokens issued from that code's user/client —
- *      RFC 6749 §4.1.2 SHOULD.
- *   3. Verify the PKCE challenge → invalid_grant on mismatch.
- *   4. Verify client_id and redirect_uri match the bound values → invalid_grant.
- *   5. Mint access + refresh tokens.
+ *   1. Read the code and verify expiry, PKCE, client_id, and redirect_uri.
+ *      Invalid exchange attempts must not consume an otherwise valid code.
+ *   2. Atomically consume the validated code (UPDATE ... WHERE consumed_at IS NULL).
+ *   3. If the code was already consumed, revoke any refresh tokens issued
+ *      from that code's user/client — RFC 6749 §4.1.2 SHOULD.
+ *   4. Mint access + refresh tokens.
  */
 export async function exchangeAuthCode(
   code: string,
@@ -79,32 +77,23 @@ export async function exchangeAuthCode(
     throw new TokenError('invalid_client', 'Unknown client_id', 401);
   }
 
-  // Atomic single-use consume. Returns null for "unknown / expired / already
-  // consumed" — we then SELECT to disambiguate the "already consumed" case
-  // and react accordingly.
-  const consumed = await db.consumeAuthCode(code);
-  if (!consumed) {
-    const replay = await db.getAuthCodeForReplay(code);
-    if (replay && replay.consumed_at !== null) {
-      // Replay attempt — revoke any refresh tokens already issued from this
-      // code's user/client pair. RFC 6749 §4.1.2 SHOULD; aligns with the
-      // refresh-token family revocation in `refreshToken` below.
-      logger.warn(
-        {
-          code: code.slice(0, 8) + '…',
-          user_id: replay.user_id,
-          client_id: replay.client_id,
-        },
-        'auth code replay attempt — revoking refresh token family',
-      );
-      await db.revokeAllRefreshTokensForFamily(replay.user_id, replay.client_id);
-    }
+  // Validate against a non-destructive read first. Consuming before these
+  // checks would let an attacker invalidate a stolen code merely by sending
+  // the wrong verifier, client_id, or redirect_uri.
+  const stored = await db.getAuthCodeForReplay(code);
+  if (!stored) {
+    throw new TokenError('invalid_grant', 'Authorization code is invalid or expired');
+  }
+  if (stored.consumed_at !== null) {
+    await revokeForAuthCodeReplay(code, stored.user_id, stored.client_id);
+  }
+  if (stored.expires_at.getTime() <= Date.now()) {
     throw new TokenError('invalid_grant', 'Authorization code is invalid or expired');
   }
 
   // PKCE first (cheaper than DB calls, catches the most common attacker
   // case — forged code from another browser without the verifier).
-  if (!pkceVerify(codeVerifier, consumed.codeChallenge, consumed.codeChallengeMethod)) {
+  if (!pkceVerify(codeVerifier, stored.code_challenge, stored.code_challenge_method)) {
     throw new TokenError('invalid_grant', 'PKCE verification failed');
   }
 
@@ -112,11 +101,23 @@ export async function exchangeAuthCode(
   // client_id/redirect_uri at issue time. A request that doesn't match must
   // fail invalid_grant — a mismatched redirect_uri is the canonical
   // open-redirect / code-injection signal.
-  if (consumed.clientId !== clientId) {
+  if (stored.client_id !== clientId) {
     throw new TokenError('invalid_grant', 'client_id does not match authorization code');
   }
-  if (consumed.redirectUri !== redirectUri) {
+  if (stored.redirect_uri !== redirectUri) {
     throw new TokenError('invalid_grant', 'redirect_uri does not match authorization code');
+  }
+
+  // Atomic single-use consume after all request-controlled bindings pass.
+  // A concurrent valid exchange can still win between the read and UPDATE;
+  // that loser is a replay and retains the family-revocation behavior.
+  const consumed = await db.consumeAuthCode(code);
+  if (!consumed) {
+    const replay = await db.getAuthCodeForReplay(code);
+    if (replay && replay.consumed_at !== null) {
+      await revokeForAuthCodeReplay(code, replay.user_id, replay.client_id);
+    }
+    throw new TokenError('invalid_grant', 'Authorization code is invalid or expired');
   }
 
   // Resolve the user so we can populate JWT claims. cascade delete would have
@@ -129,4 +130,21 @@ export async function exchangeAuthCode(
   }
 
   return mintTokens(user, clientId, consumed.scope);
+}
+
+async function revokeForAuthCodeReplay(
+  code: string,
+  userId: string,
+  clientId: string,
+): Promise<never> {
+  logger.warn(
+    {
+      code: code.slice(0, 8) + '…',
+      user_id: userId,
+      client_id: clientId,
+    },
+    'auth code replay attempt — revoking refresh token family',
+  );
+  await db.revokeAllRefreshTokensForFamily(userId, clientId);
+  throw new TokenError('invalid_grant', 'Authorization code is invalid or expired');
 }

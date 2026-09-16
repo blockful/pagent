@@ -16,6 +16,7 @@ vi.mock('../db.ts', () => ({
   getUserByHandle: vi.fn(),
   insertAuthCode: vi.fn(),
   insertMagicLink: vi.fn(),
+  getActiveMagicLink: vi.fn(),
   verifyAndConsumeMagicLink: vi.fn(),
 }));
 
@@ -35,6 +36,7 @@ import {
   InvalidMagicLinkError,
   SmtpUnavailableError,
   createTransport,
+  inspectMagicLink,
   sendMagicLink,
   verifyMagicLink,
 } from './magic-link.ts';
@@ -126,6 +128,25 @@ describe('sendMagicLink', () => {
 });
 
 describe('verifyMagicLink', () => {
+  it('inspects an active token without consuming it', async () => {
+    const row = {
+      email: 'alex@blockful.io',
+      authorizeContext: { browserSession: true },
+    };
+    vi.mocked(db.getActiveMagicLink).mockResolvedValueOnce(row);
+
+    await expect(inspectMagicLink('inspect-token')).resolves.toEqual(row);
+    expect(db.getActiveMagicLink).toHaveBeenCalledWith(sha256Hex('inspect-token'));
+    expect(db.verifyAndConsumeMagicLink).not.toHaveBeenCalled();
+  });
+
+  it('rejects an inactive token during inspection without consuming it', async () => {
+    vi.mocked(db.getActiveMagicLink).mockResolvedValueOnce(null);
+
+    await expect(inspectMagicLink('inactive-token')).rejects.toBeInstanceOf(InvalidMagicLinkError);
+    expect(db.verifyAndConsumeMagicLink).not.toHaveBeenCalled();
+  });
+
   it('round-trips: sendMagicLink token verifies and returns the stored context', async () => {
     let captured: Parameters<typeof db.insertMagicLink>[0] | null = null;
     vi.mocked(db.insertMagicLink).mockImplementation(async (input) => {

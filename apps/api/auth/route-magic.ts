@@ -5,6 +5,7 @@ import { getClient, isAllowedOAuthRedirectUri } from './clients-store.ts';
 import {
   InvalidMagicLinkError,
   SmtpUnavailableError,
+  inspectMagicLink,
   sendMagicLink,
   verifyMagicLink,
 } from './magic-link.ts';
@@ -138,9 +139,9 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
       return renderError(c, 'Magic link is missing the token parameter.');
     }
 
-    let consumed: Awaited<ReturnType<typeof verifyMagicLink>>;
+    let inspected: Awaited<ReturnType<typeof inspectMagicLink>>;
     try {
-      consumed = await verifyMagicLink(token);
+      inspected = await inspectMagicLink(token);
     } catch (err) {
       if (err instanceof InvalidMagicLinkError) {
         return renderError(
@@ -151,13 +152,27 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
       throw err;
     }
 
-    const ctx = consumed.authorizeContext;
+    const ctx = inspected.authorizeContext;
     if (ctx.browserSession) {
       const validTransaction = verifyBrowserTransaction(c, ctx.browserTransactionHash);
-      clearBrowserTransaction(c);
       if (!validTransaction) {
+        clearBrowserTransaction(c);
         return renderError(c, 'Authorization session expired or invalid. Please restart sign-in.');
       }
+      let consumed: Awaited<ReturnType<typeof verifyMagicLink>>;
+      try {
+        consumed = await verifyMagicLink(token);
+      } catch (err) {
+        if (err instanceof InvalidMagicLinkError) {
+          clearBrowserTransaction(c);
+          return renderError(
+            c,
+            'This sign-in link has expired or has already been used. Please request a new one.',
+          );
+        }
+        throw err;
+      }
+      clearBrowserTransaction(c);
       const user = await upsertUser({ email: consumed.email });
       const sessionToken = await createSession(
         user.id,
@@ -180,6 +195,12 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
       );
     }
 
+    const validTransaction = verifyBrowserTransaction(c, ctx.browserTransactionHash);
+    if (!ctx.consentGranted || !validTransaction) {
+      clearBrowserTransaction(c);
+      return renderError(c, 'Authorization consent expired or invalid. Please restart sign-in.');
+    }
+
     const client = await getClient(ctx.clientId);
     if (
       !client ||
@@ -188,11 +209,20 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
     ) {
       return renderError(c, 'Client registration changed during sign-in. Please restart.');
     }
-    const validTransaction = verifyBrowserTransaction(c, ctx.browserTransactionHash);
-    clearBrowserTransaction(c);
-    if (!ctx.consentGranted || !validTransaction) {
-      return renderError(c, 'Authorization consent expired or invalid. Please restart sign-in.');
+    let consumed: Awaited<ReturnType<typeof verifyMagicLink>>;
+    try {
+      consumed = await verifyMagicLink(token);
+    } catch (err) {
+      if (err instanceof InvalidMagicLinkError) {
+        clearBrowserTransaction(c);
+        return renderError(
+          c,
+          'This sign-in link has expired or has already been used. Please request a new one.',
+        );
+      }
+      throw err;
     }
+    clearBrowserTransaction(c);
     const user = await upsertUser({ email: consumed.email });
     const pagentCode = await createAuthCode(
       user.id,

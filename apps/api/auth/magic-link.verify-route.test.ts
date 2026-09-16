@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../db.ts', () => ({
   init: vi.fn(() => Promise.resolve()),
@@ -17,6 +17,7 @@ vi.mock('../db.ts', () => ({
   getUserByHandle: vi.fn(),
   insertAuthCode: vi.fn(),
   insertMagicLink: vi.fn(),
+  getActiveMagicLink: vi.fn(),
   verifyAndConsumeMagicLink: vi.fn(),
   insertSession: vi.fn(),
 }));
@@ -56,7 +57,7 @@ const browserUser = {
 };
 
 function mockBrowserMagicLink(): void {
-  vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce({
+  mockMagicLink({
     email: browserUser.email,
     authorizeContext: {
       browserSession: true,
@@ -65,11 +66,21 @@ function mockBrowserMagicLink(): void {
   });
 }
 
+function mockMagicLink(row: Awaited<ReturnType<typeof db.getActiveMagicLink>>): void {
+  vi.mocked(db.getActiveMagicLink).mockResolvedValueOnce(row);
+  if (row !== null) vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce(row);
+}
+
 setupMagicLinkTest();
+
+afterEach(() => {
+  vi.mocked(db.getActiveMagicLink).mockReset();
+  vi.mocked(db.verifyAndConsumeMagicLink).mockReset();
+});
 
 describe('GET /oauth/magic', () => {
   it('verifies the token, upserts the user, and redirects with code + state', async () => {
-    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce({
+    mockMagicLink({
       email: 'alex@blockful.io',
       authorizeContext: {
         clientId: clientRow.client_id,
@@ -123,12 +134,13 @@ describe('GET /oauth/magic', () => {
     expect(codeArg.scope).toBe('page:create');
 
     // The token was hashed before lookup.
+    expect(db.getActiveMagicLink).toHaveBeenCalledWith(sha256Hex('fake-token'));
     expect(db.verifyAndConsumeMagicLink).toHaveBeenCalledWith(sha256Hex('fake-token'));
     expect(res.headers.get('set-cookie')).toContain(`${AUTH_TRANSACTION_COOKIE_NAME}=; Max-Age=0`);
   });
 
   it('rejects a consented OAuth magic link without its bound browser transaction', async () => {
-    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce({
+    mockMagicLink({
       email: 'victim@blockful.io',
       authorizeContext: {
         clientId: clientRow.client_id,
@@ -144,12 +156,13 @@ describe('GET /oauth/magic', () => {
     const res = await app.fetch(new Request(`${BASE}/oauth/magic?token=scraped-token`));
 
     expect(res.status).toBe(400);
+    expect(db.verifyAndConsumeMagicLink).not.toHaveBeenCalled();
     expect(db.upsertUser).not.toHaveBeenCalled();
     expect(db.insertAuthCode).not.toHaveBeenCalled();
   });
 
   it('rejects a pending OAuth magic link even with the bound browser transaction', async () => {
-    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce({
+    mockMagicLink({
       email: 'victim@blockful.io',
       authorizeContext: {
         clientId: clientRow.client_id,
@@ -170,6 +183,36 @@ describe('GET /oauth/magic', () => {
     );
 
     expect(res.status).toBe(400);
+    expect(db.verifyAndConsumeMagicLink).not.toHaveBeenCalled();
+    expect(db.upsertUser).not.toHaveBeenCalled();
+    expect(db.insertAuthCode).not.toHaveBeenCalled();
+  });
+
+  it('does not mutate a user when another request consumes the token after inspection', async () => {
+    vi.mocked(db.getActiveMagicLink).mockResolvedValueOnce({
+      email: 'victim@blockful.io',
+      authorizeContext: {
+        clientId: clientRow.client_id,
+        redirectUri: 'http://localhost:9876/callback',
+        codeChallenge: 'challenge',
+        codeChallengeMethod: 'S256',
+        browserTransactionHash: OAUTH_TRANSACTION_HASH,
+        consentGranted: true,
+      },
+    });
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
+    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce(null);
+
+    const res = await app.fetch(
+      new Request(`${BASE}/oauth/magic?token=raced-token`, {
+        headers: {
+          cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${OAUTH_TRANSACTION_TOKEN}`,
+        },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(db.verifyAndConsumeMagicLink).toHaveBeenCalledWith(sha256Hex('raced-token'));
     expect(db.upsertUser).not.toHaveBeenCalled();
     expect(db.insertAuthCode).not.toHaveBeenCalled();
   });
@@ -179,27 +222,31 @@ describe('GET /oauth/magic', () => {
     expect(res.status).toBe(400);
     const html = await res.text();
     expect(html.toLowerCase()).toContain('token');
+    expect(db.getActiveMagicLink).not.toHaveBeenCalled();
     expect(db.verifyAndConsumeMagicLink).not.toHaveBeenCalled();
   });
 
   it('renders an error page for an unknown / expired / consumed token', async () => {
-    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce(null);
+    vi.mocked(db.getActiveMagicLink).mockResolvedValueOnce(null);
     const res = await app.fetch(new Request(`${BASE}/oauth/magic?token=bogus`));
     expect(res.status).toBe(400);
     const html = await res.text();
     expect(html.toLowerCase()).toContain('expired');
+    expect(db.verifyAndConsumeMagicLink).not.toHaveBeenCalled();
     // No user upsert when verification fails.
     expect(db.upsertUser).not.toHaveBeenCalled();
   });
 
   it('renders an error when the client registration changed after the email was sent', async () => {
-    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce({
+    mockMagicLink({
       email: 'alex@blockful.io',
       authorizeContext: {
         clientId: 'no-longer-registered',
         redirectUri: 'http://localhost:9876/callback',
         codeChallenge: 'challenge',
         codeChallengeMethod: 'S256',
+        browserTransactionHash: OAUTH_TRANSACTION_HASH,
+        consentGranted: true,
       },
     });
     vi.mocked(db.getOAuthClientById).mockResolvedValueOnce(null);
@@ -214,16 +261,23 @@ describe('GET /oauth/magic', () => {
       updated_at: new Date(),
     });
 
-    const res = await app.fetch(new Request(`${BASE}/oauth/magic?token=t`));
+    const res = await app.fetch(
+      new Request(`${BASE}/oauth/magic?token=t`, {
+        headers: {
+          cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${OAUTH_TRANSACTION_TOKEN}`,
+        },
+      }),
+    );
     expect(res.status).toBe(400);
     const html = await res.text();
     expect(html.toLowerCase()).toContain('client');
+    expect(db.verifyAndConsumeMagicLink).not.toHaveBeenCalled();
     // The auth code is NOT issued in this case.
     expect(db.insertAuthCode).not.toHaveBeenCalled();
   });
 
   it('renders an error when the authorize context has no redirect_uri', async () => {
-    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce({
+    mockMagicLink({
       email: 'alex@blockful.io',
       authorizeContext: {},
     });
@@ -240,6 +294,7 @@ describe('GET /oauth/magic', () => {
 
     const res = await app.fetch(new Request(`${BASE}/oauth/magic?token=t`));
     expect(res.status).toBe(400);
+    expect(db.verifyAndConsumeMagicLink).not.toHaveBeenCalled();
   });
 
   it('rejects a browser-session link without its transaction cookie before mutation', async () => {
@@ -247,6 +302,7 @@ describe('GET /oauth/magic', () => {
     const res = await app.fetch(new Request(`${BASE}/oauth/magic?token=browser-token`));
 
     expect(res.status).toBe(400);
+    expect(db.verifyAndConsumeMagicLink).not.toHaveBeenCalled();
     expect(db.upsertUser).not.toHaveBeenCalled();
     expect(db.insertSession).not.toHaveBeenCalled();
     expect(res.headers.get('set-cookie')).toContain(`${AUTH_TRANSACTION_COOKIE_NAME}=; Max-Age=0`);
@@ -261,6 +317,7 @@ describe('GET /oauth/magic', () => {
     );
 
     expect(res.status).toBe(400);
+    expect(db.verifyAndConsumeMagicLink).not.toHaveBeenCalled();
     expect(db.upsertUser).not.toHaveBeenCalled();
     expect(db.insertSession).not.toHaveBeenCalled();
   });

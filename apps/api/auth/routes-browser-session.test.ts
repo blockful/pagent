@@ -37,6 +37,7 @@ describe('Browser session login flow', () => {
     vi.mocked(db.insertSession).mockReset();
     vi.mocked(db.upsertUser).mockReset();
     vi.mocked(db.getUserByHandle).mockReset();
+    vi.mocked(db.getActiveMagicLink).mockReset();
     vi.mocked(db.verifyAndConsumeMagicLink).mockReset();
   });
 
@@ -55,13 +56,15 @@ describe('Browser session login flow', () => {
   });
 
   it('Magic link verify with browser_session=true sets cookie and redirects to /', async () => {
-    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce({
+    const magicLink = {
       email: 'alex@blockful.io',
       authorizeContext: {
         browserSession: true,
         browserTransactionHash: BROWSER_TRANSACTION_HASH,
       },
-    });
+    };
+    vi.mocked(db.getActiveMagicLink).mockResolvedValueOnce(magicLink);
+    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce(magicLink);
     vi.mocked(db.getUserByHandle).mockResolvedValue(null);
     vi.mocked(db.upsertUser).mockResolvedValueOnce(SESSION_USER_ROW);
     vi.mocked(db.insertSession).mockResolvedValueOnce(undefined);

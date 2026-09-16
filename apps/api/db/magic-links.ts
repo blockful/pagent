@@ -36,6 +36,21 @@ export type MagicLinkInsert = {
   expiresAt: Date;
 };
 
+export type MagicLinkRow = {
+  email: string;
+  authorizeContext: MagicLinkAuthorizeContext;
+};
+
+function mapMagicLinkRow(row: {
+  email: string;
+  authorize_context: MagicLinkAuthorizeContext | null;
+}): MagicLinkRow {
+  return {
+    email: row.email,
+    authorizeContext: row.authorize_context ?? {},
+  };
+}
+
 /**
  * Insert a fresh magic link row. The raw token is never stored — only the
  * SHA-256 hash from the caller. Not wrapped in withRetry: a retry after a
@@ -56,6 +71,26 @@ export async function insertMagicLink(input: MagicLinkInsert): Promise<void> {
 }
 
 /**
+ * Read an active magic link without consuming it. The route uses this only to
+ * validate browser-transaction, consent, client, redirect, and PKCE bindings
+ * before the one-time token is burned. The later UPDATE remains the atomic
+ * single-use gate, so concurrent valid callbacks still have at most one
+ * winner.
+ */
+export async function getActiveMagicLink(tokenHash: string): Promise<MagicLinkRow | null> {
+  const c = client();
+  const rows = await c<{ email: string; authorize_context: MagicLinkAuthorizeContext | null }[]>`
+    select email, authorize_context
+    from magic_links
+    where token_hash = ${tokenHash}
+      and expires_at > now()
+      and consumed_at is null
+  `;
+  const row = rows[0];
+  return row === undefined ? null : mapMagicLinkRow(row);
+}
+
+/**
  * Atomically consume a magic link: marks `consumed_at = now()` and returns
  * the email + stored authorize context, but only if the row exists, hasn't
  * expired, and hasn't already been consumed. Concurrent verifies race on the
@@ -65,9 +100,7 @@ export async function insertMagicLink(input: MagicLinkInsert): Promise<void> {
  * caller surfaces that as a generic "expired or invalid" error — we don't
  * distinguish to avoid leaking whether the token existed at all.
  */
-export async function verifyAndConsumeMagicLink(
-  tokenHash: string,
-): Promise<{ email: string; authorizeContext: MagicLinkAuthorizeContext } | null> {
+export async function verifyAndConsumeMagicLink(tokenHash: string): Promise<MagicLinkRow | null> {
   const c = client();
   const rows = await c<{ email: string; authorize_context: MagicLinkAuthorizeContext | null }[]>`
     update magic_links
@@ -78,12 +111,5 @@ export async function verifyAndConsumeMagicLink(
     returning email, authorize_context
   `;
   if (rows.length === 0) return null;
-  const r = rows[0]!;
-  return {
-    email: r.email,
-    // authorize_context is JSONB; postgres-js returns parsed objects already.
-    // Treat NULL as an empty context — a legacy row missing the column would
-    // still be consumable (e.g. browser-session flow with no PKCE bits).
-    authorizeContext: r.authorize_context ?? {},
-  };
+  return mapMagicLinkRow(rows[0]!);
 }

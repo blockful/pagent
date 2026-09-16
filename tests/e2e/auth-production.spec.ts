@@ -1,7 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { expect, request, test, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { z } from 'zod';
 import * as db from '../../apps/api/db.ts';
+import { AUTH_TRANSACTION_COOKIE_NAME } from '../../apps/api/auth/route-transaction.ts';
 import {
   API_PUBLIC_URL,
   RENDERER_URL,
@@ -162,6 +163,36 @@ test('requires explicit browser-bound consent before exposing OAuth sign-in choi
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByText('Authorization cancelled.')).toBeVisible();
   expect(page.url()).toBe(`${localApiUrl()}/oauth/authorize/consent`);
+});
+
+test('does not consume a browser-bound magic link when an unbound scanner opens it', async () => {
+  const runId = randomUUID();
+  const rawToken = `magic-${runId}`;
+  const browserTransaction = `browser-${runId}`;
+  const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+  await db.insertMagicLink({
+    email: `magic-production-${runId}@example.test`,
+    tokenHash,
+    authorizeContext: {
+      browserSession: true,
+      browserTransactionHash: createHash('sha256').update(browserTransaction).digest('base64url'),
+    },
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+
+  const scanner = await api?.get(`/oauth/magic?token=${rawToken}`);
+  expect(scanner?.status()).toBe(400);
+  await expect(db.getActiveMagicLink(tokenHash)).resolves.not.toBeNull();
+
+  const browser = await api?.get(`/oauth/magic?token=${rawToken}`, {
+    headers: {
+      Cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${browserTransaction}`,
+    },
+    maxRedirects: 0,
+  });
+  expect(browser?.status()).toBe(302);
+  expect(browser?.headers().location).toBe('/');
+  await expect(db.getActiveMagicLink(tokenHash)).resolves.toBeNull();
 });
 
 test('publishes the generated Ed25519 public key', async () => {

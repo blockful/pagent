@@ -29,6 +29,7 @@ vi.mock('../db.ts', () => ({
   extendSessionExpiry: vi.fn(() => Promise.resolve()),
   deleteSessionByTokenHash: vi.fn(() => Promise.resolve()),
   insertMagicLink: vi.fn(() => Promise.resolve()),
+  getActiveMagicLink: vi.fn(() => Promise.resolve(null)),
   verifyAndConsumeMagicLink: vi.fn(() => Promise.resolve(null)),
 }));
 

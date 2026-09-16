@@ -83,6 +83,42 @@ test('allocates distinct handles when signups with the same local part race', as
   }
 });
 
+test('inspects magic-link bindings without consuming the one-time token', async () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl === undefined) throw new TypeError('DATABASE_URL is required');
+  await db.init(databaseUrl);
+  try {
+    const runId = randomUUID();
+    const tokenHash = `magic-link-${runId}`;
+    const authorizeContext = {
+      browserSession: true,
+      browserTransactionHash: `browser-${runId}`,
+    };
+    await db.insertMagicLink({
+      email: `magic-link-${runId}@example.test`,
+      tokenHash,
+      authorizeContext,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    await expect(db.getActiveMagicLink(tokenHash)).resolves.toMatchObject({
+      authorizeContext,
+    });
+    await expect(db.getActiveMagicLink(tokenHash)).resolves.toMatchObject({
+      authorizeContext,
+    });
+
+    const results = await Promise.all([
+      db.verifyAndConsumeMagicLink(tokenHash),
+      db.verifyAndConsumeMagicLink(tokenHash),
+    ]);
+    expect(results.filter((result) => result !== null)).toHaveLength(1);
+    await expect(db.getActiveMagicLink(tokenHash)).resolves.toBeNull();
+  } finally {
+    await db.shutdown();
+  }
+});
+
 async function createTokenFamily() {
   const runId = randomUUID();
   const clientId = `e2e-client-${runId}`;
