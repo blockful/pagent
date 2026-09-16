@@ -170,6 +170,45 @@ describe('registerClient validation', () => {
     );
   });
 
+  it('rejects remote HTTP and browser-executable redirect schemes', async () => {
+    for (const redirectUri of [
+      'http://attacker.example/callback',
+      'javascript:alert(1)',
+      'data:text/html,attack',
+      'file:///tmp/callback',
+      'blob:https://attacker.example/id',
+      'ftp://attacker.example/callback',
+      'ws://attacker.example/callback',
+      'wss://attacker.example/callback',
+      'mailto:attacker@example.com',
+      'tel:+15555550123',
+      'sms:+15555550123',
+      'intent://attacker.example/callback',
+      'chrome-extension://abcdefghijklmnop/callback',
+    ]) {
+      await expect(registerClient({ redirect_uris: [redirectUri] })).rejects.toBeInstanceOf(
+        InvalidClientMetadataError,
+      );
+    }
+    expect(db.insertOAuthClient).not.toHaveBeenCalled();
+  });
+
+  it('accepts HTTPS, explicit HTTP loopback, and custom application redirects', async () => {
+    const redirectUris = [
+      'https://client.example/callback',
+      'http://localhost:9876/callback',
+      'http://127.0.0.1:9876/callback',
+      'http://[::1]:9876/callback',
+      'myapp://callback',
+      'com.example.app:/oauth/callback',
+    ];
+    vi.mocked(db.insertOAuthClient).mockImplementation(async (input) =>
+      row({ redirect_uris: input.redirect_uris }),
+    );
+
+    await expect(registerClient({ redirect_uris: redirectUris })).resolves.toBeDefined();
+  });
+
   it('accepts custom URI schemes (MCP clients commonly use myapp:// etc.)', async () => {
     vi.mocked(db.insertOAuthClient).mockResolvedValueOnce(
       row({ redirect_uris: ['myapp://callback'] }),

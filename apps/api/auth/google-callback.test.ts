@@ -32,6 +32,7 @@ import {
 import { AUTH_TRANSACTION_COOKIE_NAME } from './route-transaction.ts';
 
 const BROWSER_TRANSACTION_TOKEN = 'browser-transaction-token';
+const OAUTH_TRANSACTION_TOKEN = 'oauth-transaction-token';
 
 function browserTransactionHash(token: string): string {
   return createHash('sha256').update(token).digest('base64url');
@@ -74,10 +75,17 @@ describe('GET /oauth/callback/google', () => {
       codeChallenge: VALID_AUTHORIZE.code_challenge,
       scope: VALID_AUTHORIZE.scope,
       state: VALID_AUTHORIZE.state,
+      browserTransactionHash: browserTransactionHash(OAUTH_TRANSACTION_TOKEN),
+      consentGranted: true,
     });
     const res = await app.fetch(
       new Request(
         `${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(state)}`,
+        {
+          headers: {
+            cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${OAUTH_TRANSACTION_TOKEN}`,
+          },
+        },
       ),
     );
     expect(res.status).toBe(302);
@@ -110,6 +118,98 @@ describe('GET /oauth/callback/google', () => {
     expect(authCodeArg.codeChallenge).toBe(VALID_AUTHORIZE.code_challenge);
     expect(authCodeArg.codeChallengeMethod).toBe('S256');
     fetchSpy.mockRestore();
+  });
+
+  it('rejects a scraped normal OAuth state without the bound browser transaction', async () => {
+    const fetchSpy = await mockGoogleTokenResponse({
+      sub: 'google-sub-123',
+      email: 'victim@blockful.io',
+    });
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
+    const state = await signStateJwt({
+      clientId: VALID_AUTHORIZE.client_id,
+      redirectUri: VALID_AUTHORIZE.redirect_uri,
+      codeChallenge: VALID_AUTHORIZE.code_challenge,
+      browserTransactionHash: browserTransactionHash(OAUTH_TRANSACTION_TOKEN),
+      consentGranted: true,
+    });
+
+    const res = await app.fetch(
+      new Request(
+        `${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(state)}`,
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(db.upsertUser).not.toHaveBeenCalled();
+    expect(db.insertAuthCode).not.toHaveBeenCalled();
+    expect(res.headers.get('set-cookie')).toContain(`${AUTH_TRANSACTION_COOKIE_NAME}=; Max-Age=0`);
+  });
+
+  it('rejects a pending OAuth state even with the matching browser transaction', async () => {
+    const fetchSpy = await mockGoogleTokenResponse({
+      sub: 'google-sub-123',
+      email: 'victim@blockful.io',
+    });
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
+    const state = await signStateJwt({
+      clientId: VALID_AUTHORIZE.client_id,
+      redirectUri: VALID_AUTHORIZE.redirect_uri,
+      codeChallenge: VALID_AUTHORIZE.code_challenge,
+      browserTransactionHash: browserTransactionHash(OAUTH_TRANSACTION_TOKEN),
+    });
+
+    const res = await app.fetch(
+      new Request(
+        `${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(state)}`,
+        {
+          headers: {
+            cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${OAUTH_TRANSACTION_TOKEN}`,
+          },
+        },
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(db.upsertUser).not.toHaveBeenCalled();
+    expect(db.insertAuthCode).not.toHaveBeenCalled();
+  });
+
+  it('rejects a legacy insecure redirect before contacting Google', async () => {
+    const fetchSpy = await mockGoogleTokenResponse({
+      sub: 'google-sub-123',
+      email: 'victim@blockful.io',
+    });
+    const redirectUri = 'http://attacker.example/callback';
+    vi.mocked(db.getOAuthClientById).mockResolvedValue({
+      ...clientRow,
+      redirect_uris: [redirectUri],
+    });
+    const state = await signStateJwt({
+      clientId: VALID_AUTHORIZE.client_id,
+      redirectUri,
+      codeChallenge: VALID_AUTHORIZE.code_challenge,
+      browserTransactionHash: browserTransactionHash(OAUTH_TRANSACTION_TOKEN),
+      consentGranted: true,
+    });
+
+    const res = await app.fetch(
+      new Request(
+        `${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(state)}`,
+        {
+          headers: {
+            cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${OAUTH_TRANSACTION_TOKEN}`,
+          },
+        },
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(db.upsertUser).not.toHaveBeenCalled();
+    expect(db.insertAuthCode).not.toHaveBeenCalled();
   });
 
   it('rejects a tampered state JWT', async () => {
@@ -174,10 +274,17 @@ describe('GET /oauth/callback/google', () => {
       clientId: VALID_AUTHORIZE.client_id,
       redirectUri: VALID_AUTHORIZE.redirect_uri,
       codeChallenge: VALID_AUTHORIZE.code_challenge,
+      browserTransactionHash: browserTransactionHash(OAUTH_TRANSACTION_TOKEN),
+      consentGranted: true,
     });
     const res = await app.fetch(
       new Request(
         `${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(state)}`,
+        {
+          headers: {
+            cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${OAUTH_TRANSACTION_TOKEN}`,
+          },
+        },
       ),
     );
     expect(res.status).toBe(302);

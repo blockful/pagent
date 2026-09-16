@@ -17,7 +17,7 @@
 # 1. Health check
 ###############################################################################
 
-### Confirm the API is running. Returns { ok, pages: <count> }.
+### Confirm the API and database are running. Returns { ok: true, db: "ok" }.
 GET {{apiHost}}/health
 
 ###############################################################################
@@ -25,7 +25,7 @@ GET {{apiHost}}/health
 ###############################################################################
 
 ### A2UI v0.9 spec: a small form with a text field + submit button.
-### Returns { id, url, expires_at }. `@name` saves the response so we
+### Returns { id, url, expires_at, format }. `@name` saves the response so we
 ### can pull `id` out below.
 # @name createPage
 POST {{apiHost}}/new
@@ -75,7 +75,7 @@ Content-Type: application/json
 ###############################################################################
 
 ### What the renderer fetches on mount. Returns
-### { spec, state, result, expires_at }. State should be "open" until
+### { spec, format, state, result, expires_at }. State should be "open" until
 ### someone submits.
 GET {{apiHost}}/{{pageId}}
 
@@ -83,7 +83,7 @@ GET {{apiHost}}/{{pageId}}
 # 5. Agent's first read — state is "open"
 ###############################################################################
 
-### The agent polls this endpoint. Returns { state, result } immediately.
+### The agent polls this endpoint. Returns { state, result, format } immediately.
 ### While the user hasn't submitted, state is "open" and result is null.
 GET {{apiHost}}/{{pageId}}/result
 

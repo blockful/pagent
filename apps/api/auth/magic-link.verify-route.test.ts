@@ -40,6 +40,10 @@ const BROWSER_TRANSACTION_TOKEN = 'magic-browser-transaction-token';
 const BROWSER_TRANSACTION_HASH = createHash('sha256')
   .update(BROWSER_TRANSACTION_TOKEN)
   .digest('base64url');
+const OAUTH_TRANSACTION_TOKEN = 'magic-oauth-transaction-token';
+const OAUTH_TRANSACTION_HASH = createHash('sha256')
+  .update(OAUTH_TRANSACTION_TOKEN)
+  .digest('base64url');
 
 const browserUser = {
   id: 'browser-user-id',
@@ -74,6 +78,8 @@ describe('GET /oauth/magic', () => {
         codeChallengeMethod: 'S256',
         scope: 'page:create',
         state: 'mcp-csrf',
+        browserTransactionHash: OAUTH_TRANSACTION_HASH,
+        consentGranted: true,
       },
     });
     vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
@@ -89,7 +95,13 @@ describe('GET /oauth/magic', () => {
     });
     vi.mocked(db.insertAuthCode).mockResolvedValue();
 
-    const res = await app.fetch(new Request(`${BASE}/oauth/magic?token=fake-token`));
+    const res = await app.fetch(
+      new Request(`${BASE}/oauth/magic?token=fake-token`, {
+        headers: {
+          cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${OAUTH_TRANSACTION_TOKEN}`,
+        },
+      }),
+    );
 
     expect(res.status).toBe(302);
     const location = res.headers.get('location');
@@ -112,6 +124,54 @@ describe('GET /oauth/magic', () => {
 
     // The token was hashed before lookup.
     expect(db.verifyAndConsumeMagicLink).toHaveBeenCalledWith(sha256Hex('fake-token'));
+    expect(res.headers.get('set-cookie')).toContain(`${AUTH_TRANSACTION_COOKIE_NAME}=; Max-Age=0`);
+  });
+
+  it('rejects a consented OAuth magic link without its bound browser transaction', async () => {
+    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce({
+      email: 'victim@blockful.io',
+      authorizeContext: {
+        clientId: clientRow.client_id,
+        redirectUri: 'http://localhost:9876/callback',
+        codeChallenge: 'challenge',
+        codeChallengeMethod: 'S256',
+        browserTransactionHash: OAUTH_TRANSACTION_HASH,
+        consentGranted: true,
+      },
+    });
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
+
+    const res = await app.fetch(new Request(`${BASE}/oauth/magic?token=scraped-token`));
+
+    expect(res.status).toBe(400);
+    expect(db.upsertUser).not.toHaveBeenCalled();
+    expect(db.insertAuthCode).not.toHaveBeenCalled();
+  });
+
+  it('rejects a pending OAuth magic link even with the bound browser transaction', async () => {
+    vi.mocked(db.verifyAndConsumeMagicLink).mockResolvedValueOnce({
+      email: 'victim@blockful.io',
+      authorizeContext: {
+        clientId: clientRow.client_id,
+        redirectUri: 'http://localhost:9876/callback',
+        codeChallenge: 'challenge',
+        codeChallengeMethod: 'S256',
+        browserTransactionHash: OAUTH_TRANSACTION_HASH,
+      },
+    });
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
+
+    const res = await app.fetch(
+      new Request(`${BASE}/oauth/magic?token=pending-token`, {
+        headers: {
+          cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${OAUTH_TRANSACTION_TOKEN}`,
+        },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(db.upsertUser).not.toHaveBeenCalled();
+    expect(db.insertAuthCode).not.toHaveBeenCalled();
   });
 
   it('renders an error page when the token is missing', async () => {

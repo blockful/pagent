@@ -1,7 +1,8 @@
 import type { Context, Hono } from 'hono';
 import { rateLimiter } from 'hono-rate-limiter';
 import { clientKey } from '../client-key.ts';
-import { getClient } from './clients-store.ts';
+import { getClient, isAllowedOAuthRedirectUri } from './clients-store.ts';
+import { renderConsentPage } from './consent-page.ts';
 import { exchangeGoogleCode } from './google.ts';
 import { renderLoginPage } from './login-page.ts';
 import type { AuthVariables } from './middleware.ts';
@@ -21,6 +22,11 @@ const AUTHORIZE_LIMIT = 30;
 const AUTHORIZE_RETRY_AFTER_SECONDS = Math.ceil(AUTHORIZE_WINDOW_MS / 1000);
 
 type AuthRouter = Hono<{ Variables: AuthVariables }>;
+
+function renderNoStoreHtml(c: Context, html: string, status: 200 | 400 = 200): Response {
+  c.header('Cache-Control', 'no-store');
+  return c.html(html, status);
+}
 
 const authorizeLimiter = rateLimiter({
   windowMs: AUTHORIZE_WINDOW_MS,
@@ -42,11 +48,12 @@ const authorizeLimiter = rateLimiter({
 
 export function registerLoginRoutes(authRoutes: AuthRouter): void {
   authRoutes.get('/oauth/authorize', authorizeLimiter, async (c) => {
+    c.header('Cache-Control', 'no-store');
     const query = c.req.query();
     if (query.browser_session === '1') {
       const browserTransactionHash = startBrowserTransaction(c);
       const signedState = await signStateJwt({ browserSession: true, browserTransactionHash });
-      return c.html(renderLoginPage({ signedState }));
+      return renderNoStoreHtml(c, renderLoginPage({ signedState }));
     }
 
     const { client_id, redirect_uri, code_challenge, code_challenge_method, scope, state } = query;
@@ -65,7 +72,7 @@ export function registerLoginRoutes(authRoutes: AuthRouter): void {
 
     const client = await getClient(client_id);
     if (!client) return renderError(c, 'Unknown client_id');
-    if (!client.redirect_uris.includes(redirect_uri)) {
+    if (!isAllowedOAuthRedirectUri(redirect_uri) || !client.redirect_uris.includes(redirect_uri)) {
       return renderError(c, 'redirect_uri does not match a registered URI for this client');
     }
     const normalizedScope = normalizeRequestedScope(typeof scope === 'string' ? scope : undefined);
@@ -73,17 +80,31 @@ export function registerLoginRoutes(authRoutes: AuthRouter): void {
       return renderError(c, `Unsupported scope: ${normalizedScope.unsupportedScope}`);
     }
 
+    const browserTransactionHash = startBrowserTransaction(c);
     const signedState = await signStateJwt({
       clientId: client_id,
       redirectUri: redirect_uri,
       codeChallenge: code_challenge,
       scope: normalizedScope.scope,
       state: typeof state === 'string' && state.length > 0 ? state : undefined,
+      browserTransactionHash,
     });
-    return c.html(renderLoginPage({ signedState }));
+    return renderNoStoreHtml(
+      c,
+      renderConsentPage({
+        signedState,
+        client: {
+          id: client.client_id,
+          name: client.client_name?.trim() || 'Unnamed OAuth client',
+          redirectUri: redirect_uri,
+          scope: normalizedScope.scope,
+        },
+      }),
+    );
   });
 
   authRoutes.get('/oauth/callback/google', async (c) => {
+    c.header('Cache-Control', 'no-store');
     const code = c.req.query('code');
     const state = c.req.query('state');
     if (typeof code !== 'string' || code.length === 0) {
@@ -129,8 +150,17 @@ export function registerLoginRoutes(authRoutes: AuthRouter): void {
     if (!claims.clientId || !claims.redirectUri || !claims.codeChallenge) {
       return renderError(c, 'Authorization state missing required fields.');
     }
+    const validTransaction = verifyBrowserTransaction(c, claims.browserTransactionHash);
+    clearBrowserTransaction(c);
+    if (!claims.consentGranted || !validTransaction) {
+      return renderError(c, 'Authorization consent expired or invalid. Please restart sign-in.');
+    }
     const client = await getClient(claims.clientId);
-    if (!client || !client.redirect_uris.includes(claims.redirectUri)) {
+    if (
+      !client ||
+      !isAllowedOAuthRedirectUri(claims.redirectUri) ||
+      !client.redirect_uris.includes(claims.redirectUri)
+    ) {
       return renderError(c, 'Client registration changed during sign-in. Please restart.');
     }
 

@@ -19,6 +19,7 @@ export interface LoginPageParams {
   /** Optional user-facing error message. Renders as a styled banner above
    *  the buttons. Already escaped before display — callers pass plain text. */
   error?: string;
+  oauthAuthorization?: boolean;
 }
 
 /**
@@ -60,7 +61,7 @@ function escapeHtml(s: string): string {
  *      mismatched redirect_uri) so there's nothing to resume.
  */
 export function renderLoginPage(params: LoginPageParams): string {
-  const { signedState, error } = params;
+  const { signedState, error, oauthAuthorization = false } = params;
 
   // Pre-compute the Google href so a missing GOOGLE_CLIENT_ID throws at
   // render time (the routes layer converts that to a 503 before reaching
@@ -71,14 +72,18 @@ export function renderLoginPage(params: LoginPageParams): string {
     ? `    <div class="error" role="alert">${escapeHtml(error)}</div>\n`
     : '';
 
+  const googleLabel = oauthAuthorization
+    ? 'Allow and continue with Google'
+    : 'Continue with Google';
+  const emailLabel = oauthAuthorization ? 'Allow and send magic link' : 'Send magic link';
   const buttons = signedState
-    ? `    <a class="btn google" href="${googleHref}">Continue with Google</a>
+    ? `    <a class="btn google" href="${googleHref}">${googleLabel}</a>
     <div class="divider"><span>or</span></div>
     <form method="POST" action="/oauth/magic/send">
       <input type="hidden" name="state" value="${escapeHtml(signedState)}">
       <label for="email">Email address</label>
       <input type="email" id="email" name="email" required autocomplete="email" placeholder="you@example.com">
-      <button type="submit" class="btn email">Send magic link</button>
+      <button type="submit" class="btn email">${emailLabel}</button>
     </form>
 `
     : '';

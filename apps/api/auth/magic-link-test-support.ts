@@ -13,9 +13,10 @@ export function sha256Hex(s: string): string {
 
 export function postMagicSend(
   body: Record<string, string>,
-  opts: { contentType?: 'json' | 'form' } = {},
+  opts: { contentType?: 'json' | 'form'; cookie?: string } = {},
 ): Request {
   const headers: Record<string, string> = {};
+  if (opts.cookie !== undefined) headers.cookie = opts.cookie;
   let serialized: string;
   if (opts.contentType === 'form' || opts.contentType === undefined) {
     headers['Content-Type'] = 'application/x-www-form-urlencoded';

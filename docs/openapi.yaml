@@ -228,7 +228,10 @@ paths:
       operationId: registerOAuthClient
       tags: [Auth]
       summary: Dynamically register a public OAuth client
-      description: Rate-limited to 10 registrations per source IP per hour.
+      description: |
+        Rate-limited to 10 registrations per source IP per hour. Redirect URIs
+        must use HTTPS, except explicit HTTP loopback addresses; custom
+        application schemes are supported for native clients.
       requestBody:
         required: true
         content:
@@ -275,7 +278,10 @@ paths:
       description: |
         OAuth clients supply `client_id`, `redirect_uri`, an S256 PKCE challenge,
         and optional scopes/state. The renderer uses `browser_session=1` to start
-        its cookie-backed browser login. The response is an HTML login page.
+        its cookie-backed browser login. OAuth-client requests return a local,
+        cookie-bound consent page that identifies the unverified client, exact
+        return destination, and requested scopes before any sign-in provider is
+        exposed. Browser-session requests return the sign-in page directly.
       parameters:
         - name: client_id
           in: query
@@ -300,7 +306,7 @@ paths:
           schema: { type: string, enum: ['1'] }
       responses:
         '200':
-          description: HTML login page offering Google and magic-link sign-in.
+          description: HTML OAuth consent page or browser-session login page.
           content:
             text/html:
               schema: { type: string }
@@ -310,6 +316,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error429'
+
+  /oauth/authorize/consent:
+    post:
+      operationId: decideOAuthConsent
+      tags: [Auth]
+      summary: Allow or cancel a pending OAuth authorization request
+      description: |
+        Verifies the signed pending request and its HttpOnly browser transaction.
+        Allowing re-signs the request as consented and renders Google and magic-link
+        sign-in choices. Cancelling clears the transaction and renders a local
+        confirmation; it never redirects the unauthenticated browser to the client.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [state, decision]
+              properties:
+                state:
+                  type: string
+                decision:
+                  type: string
+                  enum: [allow, cancel]
+      responses:
+        '200':
+          description: HTML sign-in choices after Allow, or a local cancellation page.
+          content:
+            text/html:
+              schema: { type: string }
+        '400':
+          description: HTML error page for an invalid, expired, or unbound transaction.
+          content:
+            text/html:
+              schema: { type: string }
 
   /oauth/callback/google:
     get:
@@ -327,7 +368,7 @@ paths:
           schema: { type: string }
       responses:
         '302':
-          description: Redirect to the OAuth client with a code, or to the renderer after browser login.
+          description: Redirect to the consented OAuth client with a code, or to the renderer after browser login.
         '400':
           description: HTML error page for an invalid or expired authorization transaction.
           content:
@@ -432,6 +473,12 @@ paths:
                 $ref: '#/components/schemas/OAuthTokenResponse'
         '400':
           description: Invalid request, grant, client, or unsupported grant type.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '401':
+          description: Unknown OAuth client.
           content:
             application/json:
               schema:
@@ -592,6 +639,18 @@ paths:
                 format: a2ui
                 max_bytes: 256000
                 message: A2UI spec exceeds the 256 KB limit; use format "html" for larger payloads only when appropriate
+        '401':
+          description: Authentication is required when `REQUIRE_AUTH=true`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '403':
+          description: A Bearer token is missing the `page:create` scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
         '429':
           description: |
             Per-IP rate limit exceeded. Wait `retry_after_seconds` seconds
@@ -806,6 +865,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error404'
+        '401':
+          description: Authentication is required when `REQUIRE_AUTH=true`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '403':
+          description: A Bearer token is missing the `page:read` scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
         '500':
           description: Unexpected server error. See 500 on `POST /new` for guidance.
           headers:

@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { env } from '../schemas.ts';
+import { renderConsentPage } from './consent-page.ts';
 import { buildGoogleAuthUrl } from './google.ts';
 import { renderLoginPage } from './login-page.ts';
 import { signStateJwt, verifyStateJwt } from './state-jwt.ts';
@@ -55,6 +56,8 @@ describe('state JWT', () => {
       codeChallenge: 'abc',
       scope: 'page:create page:read',
       state: 'csrf-state-from-client',
+      browserTransactionHash: 'transaction-hash',
+      consentGranted: true,
     };
     const token = await signStateJwt(claims);
     const decoded = await verifyStateJwt(token);
@@ -109,10 +112,10 @@ describe('state JWT', () => {
 describe('renderLoginPage', () => {
   it('renders a complete HTML document with the Google link and email form', async () => {
     const state = await signStateJwt({ clientId: 'mcp-cli', redirectUri: 'http://x' });
-    const html = renderLoginPage({ signedState: state });
+    const html = renderLoginPage({ signedState: state, oauthAuthorization: true });
     expect(html).toContain('<!DOCTYPE html>');
     expect(html).toContain('<title>Sign in to Pagent</title>');
-    expect(html).toContain('Continue with Google');
+    expect(html).toContain('Allow and continue with Google');
     expect(html).toContain('accounts.google.com/o/oauth2/v2/auth');
     expect(html).toContain('<form method="POST" action="/oauth/magic/send"');
     expect(html).toContain(`value="${state}"`);
@@ -130,5 +133,26 @@ describe('renderLoginPage', () => {
     expect(html).not.toContain('Continue with Google');
     expect(html).not.toContain('<form method="POST"');
     expect(html).toContain('Unknown client_id');
+  });
+});
+
+describe('renderConsentPage', () => {
+  it('escapes self-asserted client metadata while preserving exact security details', () => {
+    const html = renderConsentPage({
+      signedState: 'signed-state',
+      client: {
+        id: 'client-<id>',
+        name: '<script>Client</script>',
+        redirectUri: 'https://client.example/callback?source=<oauth>',
+        scope: 'page:create page:read',
+      },
+    });
+
+    expect(html).not.toContain('<script>Client</script>');
+    expect(html).toContain('&lt;script&gt;Client&lt;/script&gt;');
+    expect(html).toContain('client-&lt;id&gt;');
+    expect(html).toContain('https://client.example/callback?source=&lt;oauth&gt;');
+    expect(html).toContain('<code>page:create</code>');
+    expect(html).toContain('<code>page:read</code>');
   });
 });

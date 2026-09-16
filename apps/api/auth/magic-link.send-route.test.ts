@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../db.ts', () => ({
@@ -32,10 +33,16 @@ import * as db from '../db.ts';
 import { app } from '../app.ts';
 import { env } from '../schemas.ts';
 import { postMagicSend, setupMagicLinkTest } from './magic-link-test-support.ts';
+import { AUTH_TRANSACTION_COOKIE_NAME } from './route-transaction.ts';
 import { signStateJwt } from './state-jwt.ts';
 import { firstCallArgument } from './test-call-support.ts';
 
 setupMagicLinkTest();
+
+const OAUTH_TRANSACTION_TOKEN = 'magic-send-oauth-transaction';
+const OAUTH_TRANSACTION_HASH = createHash('sha256')
+  .update(OAUTH_TRANSACTION_TOKEN)
+  .digest('base64url');
 
 describe('POST /oauth/magic/send', () => {
   it('returns 200 with a "check your email" message on valid request', async () => {
@@ -154,10 +161,18 @@ describe('POST /oauth/magic/send', () => {
       codeChallenge: 'challenge',
       scope: 'page:create',
       state: 'mcp-csrf',
+      browserTransactionHash: OAUTH_TRANSACTION_HASH,
+      consentGranted: true,
     });
 
     const res = await app.fetch(
-      postMagicSend({ email: 'alex@blockful.io', state }, { contentType: 'json' }),
+      postMagicSend(
+        { email: 'alex@blockful.io', state },
+        {
+          contentType: 'json',
+          cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${OAUTH_TRANSACTION_TOKEN}`,
+        },
+      ),
     );
     expect(res.status).toBe(200);
     const arg = firstCallArgument(vi.mocked(db.insertMagicLink).mock.calls, 'insertMagicLink');
@@ -167,6 +182,31 @@ describe('POST /oauth/magic/send', () => {
     expect(arg.authorizeContext.codeChallengeMethod).toBe('S256');
     expect(arg.authorizeContext.scope).toBe('page:create');
     expect(arg.authorizeContext.state).toBe('mcp-csrf');
+    expect(arg.authorizeContext.browserTransactionHash).toBe(OAUTH_TRANSACTION_HASH);
+    expect(arg.authorizeContext.consentGranted).toBe(true);
+  });
+
+  it('rejects a pending OAuth state before sending a magic link', async () => {
+    const state = await signStateJwt({
+      clientId: 'mcp-cli',
+      redirectUri: 'http://localhost:9876/cb',
+      codeChallenge: 'challenge',
+      browserTransactionHash: OAUTH_TRANSACTION_HASH,
+    });
+
+    const res = await app.fetch(
+      postMagicSend(
+        { email: 'victim@blockful.io', state },
+        {
+          contentType: 'json',
+          cookie: `${AUTH_TRANSACTION_COOKIE_NAME}=${OAUTH_TRANSACTION_TOKEN}`,
+        },
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(db.insertMagicLink).not.toHaveBeenCalled();
+    expect(mockSendMail).not.toHaveBeenCalled();
   });
 
   it('forwards the browser transaction binding into the magic-link context', async () => {

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../db.ts', () => ({
@@ -47,8 +48,124 @@ describe('GET /oauth/authorize', () => {
     expect(res.headers.get('content-type')).toContain('text/html');
     const html = await res.text();
     expect(html).toContain('<!DOCTYPE html>');
-    expect(html).toContain('Continue with Google');
-    expect(html).toContain('accounts.google.com');
+    expect(html).toContain('Unverified OAuth client');
+    expect(html).toContain(clientRow.client_name);
+    expect(html).toContain(VALID_AUTHORIZE.redirect_uri);
+    expect(html).toContain('page:create');
+    expect(html).toContain('page:read');
+    expect(html).toContain('action="/oauth/authorize/consent"');
+    expect(html).toContain('name="decision" value="allow"');
+    expect(html).toContain('name="decision" value="cancel"');
+    expect(html).not.toContain('accounts.google.com');
+    expect(html).not.toContain('action="/oauth/magic/send"');
+
+    const cookie = res.headers.get('set-cookie')?.match(/pagent_auth_transaction=([^;]+)/)?.[1];
+    if (!cookie) throw new Error('authorization transaction cookie was not set');
+    const claims = await verifyStateJwt(signedStateFromHtml(html));
+    expect(claims.browserTransactionHash).toBe(
+      createHash('sha256').update(cookie).digest('base64url'),
+    );
+  });
+
+  it('rejects a pre-existing client with an insecure remote HTTP redirect', async () => {
+    vi.mocked(db.getOAuthClientById).mockResolvedValueOnce({
+      ...clientRow,
+      redirect_uris: ['http://attacker.example/callback'],
+    });
+
+    const res = await app.fetch(
+      new Request(
+        authorizeUrl({ ...VALID_AUTHORIZE, redirect_uri: 'http://attacker.example/callback' }),
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(db.getOAuthClientById).toHaveBeenCalledTimes(1);
+    expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  it('keeps cancellation local and clears the browser transaction', async () => {
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
+    const authorize = await app.fetch(new Request(authorizeUrl(VALID_AUTHORIZE)));
+    const html = await authorize.text();
+    const cookie = authorize.headers
+      .get('set-cookie')
+      ?.match(/pagent_auth_transaction=([^;]+)/)?.[1];
+    if (!cookie) throw new Error('authorization transaction cookie was not set');
+
+    const denied = await app.fetch(
+      new Request(`${BASE}/oauth/authorize/consent`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          cookie: `pagent_auth_transaction=${cookie}`,
+        },
+        body: new URLSearchParams({
+          state: signedStateFromHtml(html),
+          decision: 'cancel',
+        }),
+      }),
+    );
+
+    expect(denied.status).toBe(200);
+    expect(denied.headers.get('location')).toBeNull();
+    expect(await denied.text()).toContain('Authorization cancelled');
+    expect(denied.headers.get('set-cookie')).toContain('pagent_auth_transaction=; Max-Age=0');
+  });
+
+  it('rejects consent without the browser transaction cookie', async () => {
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
+    const authorize = await app.fetch(new Request(authorizeUrl(VALID_AUTHORIZE)));
+    const pendingHtml = await authorize.text();
+
+    const allowed = await app.fetch(
+      new Request(`${BASE}/oauth/authorize/consent`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          state: signedStateFromHtml(pendingHtml),
+          decision: 'allow',
+        }),
+      }),
+    );
+
+    expect(allowed.status).toBe(400);
+    expect(await allowed.text()).toContain('Authorization session expired or invalid');
+    expect(allowed.headers.get('set-cookie')).toContain('pagent_auth_transaction=; Max-Age=0');
+  });
+
+  it('renders sign-in choices only after an explicit cookie-bound allow decision', async () => {
+    vi.mocked(db.getOAuthClientById).mockResolvedValue(clientRow);
+    const authorize = await app.fetch(new Request(authorizeUrl(VALID_AUTHORIZE)));
+    const pendingHtml = await authorize.text();
+    const cookie = authorize.headers
+      .get('set-cookie')
+      ?.match(/pagent_auth_transaction=([^;]+)/)?.[1];
+    if (!cookie) throw new Error('authorization transaction cookie was not set');
+
+    const allowed = await app.fetch(
+      new Request(`${BASE}/oauth/authorize/consent`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          cookie: `pagent_auth_transaction=${cookie}`,
+        },
+        body: new URLSearchParams({
+          state: signedStateFromHtml(pendingHtml),
+          decision: 'allow',
+        }),
+      }),
+    );
+
+    expect(allowed.status).toBe(200);
+    const loginHtml = await allowed.text();
+    expect(loginHtml).toContain('accounts.google.com');
+    expect(loginHtml).toContain('action="/oauth/magic/send"');
+    const allowedState = await verifyStateJwt(signedStateFromHtml(loginHtml));
+    expect(allowedState.consentGranted).toBe(true);
+    expect(allowedState.browserTransactionHash).toBe(
+      createHash('sha256').update(cookie).digest('base64url'),
+    );
   });
 
   it('renders an error (not redirect) for invalid client_id', async () => {

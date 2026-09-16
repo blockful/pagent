@@ -45,6 +45,7 @@ export interface StateClaims {
   state?: string;
   browserSession?: boolean;
   browserTransactionHash?: string;
+  consentGranted?: boolean;
 }
 
 function getKey(): Uint8Array {
@@ -76,6 +77,7 @@ export async function signStateJwt(claims: StateClaims): Promise<string> {
   if (claims.browserTransactionHash !== undefined) {
     payload.browser_transaction_hash = claims.browserTransactionHash;
   }
+  if (claims.consentGranted !== undefined) payload.consent_granted = claims.consentGranted;
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: ALG, typ: 'JWT' })
     .setIssuer(ISS)
@@ -109,6 +111,9 @@ export async function verifyStateJwt(token: string): Promise<StateClaims> {
   if (typeof payload.browser_session === 'boolean') out.browserSession = payload.browser_session;
   if (typeof payload.browser_transaction_hash === 'string') {
     out.browserTransactionHash = payload.browser_transaction_hash;
+  }
+  if (typeof payload.consent_granted === 'boolean') {
+    out.consentGranted = payload.consent_granted;
   }
   return out;
 }

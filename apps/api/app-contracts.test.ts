@@ -75,6 +75,7 @@ describe('OpenAPI surface', () => {
       '/.well-known/jwks.json',
       '/oauth/register',
       '/oauth/authorize',
+      '/oauth/authorize/consent',
       '/oauth/callback/google',
       '/oauth/magic/send',
       '/oauth/magic',

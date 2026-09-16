@@ -85,6 +85,17 @@ describe('POST /oauth/register', () => {
     expect(db.insertOAuthClient).not.toHaveBeenCalled();
   });
 
+  it('returns 400 for an insecure remote HTTP redirect URI', async () => {
+    const res = await app.fetch(
+      postRegister({ redirect_uris: ['http://attacker.example/callback'] }, '10.0.0.40'),
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe('invalid_client_metadata');
+    expect(db.insertOAuthClient).not.toHaveBeenCalled();
+  });
+
   it('returns 400 when redirect_uris is empty array', async () => {
     const res = await app.fetch(postRegister({ redirect_uris: [] }, '10.0.0.5'));
     expect(res.status).toBe(400);

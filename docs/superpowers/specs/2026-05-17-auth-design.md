@@ -323,12 +323,22 @@ GET /oauth/authorize?
   scope=page:create+page:read
 ```
 
-This endpoint serves a login page. The login page is a minimal HTML
-page (server-rendered, not the Vite SPA) with two options:
+For OAuth clients, this endpoint first serves a minimal consent page
+(server-rendered, not the Vite SPA). The page labels all dynamically
+registered client metadata as unverified and shows the self-asserted client
+name, client ID, exact return destination, and requested scopes. It contains
+only explicit **Allow** and **Cancel** POST actions; identity-provider links
+are not present yet.
 
-1. **"Continue with Google"** — redirects to Google's OAuth consent
+The pending request is bound to an HttpOnly, SameSite browser transaction.
+`POST /oauth/authorize/consent` verifies both the signed request and that
+transaction. Cancel clears it and renders a local confirmation without
+redirecting to the client. Allow re-signs the request with consent recorded
+and renders the login page with two options:
+
+1. **"Allow and continue with Google"** — redirects to Google's OAuth consent
    screen with Pagent as the relying party.
-2. **"Sign in with email"** — shows an email input. On submit, sends a
+2. **"Allow and send magic link"** — shows an email input. On submit, sends a
    Magic Link email and shows a "check your email" message.
 
 After successful authentication (Google callback or Magic Link click),
@@ -1059,8 +1069,11 @@ Redis/Upstash.
 ### 7.4 CSRF protection
 
 - **OAuth flows:** CSRF is mitigated by the `state` parameter (MCP
-  clients generate it, Pagent echoes it back) and PKCE (the code
-  verifier is never exposed to the browser).
+  clients generate it, Pagent echoes it back), PKCE (the code verifier is
+  never exposed to the browser), and a Pagent-issued HttpOnly transaction
+  cookie whose hash is carried in signed state. Normal client callbacks and
+  Magic Link completion require both explicit consent and that same browser
+  transaction before user mutation or authorization-code issuance.
 - **Session cookies:** `SameSite=Lax` prevents CSRF on state-changing
   requests (POST). The renderer and API are on different origins
   (`pagent.link` vs `api.pagent.link`), but `SameSite=Lax` allows
@@ -1072,8 +1085,10 @@ Redis/Upstash.
 
 The `redirect_uri` in the authorize request is validated against the
 client's registered `redirect_uris` array. Exact string match — no
-wildcards, no pattern matching. This prevents an attacker from using
-Pagent's authorize endpoint to redirect a user to a malicious site.
+wildcards, no pattern matching. Remote web redirects must use HTTPS; HTTP is
+limited to explicit loopback hosts, and browser-executable schemes are
+rejected. The policy is enforced at registration and again at authorize and
+callback time so legacy rows cannot bypass it.
 
 ### 7.6 Email enumeration
 

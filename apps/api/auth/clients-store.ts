@@ -45,19 +45,44 @@ export class InvalidClientMetadataError extends Error {
 // --- Helpers ----------------------------------------------------------------
 
 /**
- * Validates a redirect URI per RFC 7591 §2: each MUST be a valid URI. We use
- * the URL constructor for parsing — it accepts any absolute URI with a
- * scheme, including custom schemes (e.g. `myapp://callback`) which native
- * MCP clients commonly use. URIs without a scheme (relative paths, bare
- * identifiers) are rejected.
+ * Enforces the OAuth redirect policy at both registration and authorization:
+ * HTTPS for remote web clients, HTTP for explicit loopback hosts, and custom
+ * application schemes for native clients. Credentials, fragments, executable
+ * browser schemes, relative paths, and generic handler schemes are rejected.
  */
-function isValidRedirectUri(uri: unknown): uri is string {
+const HTTP_LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+const DISALLOWED_REDIRECT_PROTOCOLS = new Set([
+  'javascript:',
+  'data:',
+  'file:',
+  'blob:',
+  'about:',
+  'ftp:',
+  'ftps:',
+  'ws:',
+  'wss:',
+  'mailto:',
+  'tel:',
+  'sms:',
+  'intent:',
+  'market:',
+  'chrome:',
+  'chrome-extension:',
+  'moz-extension:',
+  'resource:',
+  'view-source:',
+]);
+
+export function isAllowedOAuthRedirectUri(uri: unknown): uri is string {
   if (typeof uri !== 'string' || uri.length === 0) return false;
   try {
-    // `new URL(uri)` throws on relative URIs (no scheme) and on syntactically
-    // malformed values. That's exactly the discriminator RFC 7591 calls for.
-    new URL(uri);
-    return true;
+    const parsed = new URL(uri);
+    if (parsed.username || parsed.password || parsed.hash) return false;
+    if (parsed.protocol === 'https:') return true;
+    if (parsed.protocol === 'http:') return HTTP_LOOPBACK_HOSTS.has(parsed.hostname);
+    if (DISALLOWED_REDIRECT_PROTOCOLS.has(parsed.protocol)) return false;
+    const customScheme = parsed.protocol.slice(0, -1);
+    return parsed.hostname.length > 0 || customScheme.includes('.');
   } catch {
     return false;
   }
@@ -80,7 +105,7 @@ function validateRedirectUris(input: unknown): string[] {
     throw new InvalidClientMetadataError("'redirect_uris' must be a non-empty array");
   }
   for (const uri of input) {
-    if (!isValidRedirectUri(uri)) {
+    if (!isAllowedOAuthRedirectUri(uri)) {
       throw new InvalidClientMetadataError(
         `'redirect_uris' contains an invalid URI: ${typeof uri === 'string' ? uri : typeof uri}`,
       );

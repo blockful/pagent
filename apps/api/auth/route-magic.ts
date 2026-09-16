@@ -1,7 +1,7 @@
 import type { Context, Hono } from 'hono';
 import { RateLimiter } from '../mcp/rate-limit.ts';
 import { env } from '../schemas.ts';
-import { getClient } from './clients-store.ts';
+import { getClient, isAllowedOAuthRedirectUri } from './clients-store.ts';
 import {
   InvalidMagicLinkError,
   SmtpUnavailableError,
@@ -81,6 +81,18 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
     if (stateInput) {
       try {
         const claims = await verifyStateJwt(stateInput);
+        if (
+          claims.clientId &&
+          (!claims.consentGranted || !verifyBrowserTransaction(c, claims.browserTransactionHash))
+        ) {
+          return c.json(
+            {
+              error: 'invalid_request',
+              message: 'OAuth consent is missing, expired, or not bound to this browser.',
+            },
+            400,
+          );
+        }
         authorizeContext = {
           clientId: claims.clientId,
           redirectUri: claims.redirectUri,
@@ -90,6 +102,7 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
           state: claims.state,
           browserSession: claims.browserSession,
           browserTransactionHash: claims.browserTransactionHash,
+          consentGranted: claims.consentGranted,
         };
       } catch {
         // Invalid state intentionally produces an unbound link to avoid an enumeration signal.
@@ -119,6 +132,7 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
   });
 
   authRoutes.get('/oauth/magic', async (c) => {
+    c.header('Cache-Control', 'no-store');
     const token = c.req.query('token');
     if (typeof token !== 'string' || token.length === 0) {
       return renderError(c, 'Magic link is missing the token parameter.');
@@ -153,7 +167,6 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
       setSessionCookie(c, sessionToken);
       return c.redirect('/', 302);
     }
-    const user = await upsertUser({ email: consumed.email });
     if (!ctx.redirectUri) {
       return renderError(
         c,
@@ -168,9 +181,19 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
     }
 
     const client = await getClient(ctx.clientId);
-    if (!client || !client.redirect_uris.includes(ctx.redirectUri)) {
+    if (
+      !client ||
+      !isAllowedOAuthRedirectUri(ctx.redirectUri) ||
+      !client.redirect_uris.includes(ctx.redirectUri)
+    ) {
       return renderError(c, 'Client registration changed during sign-in. Please restart.');
     }
+    const validTransaction = verifyBrowserTransaction(c, ctx.browserTransactionHash);
+    clearBrowserTransaction(c);
+    if (!ctx.consentGranted || !validTransaction) {
+      return renderError(c, 'Authorization consent expired or invalid. Please restart sign-in.');
+    }
+    const user = await upsertUser({ email: consumed.email });
     const pagentCode = await createAuthCode(
       user.id,
       ctx.clientId,

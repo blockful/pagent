@@ -25,6 +25,7 @@ const metadataSchema = z.object({
   registration_endpoint: z.string().url(),
   revocation_endpoint: z.string().url(),
 });
+const registeredClientSchema = z.object({ client_id: z.string().uuid() });
 const jwksSchema = z.object({
   keys: z.array(
     z.object({ kty: z.literal('OKP'), crv: z.literal('Ed25519'), use: z.literal('sig') }),
@@ -122,6 +123,45 @@ test('publishes OAuth metadata on the configured API origin', async () => {
     registration_endpoint: `${API_PUBLIC_URL}/oauth/register`,
     revocation_endpoint: `${API_PUBLIC_URL}/oauth/revoke`,
   });
+});
+
+test('requires explicit browser-bound consent before exposing OAuth sign-in choices', async ({
+  page,
+}) => {
+  const registration = await api?.post('/oauth/register', {
+    data: {
+      client_name: 'Production OAuth client',
+      redirect_uris: ['https://client.example/callback'],
+    },
+  });
+  expect(registration?.status()).toBe(201);
+  const client = registeredClientSchema.parse(await jsonResponse(registration));
+  const authorize = new URL('/oauth/authorize', localApiUrl());
+  authorize.search = new URLSearchParams({
+    client_id: client.client_id,
+    redirect_uri: 'https://client.example/callback',
+    code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
+    code_challenge_method: 'S256',
+    scope: 'page:create page:read',
+    state: 'production-e2e-state',
+  }).toString();
+
+  await page.goto(authorize.toString());
+  await expect(page.getByText('Unverified OAuth client')).toBeVisible();
+  await expect(page.getByText('Production OAuth client')).toBeVisible();
+  await expect(page.getByText('https://client.example/callback')).toBeVisible();
+  await expect(page.getByText('page:create')).toBeVisible();
+  await expect(page.getByText('page:read')).toBeVisible();
+  await expect(page.getByRole('link', { name: /Google/ })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Allow' }).click();
+  await expect(page.getByRole('link', { name: 'Allow and continue with Google' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Allow and send magic link' })).toBeVisible();
+
+  await page.goto(authorize.toString());
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByText('Authorization cancelled.')).toBeVisible();
+  expect(page.url()).toBe(`${localApiUrl()}/oauth/authorize/consent`);
 });
 
 test('publishes the generated Ed25519 public key', async () => {
