@@ -88,6 +88,7 @@ describe('HTTP layer', () => {
     expect(res.status).toBe(204);
     expect(res.headers.get('Access-Control-Allow-Methods')).toContain('POST');
     expect(res.headers.get('Access-Control-Allow-Headers')).toContain('Content-Type');
+    expect(res.headers.get('Access-Control-Allow-Headers')).toContain('Authorization');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });
 

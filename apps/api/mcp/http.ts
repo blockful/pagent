@@ -42,7 +42,7 @@ const REQUEST_ID_REGEX = /^[A-Za-z0-9_-]{1,128}$/;
 // Headers a browser-side MCP client might preflight. `Mcp-Session-Id` is
 // reserved by the SDK transport even in stateless mode — clients may still
 // echo it on resumed sessions.
-const CORS_ALLOWED_HEADERS = 'Content-Type, Mcp-Session-Id, X-Request-Id';
+const CORS_ALLOWED_HEADERS = 'Authorization, Content-Type, Mcp-Session-Id, X-Request-Id';
 // Methods the SDK's streamable HTTP transport actually serves.
 const CORS_ALLOWED_METHODS = 'GET, POST, DELETE, OPTIONS';
 
@@ -171,7 +171,10 @@ export function makeMcpHttpHandler(cfg: McpHttpConfig) {
     // can discover the AS without an out-of-band config step. The check sits
     // after rate-limit (no point validating tokens we'd throttle anyway) but
     // before body parse (a 401 should be cheap and not trigger body reads).
-    if (env.REQUIRE_AUTH && req.method === 'POST') {
+    if (
+      env.REQUIRE_AUTH &&
+      (req.method === 'GET' || req.method === 'POST' || req.method === 'DELETE')
+    ) {
       const authHeader = req.headers.authorization;
       const resourceMetadataUrl = `${cfg.publicUrl}/.well-known/oauth-protected-resource`;
       if (!authHeader?.startsWith('Bearer ')) {

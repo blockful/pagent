@@ -21419,11 +21419,22 @@ import { pathToFileURL } from "node:url";
 var HTML_MAX_BYTES = 1e6;
 
 // apps/api/mcp/tools.ts
+var InsufficientScopeError = class extends Error {
+  requiredScope;
+  constructor(requiredScope) {
+    super(`Insufficient OAuth scope: ${requiredScope} is required`);
+    this.name = "InsufficientScopeError";
+    this.requiredScope = requiredScope;
+  }
+};
 function ownerIdFromExtra(extra) {
-  if (!extra || typeof extra !== "object") return void 0;
-  const authInfo = extra.authInfo;
-  const sub = authInfo?.extra?.sub;
+  const sub = extra?.authInfo?.extra?.sub;
   return typeof sub === "string" ? sub : void 0;
+}
+function requireScope(extra, requiredScope) {
+  if (extra?.authInfo && !extra.authInfo.scopes.includes(requiredScope)) {
+    throw new InsufficientScopeError(requiredScope);
+  }
 }
 var SHOW_UI_DESCRIPTION = [
   "Ask the user a question that needs a structured answer back. Forms, pickers, confirmations, multi-step wizards, surveys, dashboards-as-input.",
@@ -21472,6 +21483,7 @@ function registerPagentTools(server2, ops) {
       }
     },
     async ({ spec }, extra) => {
+      requireScope(extra, "page:create");
       const created = await ops.showUi(spec, ownerIdFromExtra(extra));
       return {
         content: [
@@ -21502,6 +21514,7 @@ expires_at: ${created.expires_at}`
       }
     },
     async ({ html }, extra) => {
+      requireScope(extra, "page:create");
       const created = await ops.showHtml(html, ownerIdFromExtra(extra));
       return {
         content: [
@@ -21533,7 +21546,8 @@ View-only \u2014 do not poll check_result for this page.`
         page_id: external_exports.string().regex(/^[a-f0-9]{32}$/, "invalid page_id").describe("The page_id returned by show_ui.")
       }
     },
-    async ({ page_id }) => {
+    async ({ page_id }, extra) => {
+      requireScope(extra, "page:read");
       const outcome = await ops.checkResult(page_id);
       if (outcome.kind === "not_found") {
         throw new Error(

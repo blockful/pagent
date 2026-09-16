@@ -43,6 +43,23 @@ export interface PageOps {
   checkResult(page_id: string): Promise<CheckResultOutcome>;
 }
 
+type ToolExtra = {
+  readonly authInfo?: {
+    readonly scopes: readonly string[];
+    readonly extra?: Readonly<Record<string, unknown>>;
+  };
+};
+
+class InsufficientScopeError extends Error {
+  readonly requiredScope: string;
+
+  constructor(requiredScope: string) {
+    super(`Insufficient OAuth scope: ${requiredScope} is required`);
+    this.name = 'InsufficientScopeError';
+    this.requiredScope = requiredScope;
+  }
+}
+
 /**
  * Extract the user id from the MCP tool handler's `extra.authInfo`. The HTTP
  * MCP path (apps/api/mcp/http.ts) sets `req.auth.extra.sub = claims.sub`
@@ -51,11 +68,15 @@ export interface PageOps {
  * auth context) or for unauthenticated HTTP MCP calls in grace mode — the
  * adapter then inserts the page with owner_id = NULL.
  */
-function ownerIdFromExtra(extra: unknown): string | undefined {
-  if (!extra || typeof extra !== 'object') return undefined;
-  const authInfo = (extra as { authInfo?: { extra?: Record<string, unknown> } }).authInfo;
-  const sub = authInfo?.extra?.sub;
+function ownerIdFromExtra(extra: ToolExtra | undefined): string | undefined {
+  const sub = extra?.authInfo?.extra?.sub;
   return typeof sub === 'string' ? sub : undefined;
+}
+
+function requireScope(extra: ToolExtra | undefined, requiredScope: string): void {
+  if (extra?.authInfo && !extra.authInfo.scopes.includes(requiredScope)) {
+    throw new InsufficientScopeError(requiredScope);
+  }
 }
 
 // --- Tool descriptions -------------------------------------------------------
@@ -117,6 +138,7 @@ export function registerPagentTools(server: McpServer, ops: PageOps): void {
       },
     },
     async ({ spec }, extra) => {
+      requireScope(extra, 'page:create');
       const created = await ops.showUi(spec, ownerIdFromExtra(extra));
       return {
         content: [
@@ -144,6 +166,7 @@ export function registerPagentTools(server: McpServer, ops: PageOps): void {
       },
     },
     async ({ html }, extra) => {
+      requireScope(extra, 'page:create');
       const created = await ops.showHtml(html, ownerIdFromExtra(extra));
       return {
         content: [
@@ -173,7 +196,8 @@ export function registerPagentTools(server: McpServer, ops: PageOps): void {
           .describe('The page_id returned by show_ui.'),
       },
     },
-    async ({ page_id }) => {
+    async ({ page_id }, extra) => {
+      requireScope(extra, 'page:read');
       const outcome = await ops.checkResult(page_id);
       if (outcome.kind === 'not_found') {
         throw new Error(

@@ -46,18 +46,51 @@ function makeOps(overrides: Partial<PageOps> = {}): PageOps {
   return { ...defaultOps, ...overrides };
 }
 
+function makeTools(ops = makeOps()): Map<string, RegisteredTool> {
+  const { server, tools } = makeServer();
+  registerPagentTools(server, ops);
+  return tools;
+}
+
+const toolCalls = [
+  ['show_ui', { spec: [] }, 'page:create'],
+  ['show_html', { html: '<p>x</p>' }, 'page:create'],
+  ['check_result', { page_id: 'a'.repeat(32) }, 'page:read'],
+] as const;
+
 describe('registerPagentTools', () => {
   it('registers three tools: show_ui, show_html, check_result', () => {
-    const { server, tools } = makeServer();
-    registerPagentTools(server, makeOps());
-    expect(tools.has('show_ui')).toBe(true);
-    expect(tools.has('show_html')).toBe(true);
-    expect(tools.has('check_result')).toBe(true);
+    const tools = makeTools();
+    expect([...tools.keys()].sort()).toEqual(['check_result', 'show_html', 'show_ui']);
   });
 
+  it.each(toolCalls)(
+    '%s allows an authenticated call with its required scope',
+    async (name, args, requiredScope) => {
+      const tools = makeTools();
+      const handler = tools.get(name)?.handler;
+      const result = await handler?.(args, {
+        authInfo: { scopes: [requiredScope], extra: { sub: 'user-uuid' } },
+      });
+      expect(result).toBeDefined();
+    },
+  );
+
+  it.each(toolCalls)(
+    '%s rejects an authenticated call without its required scope',
+    async (name, args, requiredScope) => {
+      const tools = makeTools();
+      const handler = tools.get(name)?.handler;
+      await expect(
+        handler?.(args, {
+          authInfo: { scopes: name === 'check_result' ? [] : ['arbitrary'], extra: {} },
+        }),
+      ).rejects.toThrow(requiredScope);
+    },
+  );
+
   it('show_html description mentions view-only and no scripts', () => {
-    const { server, tools } = makeServer();
-    registerPagentTools(server, makeOps());
+    const tools = makeTools();
     const desc = tools.get('show_html')!.description;
     expect(desc).toMatch(/view-only/i);
     expect(desc).toMatch(/script/i);
@@ -65,15 +98,13 @@ describe('registerPagentTools', () => {
   });
 
   it('show_ui description distinguishes itself from show_html', () => {
-    const { server, tools } = makeServer();
-    registerPagentTools(server, makeOps());
+    const tools = makeTools();
     const desc = tools.get('show_ui')!.description;
     expect(desc).toMatch(/show_html/);
   });
 
   it('check_result structuredContent includes format', async () => {
-    const { server, tools } = makeServer();
-    registerPagentTools(server, makeOps());
+    const tools = makeTools();
     const handler = tools.get('check_result')!.handler;
     const out = (await handler({ page_id: 'a'.repeat(32) })) as {
       structuredContent: { state: string; result: unknown; page_id: string; format: string };
@@ -82,12 +113,10 @@ describe('registerPagentTools', () => {
   });
 
   it('show_html handler returns structuredContent matching showHtml + "do not poll" text', async () => {
-    const { server, tools } = makeServer();
     const expectedId = 'c'.repeat(32);
     const expectedUrl = 'http://test.local/' + expectedId;
     const expectedExpires = 1700000000000;
-    registerPagentTools(
-      server,
+    const tools = makeTools(
       makeOps({
         showHtml: async (html) => {
           // Sanity check: handler must forward the html argument.
@@ -110,9 +139,7 @@ describe('registerPagentTools', () => {
   });
 
   it('check_result handler on an HTML page surfaces "stop polling" guidance', async () => {
-    const { server, tools } = makeServer();
-    registerPagentTools(
-      server,
+    const tools = makeTools(
       makeOps({
         checkResult: async () => ({
           kind: 'state',
@@ -142,10 +169,8 @@ describe('registerPagentTools', () => {
   // it to ops.showUi / ops.showHtml as `ownerId`.
 
   it('show_ui handler forwards extra.authInfo.extra.sub to ops.showUi as ownerId', async () => {
-    const { server, tools } = makeServer();
     const captured: { spec?: unknown; ownerId?: string } = {};
-    registerPagentTools(
-      server,
+    const tools = makeTools(
       makeOps({
         showUi: async (spec, ownerId) => {
           captured.spec = spec;
@@ -170,10 +195,8 @@ describe('registerPagentTools', () => {
   });
 
   it('show_ui handler passes ownerId = undefined when no authInfo is present', async () => {
-    const { server, tools } = makeServer();
     let captured: string | undefined = 'sentinel';
-    registerPagentTools(
-      server,
+    const tools = makeTools(
       makeOps({
         showUi: async (_spec, ownerId) => {
           captured = ownerId;
@@ -188,10 +211,8 @@ describe('registerPagentTools', () => {
   });
 
   it('show_html handler forwards extra.authInfo.extra.sub to ops.showHtml as ownerId', async () => {
-    const { server, tools } = makeServer();
     let captured: string | undefined;
-    registerPagentTools(
-      server,
+    const tools = makeTools(
       makeOps({
         showHtml: async (_html, ownerId) => {
           captured = ownerId;
@@ -215,10 +236,8 @@ describe('registerPagentTools', () => {
   });
 
   it('show_html handler passes ownerId = undefined when no authInfo is present', async () => {
-    const { server, tools } = makeServer();
     let captured: string | undefined = 'sentinel';
-    registerPagentTools(
-      server,
+    const tools = makeTools(
       makeOps({
         showHtml: async (_html, ownerId) => {
           captured = ownerId;
@@ -235,10 +254,8 @@ describe('registerPagentTools', () => {
     // If an upstream auth pipeline ever set `sub` to a number / object, the
     // helper must not pass through garbage. ownerId should be undefined and
     // the store will write owner_id = NULL.
-    const { server, tools } = makeServer();
     let captured: string | undefined = 'sentinel';
-    registerPagentTools(
-      server,
+    const tools = makeTools(
       makeOps({
         showUi: async (_spec, ownerId) => {
           captured = ownerId;
@@ -253,7 +270,7 @@ describe('registerPagentTools', () => {
         authInfo: {
           token: 'tok',
           clientId: 'mcp-cli',
-          scopes: [],
+          scopes: ['page:create'],
           extra: { sub: 42 as unknown as string },
         },
       },

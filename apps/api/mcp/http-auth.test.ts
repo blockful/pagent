@@ -44,9 +44,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (closeServer !== undefined) {
-    await closeServer();
-  }
+  await closeServer?.();
 });
 
 beforeEach(() => {
@@ -61,6 +59,21 @@ function withRequireAuth<T>(fn: () => Promise<T>): Promise<T> {
   return fn().finally(() => {
     (env as { REQUIRE_AUTH: boolean }).REQUIRE_AUTH = original;
   });
+}
+
+function accessTokenClaims(scope: string, sub = 'user-uuid'): jwt.JwtPayload {
+  return {
+    sub,
+    email: 'user@example.com',
+    handle: 'user',
+    client_id: 'mcp-cli',
+    scope,
+    iss: 'http://test.local',
+    aud: 'http://test.local',
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    iat: Math.floor(Date.now() / 1000),
+    jti: 'test-jti',
+  };
 }
 
 async function newSdkClient(): Promise<Client> {
@@ -133,18 +146,8 @@ describe('Bearer auth gating', () => {
 
   it('passes through when REQUIRE_AUTH=true and a valid Bearer is presented', async () => {
     await withRequireAuth(async () => {
-      const spy = vi.spyOn(jwt, 'verifyAccessToken').mockResolvedValue({
-        sub: 'user-uuid',
-        email: 'a@b.co',
-        handle: 'a',
-        client_id: 'mcp-cli',
-        scope: 'page:create page:read',
-        iss: 'http://test.local',
-        aud: 'http://test.local',
-        exp: Math.floor(Date.now() / 1000) + 3600,
-        iat: Math.floor(Date.now() / 1000),
-        jti: 'jti-1',
-      });
+      const claims = accessTokenClaims('page:create page:read');
+      const spy = vi.spyOn(jwt, 'verifyAccessToken').mockResolvedValue(claims);
       const started = await startProtectedServer();
       try {
         const res = await fetch(started.url, {
@@ -179,18 +182,8 @@ describe('Bearer auth gating', () => {
 
   it('show_ui via authed MCP forwards JWT sub as owner_id to db.insertPage', async () => {
     await withRequireAuth(async () => {
-      const spy = vi.spyOn(jwt, 'verifyAccessToken').mockResolvedValue({
-        sub: 'auth-flow-user-uuid',
-        email: 'flow@example.com',
-        handle: 'flow',
-        client_id: 'mcp-cli',
-        scope: 'page:create',
-        iss: 'http://test.local',
-        aud: 'http://test.local',
-        exp: Math.floor(Date.now() / 1000) + 3600,
-        iat: Math.floor(Date.now() / 1000),
-        jti: 'jti-flow',
-      });
+      const claims = accessTokenClaims('page:create', 'auth-flow-user-uuid');
+      const spy = vi.spyOn(jwt, 'verifyAccessToken').mockResolvedValue(claims);
       const started = await startProtectedServer();
       const client = new Client({ name: 'test', version: '0.0.1' });
       try {
@@ -213,6 +206,49 @@ describe('Bearer auth gating', () => {
       }
     });
   });
+
+  it('show_ui returns an MCP tool error when the token lacks page:create', async () => {
+    await withRequireAuth(async () => {
+      const claims = accessTokenClaims('page:read', 'read-only-user');
+      const spy = vi.spyOn(jwt, 'verifyAccessToken').mockResolvedValue(claims);
+      const started = await startProtectedServer();
+      const client = new Client({ name: 'test', version: '0.0.1' });
+      try {
+        await client.connect(
+          new StreamableHTTPClientTransport(started.url, {
+            requestInit: { headers: { authorization: 'Bearer valid.jwt' } },
+          }),
+        );
+        const result = await client.callTool({
+          name: 'show_ui',
+          arguments: { spec: [{ createSurface: { surfaceId: 'm' } }] },
+        });
+        expect(result.isError).toBe(true);
+        expect(JSON.stringify(result.content)).toContain('page:create');
+        expect(db.insertPage).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+        spy.mockRestore();
+        await started.close();
+      }
+    });
+  });
+
+  it.each(['GET', 'DELETE'] as const)(
+    'returns 401 for unauthenticated %s when REQUIRE_AUTH=true',
+    async (method) => {
+      await withRequireAuth(async () => {
+        const started = await startProtectedServer();
+        try {
+          const res = await fetch(started.url, { method, headers: { Accept: MCP_ACCEPT } });
+          expect(res.status).toBe(401);
+          expect(res.headers.get('WWW-Authenticate')).toContain('Bearer');
+        } finally {
+          await started.close();
+        }
+      });
+    },
+  );
 
   it('show_ui via unauthenticated MCP (REQUIRE_AUTH=false) leaves ownerId null', async () => {
     const client = await newSdkClient();
