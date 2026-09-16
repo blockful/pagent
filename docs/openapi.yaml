@@ -27,6 +27,15 @@ info:
     - **received** — the agent called `GET /{id}/result` at least once after
       submission. The state flip is idempotent; subsequent reads keep returning
       `received`.
+
+    ## Authentication modes
+
+    When `REQUIRE_AUTH=false` (rollout grace mode), anonymous requests to
+    `POST /new` and `GET /{id}/result` are allowed. OAuth scope checks still
+    apply whenever a valid Bearer token is presented: an under-scoped token
+    receives 403 even though the same request without credentials is allowed.
+    When `REQUIRE_AUTH=true`, both routes also require an authenticated user.
+    `GET /{id}` and browser submissions to `POST /{id}/result` remain public.
   contact:
     name: Pagent maintainers
     url: https://github.com/blockful/pagent
@@ -582,6 +591,10 @@ paths:
         done.
 
         Rate-limited to 30 requests per minute per source IP.
+
+        In rollout grace mode (`REQUIRE_AUTH=false`), anonymous creation is
+        allowed. A valid Bearer token is still required to include
+        `page:create`; otherwise this route returns 403.
       security:
         - BearerAuth: []
         - CookieAuth: []
@@ -646,7 +659,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/OAuthError'
         '403':
-          description: A Bearer token is missing the `page:create` scope.
+          description: |
+            A valid Bearer token is missing the `page:create` scope. Scope
+            checks apply even in rollout grace mode, when an anonymous request
+            would be allowed.
           content:
             application/json:
               schema:
@@ -840,6 +856,10 @@ paths:
 
         **What to do next:** parse the `result` object and continue the agent
         conversation. `result` is null until the user submits.
+
+        In rollout grace mode (`REQUIRE_AUTH=false`), anonymous polling is
+        allowed. A valid Bearer token is still required to include `page:read`;
+        otherwise this route returns 403.
       security:
         - BearerAuth: []
         - CookieAuth: []
@@ -872,7 +892,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/OAuthError'
         '403':
-          description: A Bearer token is missing the `page:read` scope.
+          description: |
+            A valid Bearer token is missing the `page:read` scope. Scope checks
+            apply even in rollout grace mode, when an anonymous request would
+            be allowed.
           content:
             application/json:
               schema:
@@ -894,8 +917,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        OAuth access token. When `REQUIRE_AUTH=true`, `POST /new` requires
-        `page:create` and `GET /{id}/result` requires `page:read`.
+        OAuth access token. Bearer-authenticated calls to `POST /new` require
+        `page:create`, and Bearer-authenticated calls to `GET /{id}/result`
+        require `page:read`. These scope checks also apply when
+        `REQUIRE_AUTH=false`; that mode permits anonymous calls, not
+        under-scoped Bearer calls.
     CookieAuth:
       type: apiKey
       in: cookie
@@ -1048,7 +1074,7 @@ components:
 
     PageResponse:
       type: object
-      required: [spec, state, result, expires_at]
+      required: [spec, format, state, result, expires_at]
       properties:
         spec:
           $ref: '#/components/schemas/Spec'
@@ -1104,7 +1130,7 @@ components:
 
     ResultResponse:
       type: object
-      required: [state, result]
+      required: [state, result, format]
       properties:
         state:
           $ref: '#/components/schemas/PageState'

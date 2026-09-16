@@ -292,7 +292,7 @@ automatically and restarts the service on 503.
 **Failure response** (`503`) — Postgres is unreachable:
 
 ```json
-{ "ok": false, "db": "error" }
+{ "ok": false, "db": "error", "message": "Database connection failed" }
 ```
 
 There is no `pages` count in the response; the field was removed in an earlier

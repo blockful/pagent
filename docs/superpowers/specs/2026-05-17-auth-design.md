@@ -240,7 +240,7 @@ GET /.well-known/oauth-authorization-server
   "grant_types_supported": ["authorization_code", "refresh_token"],
   "token_endpoint_auth_methods_supported": ["none"],
   "code_challenge_methods_supported": ["S256"],
-  "scopes_supported": ["page:create", "page:read", "page:write"],
+  "scopes_supported": ["page:create", "page:read"],
   "service_documentation": "https://github.com/blockful/pagent#readme"
 }
 ```
@@ -260,7 +260,7 @@ GET /.well-known/oauth-protected-resource
 {
   "resource": "https://api.pagent.link",
   "authorization_servers": ["https://api.pagent.link"],
-  "scopes_supported": ["page:create", "page:read", "page:write"],
+  "scopes_supported": ["page:create", "page:read"],
   "bearer_methods_supported": ["header"],
   "resource_name": "Pagent API",
   "resource_documentation": "https://github.com/blockful/pagent#readme"
@@ -831,15 +831,15 @@ lifetime is the revocation mechanism for V1.
 
 ### 5.5 Scopes
 
-| Scope          | Grants                                              |
-| -------------- | --------------------------------------------------- |
-| `page:create`  | `POST /new`, `show_ui`, `show_html` MCP tools       |
-| `page:read`    | `GET /:id`, `GET /:id/result`, `check_result` tool  |
-| `page:write`   | `POST /:id/result` (submit from browser)             |
+| Scope         | Grants                                             |
+| ------------- | -------------------------------------------------- |
+| `page:create` | `POST /new`, `show_ui`, `show_html` MCP tools      |
+| `page:read`   | `GET /:id/result`, `check_result` MCP tool         |
 
-Default scope (if none requested): `page:create page:read`. The
-`page:write` scope is implicitly granted to session-cookie-authenticated
-browser users (the renderer needs it to submit forms).
+Default scope (if none requested): `page:create page:read`. `GET /:id`
+and the renderer's `POST /:id/result` submission route are public and do
+not require an OAuth scope. Session-cookie-authenticated requests are not
+subject to Bearer-token scope checks.
 
 ## 6. Middleware design
 
@@ -993,16 +993,19 @@ In `apps/api/app.ts`, the middleware chain becomes:
 // Always resolve auth (sets c.var.user or null)
 app.use('*', resolveAuth());
 
-// Conditionally require auth on mutation endpoints
-if (env.REQUIRE_AUTH) {
-  app.use('/new', requireAuth());
-}
+// POST /new and GET /:id/result conditionally use requireAuth().
+// Their requireScope() middleware always checks valid Bearer credentials.
+// GET /:id and POST /:id/result remain public.
 ```
 
-Read endpoints (`GET /:id`, `GET /:id/result`) remain public — pages
-are accessed by their unguessable 128-bit ID. Ownership checks (e.g.,
-"only the owner can delete") are deferred to V2 when we add
-page-management endpoints.
+`GET /:id` remains public because the renderer addresses pages by their
+unguessable 128-bit ID. `GET /:id/result` requires authentication when
+`REQUIRE_AUTH=true`; when the flag is false, anonymous polling remains
+available for rollout compatibility. Scope checks are independent of that
+anonymous gate: any valid Bearer used with `POST /new` or
+`GET /:id/result` must include `page:create` or `page:read`, respectively,
+even during grace mode. `POST /:id/result` remains public for renderer
+submissions.
 
 ### 6.5 `owner_id` injection
 
@@ -1126,15 +1129,21 @@ as a signed JWT (HMAC-SHA256 with a server-side secret). This prevents:
    will go through the auth flow on first connect. MCP clients that
    don't support OAuth continue to work (the `/mcp` endpoint returns
    MCP responses, not 401).
-3. Monitor: what percentage of pages have `owner_id IS NOT NULL`?
+3. Anonymous `POST /new` and `GET /:id/result` requests continue to work.
+   A client that supplies a valid Bearer token must still have the matching
+   route scope; under-scoped Bearer requests return 403 rather than falling
+   back to anonymous access.
+4. Monitor: what percentage of pages have `owner_id IS NOT NULL`?
 
 ### 8.3 Phase 3: Auth required
 
 1. Set `REQUIRE_AUTH=true` in Railway.
-2. `POST /new` and `POST /mcp` (for tool calls that create pages)
-   return 401 without a valid token.
-3. Unauthenticated read access (`GET /:id`, `GET /:id/result`) still
-   works — pages are accessed by unguessable ID.
+2. `POST /new`, `GET /:id/result`, and `POST /mcp` return 401 without a
+   valid authenticated identity. Bearer calls also require their route or
+   tool scope.
+3. Unauthenticated `GET /:id` access still works — pages are accessed by
+   unguessable ID. Browser submissions to `POST /:id/result` also remain
+   public.
 4. The stdio MCP server (`apps/mcp`) now needs to send Bearer tokens
    with its HTTP requests to `SERVICE_URL`. The user provides their
    token via the `PAGENT_TOKEN` env var (or the SDK handles the OAuth
@@ -1142,14 +1151,16 @@ as a signed JWT (HMAC-SHA256 with a server-side secret). This prevents:
 
 ### 8.4 Backward compatibility guarantees
 
-| Behavior                              | During grace period | After REQUIRE_AUTH=true |
-| ------------------------------------- | ------------------- | ----------------------- |
-| `POST /new` without auth              | Works (owner=NULL)  | 401                     |
-| `GET /:id` without auth               | Works               | Works                   |
-| `GET /:id/result` without auth        | Works               | Works                   |
-| `POST /:id/result` without auth       | Works               | Works (cookie auth)     |
-| `POST /mcp` without Bearer            | Works               | 401 with discovery      |
-| Existing pages (owner_id=NULL)        | Readable            | Readable                |
+| Behavior                                      | During grace period | After REQUIRE_AUTH=true |
+| --------------------------------------------- | ------------------- | ----------------------- |
+| `POST /new` without auth                      | Works (owner=NULL)  | 401                     |
+| `POST /new` with under-scoped valid Bearer    | 403                 | 403                     |
+| `GET /:id` without auth                       | Works               | Works                   |
+| `GET /:id/result` without auth                | Works               | 401                     |
+| `GET /:id/result` with under-scoped Bearer    | 403                 | 403                     |
+| `POST /:id/result` without auth               | Works               | Works                   |
+| `POST /mcp` without Bearer                    | Works               | 401 with discovery      |
+| Existing pages (`owner_id = NULL`) via page URL | Readable          | Readable                |
 
 ## 9. Environment variables
 
@@ -1157,7 +1168,7 @@ New environment variables for the API (`apps/api`):
 
 | Variable                   | Required | Default      | Description                                     |
 | -------------------------- | -------- | ------------ | ----------------------------------------------- |
-| `REQUIRE_AUTH`             | No       | `false`      | If `true`, mutation endpoints require auth       |
+| `REQUIRE_AUTH`             | No       | `false`      | If `true`, page creation, result reads, and MCP require auth |
 | `JWT_SIGNING_KEY`          | Yes*     | -            | Ed25519 private key, base64url-encoded (DER)     |
 | `JWT_PUBLIC_KEY`           | Yes*     | -            | Ed25519 public key, base64url-encoded (DER)      |
 | `GOOGLE_CLIENT_ID`        | Yes*     | -            | Google OAuth 2.0 client ID                       |

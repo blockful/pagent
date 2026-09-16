@@ -15,7 +15,7 @@ Implement the two auth middleware layers: the Hono middleware for REST routes (`
   - `createSession(userId: string, ip?: string, userAgent?: string): Promise<string>` — generates 128-bit random hex, stores `SHA-256(token)` in `sessions` with expiry. Returns the raw token for the cookie.
   - `deleteSession(token: string): Promise<void>` — deletes by `token_hash`.
 - `apps/api/mcp/http.ts` — add Bearer token check before `StreamableHTTPServerTransport.handleRequest()`. On missing/invalid Bearer when `REQUIRE_AUTH=true`: return 401 with `WWW-Authenticate: Bearer resource_metadata="/.well-known/oauth-protected-resource"`.
-- `apps/api/app.ts` — mount `resolveAuth()` on `*`. Conditionally mount `requireAuth()` on `POST /new` when `REQUIRE_AUTH=true`.
+- `apps/api/app.ts` — mount `resolveAuth()` on `*`. Conditionally require auth on `POST /new` and `GET /:id/result` when `REQUIRE_AUTH=true`; always enforce the corresponding scope when a valid Bearer token is presented.
 - `apps/api/auth/middleware.test.ts` (new) — tests:
   - Request with valid session cookie sets `c.var.user`.
   - Request with valid Bearer JWT sets `c.var.user`.
@@ -38,8 +38,8 @@ Implement the two auth middleware layers: the Hono middleware for REST routes (`
 - Bearer auth uses `verifyAccessToken()` from `jwt.ts` (no DB lookup).
 - MCP handler returns 401 with `WWW-Authenticate` header pointing to resource metadata when auth is required but missing.
 - `requireAuth()` is only applied when `REQUIRE_AUTH=true`.
-- Read endpoints (`GET /:id`, `GET /:id/result`) remain public regardless of `REQUIRE_AUTH`.
-- Existing unauthenticated behavior is preserved when `REQUIRE_AUTH=false`.
+- `GET /:id` remains public regardless of `REQUIRE_AUTH`; `GET /:id/result` requires auth when `REQUIRE_AUTH=true`.
+- Existing anonymous behavior is preserved when `REQUIRE_AUTH=false`, but valid Bearer tokens remain scope-checked and receive 403 when under-scoped.
 
 ## Dependencies
 
