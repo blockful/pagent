@@ -32,6 +32,6 @@ export function getClientIp(c: Context): string | undefined {
   return key === 'anonymous' ? undefined : key;
 }
 
-export async function renderError(c: Context, message: string, status: 400 | 503 = 400) {
+export function renderError(c: Context, message: string, status: 400 | 503 = 400): Response {
   return c.html(renderLoginPage({ error: message }), status);
 }
