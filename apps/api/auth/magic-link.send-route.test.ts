@@ -105,20 +105,17 @@ describe('POST /oauth/magic/send', () => {
     expect(html).toContain('>Try again</a>');
   });
 
-  it.each([
-    'application/json;q=1, text/html;q=0',
-    'application/json;q=1, text/html;Q=0',
-  ])('returns JSON when the client gives HTML zero quality: %s', async (accept) => {
-    const res = await app.fetch(
-      postMagicSend(
-        { email: 'not-an-email' },
-        { contentType: 'form', accept },
-      ),
-    );
-    expect(res.status).toBe(400);
-    expect(res.headers.get('content-type')).toContain('application/json');
-    await expect(res.json()).resolves.toMatchObject({ error: 'invalid_request' });
-  });
+  it.each(['application/json;q=1, text/html;q=0', 'application/json;q=1, text/html;Q=0'])(
+    'returns JSON when the client gives HTML zero quality: %s',
+    async (accept) => {
+      const res = await app.fetch(
+        postMagicSend({ email: 'not-an-email' }, { contentType: 'form', accept }),
+      );
+      expect(res.status).toBe(400);
+      expect(res.headers.get('content-type')).toContain('application/json');
+      await expect(res.json()).resolves.toMatchObject({ error: 'invalid_request' });
+    },
+  );
 
   it('keeps browser form errors recoverable when signed state is available', async () => {
     const res = await app.fetch(
