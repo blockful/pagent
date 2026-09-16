@@ -14,7 +14,23 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pagent_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pagent_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pagent_e2e?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
@@ -25,6 +41,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
 
       - name: Audit dependencies
         run: npm audit --audit-level=high
@@ -38,8 +57,11 @@ jobs:
       - name: Format check
         run: npm run format:check
 
-      - name: Test
-        run: npm test
+      - name: Unit and integration tests with coverage
+        run: npm run test:coverage
+
+      - name: Production end-to-end tests
+        run: npm run test:e2e
 
       - name: Build web
         # VITE_API_URL is required by `vite build` (see apps/web/vite.config.ts).

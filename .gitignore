@@ -8,6 +8,8 @@ production.env
 .DS_Store
 *.log
 .playwright-mcp/
+playwright-report/
+test-results/
 
 # Local test artifacts (Playwright screenshots, ad-hoc fixtures)
 *.png
