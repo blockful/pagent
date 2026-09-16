@@ -32,9 +32,30 @@ export type CheckResultOutcome =
   | { kind: 'state'; state: PageState; result: unknown; format: PageFormat };
 
 export interface PageOps {
-  showUi(spec: unknown): Promise<ShowUiResult>;
-  showHtml(html: string): Promise<ShowUiResult>;
+  /**
+   * `ownerId` is the authenticated user's UUID, lifted from the MCP request's
+   * authInfo (Bearer-authenticated HTTP MCP) or undefined for unauthenticated
+   * paths (stdio adapter, REQUIRE_AUTH=false). Adapters pass it through to
+   * page creation so the resulting row carries the right owner_id.
+   */
+  showUi(spec: unknown, ownerId?: string): Promise<ShowUiResult>;
+  showHtml(html: string, ownerId?: string): Promise<ShowUiResult>;
   checkResult(page_id: string): Promise<CheckResultOutcome>;
+}
+
+/**
+ * Extract the user id from the MCP tool handler's `extra.authInfo`. The HTTP
+ * MCP path (apps/api/mcp/http.ts) sets `req.auth.extra.sub = claims.sub`
+ * after Bearer verification; the SDK forwards that onto tool handlers as
+ * `extra.authInfo.extra.sub`. Returns undefined for the stdio adapter (no
+ * auth context) or for unauthenticated HTTP MCP calls in grace mode — the
+ * adapter then inserts the page with owner_id = NULL.
+ */
+function ownerIdFromExtra(extra: unknown): string | undefined {
+  if (!extra || typeof extra !== 'object') return undefined;
+  const authInfo = (extra as { authInfo?: { extra?: Record<string, unknown> } }).authInfo;
+  const sub = authInfo?.extra?.sub;
+  return typeof sub === 'string' ? sub : undefined;
 }
 
 // --- Tool descriptions -------------------------------------------------------
@@ -95,8 +116,8 @@ export function registerPagentTools(server: McpServer, ops: PageOps): void {
         spec: z.array(z.record(z.unknown())).describe(SHOW_UI_INPUT_DESCRIPTION),
       },
     },
-    async ({ spec }) => {
-      const created = await ops.showUi(spec);
+    async ({ spec }, extra) => {
+      const created = await ops.showUi(spec, ownerIdFromExtra(extra));
       return {
         content: [
           {
@@ -122,8 +143,8 @@ export function registerPagentTools(server: McpServer, ops: PageOps): void {
         html: z.string().min(1).max(HTML_MAX_BYTES).describe(SHOW_HTML_INPUT_DESCRIPTION),
       },
     },
-    async ({ html }) => {
-      const created = await ops.showHtml(html);
+    async ({ html }, extra) => {
+      const created = await ops.showHtml(html, ownerIdFromExtra(extra));
       return {
         content: [
           {

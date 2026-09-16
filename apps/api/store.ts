@@ -17,6 +17,13 @@ import type { ShowUiResult, CheckResultOutcome } from './mcp/tools.ts';
 export type CreatePageConfig = {
   publicUrl: string;
   pageTtlMs: number;
+  /**
+   * UUID of the authenticated user creating the page. When set, the page row
+   * is inserted with `owner_id` so the user can list / manage their pages
+   * later. Null/undefined during the grace period (REQUIRE_AUTH=false) or
+   * for the in-process MCP stdio adapter, which has no auth context.
+   */
+  ownerId?: string | null;
 };
 
 /**
@@ -48,6 +55,7 @@ export async function createPage(
     result: null,
     createdAt: now,
     expiresAt: now + cfg.pageTtlMs,
+    ownerId: cfg.ownerId ?? null,
   };
   await db.insertPage(page);
   metrics.pagesCreated.add(1, { format });

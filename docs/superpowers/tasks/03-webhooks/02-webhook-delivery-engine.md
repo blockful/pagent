@@ -18,6 +18,7 @@ MCP tools -- it exports `deliverWebhook()` and the supporting types.
 ### `apps/api/webhook.ts`
 
 1. **Types** -- export `WebhookPayload` and `WebhookFileRef`:
+
    ```ts
    type WebhookFileRef = {
      file_id: string;
