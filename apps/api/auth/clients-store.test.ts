@@ -17,8 +17,20 @@ import * as db from '../db.ts';
 import { registerClient, getClient, InvalidClientMetadataError } from './clients-store.ts';
 
 type Row = Awaited<ReturnType<typeof db.insertOAuthClient>>;
+type Client = Awaited<ReturnType<typeof getClient>>;
 
 const NOW = new Date('2026-05-17T12:00:00Z');
+
+function requireClient(value: Client): NonNullable<Client> {
+  if (value === undefined) throw new Error('expected registered client');
+  return value;
+}
+
+function firstInsertArg(): Parameters<typeof db.insertOAuthClient>[0] {
+  const call = vi.mocked(db.insertOAuthClient).mock.calls.at(0);
+  if (!call) throw new Error('expected insertOAuthClient call');
+  return call[0];
+}
 
 /** Build a row shaped like what db.insertOAuthClient returns. */
 function row(overrides: Partial<Row> = {}): Row {
@@ -74,7 +86,7 @@ describe('registerClient', () => {
     await registerClient({ redirect_uris: ['http://localhost:9876/callback'] });
 
     expect(db.insertOAuthClient).toHaveBeenCalledTimes(1);
-    const arg = vi.mocked(db.insertOAuthClient).mock.calls[0]![0];
+    const arg = firstInsertArg();
     expect(arg.grant_types).toEqual(['authorization_code', 'refresh_token']);
     expect(arg.response_types).toEqual(['code']);
     expect(arg.token_endpoint_auth_method).toBe('none');
@@ -91,7 +103,7 @@ describe('registerClient', () => {
       response_types: ['code'],
     });
 
-    const arg = vi.mocked(db.insertOAuthClient).mock.calls[0]![0];
+    const arg = firstInsertArg();
     expect(arg.grant_types).toEqual(['refresh_token']);
     expect(arg.response_types).toEqual(['code']);
   });
@@ -153,9 +165,9 @@ describe('registerClient validation', () => {
     await expect(registerClient({ redirect_uris: ['http://ok/cb', ''] })).rejects.toBeInstanceOf(
       InvalidClientMetadataError,
     );
-    await expect(
-      registerClient({ redirect_uris: ['http://ok/cb', null as unknown as string] }),
-    ).rejects.toBeInstanceOf(InvalidClientMetadataError);
+    await expect(registerClient({ redirect_uris: ['http://ok/cb', null] })).rejects.toBeInstanceOf(
+      InvalidClientMetadataError,
+    );
   });
 
   it('accepts custom URI schemes (MCP clients commonly use myapp:// etc.)', async () => {
@@ -202,11 +214,11 @@ describe('getClient', () => {
     vi.mocked(db.getOAuthClientById).mockResolvedValueOnce(row({ client_name: 'Claude Code' }));
 
     const result = await getClient('a1b2c3d4-e5f6-4321-9876-abcdef012345');
+    const client = requireClient(result);
 
-    expect(result).toBeDefined();
-    expect(result!.client_id).toBe('a1b2c3d4-e5f6-4321-9876-abcdef012345');
-    expect(result!.client_name).toBe('Claude Code');
-    expect(result!.redirect_uris).toEqual(['http://localhost:9876/callback']);
+    expect(client.client_id).toBe('a1b2c3d4-e5f6-4321-9876-abcdef012345');
+    expect(client.client_name).toBe('Claude Code');
+    expect(client.redirect_uris).toEqual(['http://localhost:9876/callback']);
   });
 
   it('returns undefined for unknown client_id', async () => {
@@ -226,9 +238,10 @@ describe('getClient', () => {
     );
 
     const result = await getClient('a-confidential-client');
+    const client = requireClient(result);
 
-    expect(result!.client_secret).toBe('shhh');
-    expect(result!.client_secret_expires_at).toBe(
+    expect(client.client_secret).toBe('shhh');
+    expect(client.client_secret_expires_at).toBe(
       Math.floor(new Date('2027-01-01T00:00:00Z').getTime() / 1000),
     );
   });
@@ -237,10 +250,11 @@ describe('getClient', () => {
     vi.mocked(db.getOAuthClientById).mockResolvedValueOnce(row());
 
     const result = await getClient('x');
+    const client = requireClient(result);
 
-    expect(result!.client_name).toBeUndefined();
-    expect(result!.client_uri).toBeUndefined();
-    expect(result!.logo_uri).toBeUndefined();
-    expect(result!.scope).toBeUndefined();
+    expect(client.client_name).toBeUndefined();
+    expect(client.client_uri).toBeUndefined();
+    expect(client.logo_uri).toBeUndefined();
+    expect(client.scope).toBeUndefined();
   });
 });

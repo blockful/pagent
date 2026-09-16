@@ -35,6 +35,7 @@ beforeAll(async () => {
   const started = await startServer(
     makeMcpHttpHandler({
       publicUrl: 'http://test.local',
+      apiPublicUrl: 'https://api.test.local',
       pageTtlMs: 60_000,
       rateLimiter,
     }),
@@ -86,6 +87,7 @@ async function startProtectedServer() {
   return startServer(
     makeMcpHttpHandler({
       publicUrl: 'http://test.local',
+      apiPublicUrl: 'https://api.test.local',
       pageTtlMs: 60_000,
       rateLimiter: new RateLimiter(1000, 60_000),
     }),
@@ -104,9 +106,8 @@ describe('Bearer auth gating', () => {
         });
         expect(res.status).toBe(401);
         const wwwAuth = res.headers.get('WWW-Authenticate');
-        expect(wwwAuth).toContain('Bearer');
         expect(wwwAuth).toContain(
-          'resource_metadata="http://test.local/.well-known/oauth-protected-resource"',
+          'Bearer resource_metadata="https://api.test.local/.well-known/oauth-protected-resource"',
         );
         const body = await parseJson(res, errorResponseSchema);
         expect(body.error).toBe('unauthorized');

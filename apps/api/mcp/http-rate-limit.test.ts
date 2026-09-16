@@ -30,6 +30,7 @@ async function startTightServer(limit: number) {
   return startServer(
     makeMcpHttpHandler({
       publicUrl: 'http://test.local',
+      apiPublicUrl: 'https://api.test.local',
       pageTtlMs: 60_000,
       rateLimiter: new RateLimiter(limit, 60_000),
     }),

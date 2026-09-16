@@ -12,6 +12,7 @@
  */
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { env } from '../schemas.ts';
+import { getApiPublicUrl } from './api-url.ts';
 
 // Google's documented OAuth 2.0 endpoints. v2/auth is the modern consent
 // screen; oauth2.googleapis.com/token is the universal token endpoint. Both
@@ -61,13 +62,12 @@ export interface GoogleProfile {
 
 /**
  * Returns the absolute redirect_uri sent to Google. Defaults to
- * `${PUBLIC_URL}/oauth/callback/google` when GOOGLE_REDIRECT_URI is unset
+ * `${API_PUBLIC_URL}/oauth/callback/google` when GOOGLE_REDIRECT_URI is unset
  * — matches the .env.example default and keeps dev/prod parity automatic.
  */
 function getRedirectUri(): string {
   if (env.GOOGLE_REDIRECT_URI) return env.GOOGLE_REDIRECT_URI;
-  const base = env.PUBLIC_URL ?? `http://localhost:${env.PORT}`;
-  return `${base}/oauth/callback/google`;
+  return `${getApiPublicUrl()}/oauth/callback/google`;
 }
 
 /**

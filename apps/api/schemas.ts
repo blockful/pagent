@@ -75,6 +75,7 @@ export const envSchema = z.preprocess(
       DATABASE_URL: z.string().min(1),
       PORT: z.coerce.number().optional().default(8787),
       PUBLIC_URL: z.string().url().optional(),
+      API_PUBLIC_URL: z.string().url().optional(),
       PAGE_TTL_MS: z.coerce.number().optional().default(1_800_000),
       ALLOWED_ORIGINS: z
         .string()
@@ -146,6 +147,33 @@ export const envSchema = z.preprocess(
             'PUBLIC_URL is required in production. Set it to the renderer URL (e.g. https://pagent.link).',
         });
       }
+      if (cfg.NODE_ENV === 'production' && !cfg.API_PUBLIC_URL) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['API_PUBLIC_URL'],
+          message:
+            'API_PUBLIC_URL is required in production. Set it to the API origin (e.g. https://api.pagent.link).',
+        });
+      }
+      if (cfg.NODE_ENV === 'production') {
+        for (const key of ['PUBLIC_URL', 'API_PUBLIC_URL'] as const) {
+          const value = cfg[key];
+          if (value && !isHttpsOrigin(value)) {
+            ctx.addIssue({
+              code: 'custom',
+              path: [key],
+              message: `${key} must be an HTTPS origin without credentials, path, query, or fragment in production.`,
+            });
+          }
+        }
+        if (cfg.GOOGLE_REDIRECT_URI && !isHttpsUrl(cfg.GOOGLE_REDIRECT_URI)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['GOOGLE_REDIRECT_URI'],
+            message: 'GOOGLE_REDIRECT_URI must use HTTPS in production.',
+          });
+        }
+      }
       if (cfg.REQUIRE_AUTH) {
         for (const key of AUTH_REQUIRED_VARS) {
           if (!cfg[key]) {
@@ -156,11 +184,35 @@ export const envSchema = z.preprocess(
             });
           }
         }
+        if (cfg.AUTH_STATE_SECRET && Buffer.byteLength(cfg.AUTH_STATE_SECRET, 'utf8') < 32) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['AUTH_STATE_SECRET'],
+            message: 'AUTH_STATE_SECRET must be at least 32 UTF-8 bytes when REQUIRE_AUTH=true.',
+          });
+        }
       }
     }),
 );
 
 export type Env = z.infer<typeof envSchema>;
+
+function isHttpsOrigin(value: string): boolean {
+  if (!URL.canParse(value)) return false;
+  const parsed = new URL(value);
+  return (
+    parsed.protocol === 'https:' &&
+    parsed.username === '' &&
+    parsed.password === '' &&
+    parsed.pathname === '/' &&
+    parsed.search === '' &&
+    parsed.hash === ''
+  );
+}
+
+function isHttpsUrl(value: string): boolean {
+  return URL.canParse(value) && new URL(value).protocol === 'https:';
+}
 
 let env: Env;
 try {

@@ -1,0 +1,121 @@
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../db.ts', () => ({
+  init: vi.fn(() => Promise.resolve()),
+  shutdown: vi.fn(() => Promise.resolve()),
+  insertPage: vi.fn(() => Promise.resolve()),
+  getActivePage: vi.fn(() => Promise.resolve(null)),
+  submitPage: vi.fn(() => Promise.resolve({ kind: 'not_found' })),
+  fetchAndAdvanceResult: vi.fn(() => Promise.resolve(null)),
+  deletePage: vi.fn(() => Promise.resolve()),
+  deleteExpiredPages: vi.fn(() => Promise.resolve({ total: 0, abandoned: 0 })),
+  ping: vi.fn().mockResolvedValue(undefined),
+  insertOAuthClient: vi.fn(),
+  getOAuthClientById: vi.fn(),
+  upsertUser: vi.fn(),
+  getUserByHandle: vi.fn(),
+  insertAuthCode: vi.fn(),
+}));
+
+import * as db from '../db.ts';
+import { createAuthCode, generateUniqueHandle, sanitizeHandle, upsertUser } from './provider.ts';
+import { setupGoogleAuthTest } from './google-test-support.ts';
+
+beforeAll(setupGoogleAuthTest);
+beforeEach(() => vi.clearAllMocks());
+
+describe('sanitizeHandle', () => {
+  it('lowercases and strips non-alphanumeric chars', () => {
+    expect(sanitizeHandle('Alex.Netto')).toBe('alexnetto');
+    expect(sanitizeHandle('Alex_NETTO+work')).toBe('alexnettowork');
+  });
+
+  it('pads short locals with "user"', () => {
+    expect(sanitizeHandle('a')).toBe('auser');
+    expect(sanitizeHandle('')).toBe('user');
+  });
+
+  it('truncates locals over 40 chars', () => {
+    const long = 'a'.repeat(60);
+    const out = sanitizeHandle(long);
+    expect(out.length).toBeLessThanOrEqual(40);
+    expect(out).toBe('a'.repeat(40));
+  });
+
+  it('strips leading and trailing dashes', () => {
+    expect(sanitizeHandle('-alex-')).toBe('alex');
+    expect(sanitizeHandle('---')).toBe('user');
+  });
+});
+
+describe('generateUniqueHandle', () => {
+  it('returns the base when not taken', async () => {
+    vi.mocked(db.getUserByHandle).mockResolvedValue(null);
+    const h = await generateUniqueHandle('alex');
+    expect(h).toBe('alex');
+  });
+
+  it('appends a numeric suffix on collision', async () => {
+    vi.mocked(db.getUserByHandle)
+      .mockResolvedValueOnce({ id: '1' } as never)
+      .mockResolvedValueOnce({ id: '2' } as never)
+      .mockResolvedValueOnce(null);
+    const h = await generateUniqueHandle('alex');
+    expect(h).toBe('alex3');
+  });
+});
+
+describe('upsertUser', () => {
+  it('generates a handle from the email local part and forwards to db.upsertUser', async () => {
+    vi.mocked(db.getUserByHandle).mockResolvedValue(null);
+    vi.mocked(db.upsertUser).mockResolvedValue({
+      id: 'user-uuid',
+      handle: 'alex',
+      email: 'alex@blockful.io',
+      name: 'Alex',
+      avatar_url: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    const u = await upsertUser({ email: 'alex@blockful.io', name: 'Alex' });
+    expect(u.id).toBe('user-uuid');
+    expect(db.upsertUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: 'alex@blockful.io',
+        name: 'Alex',
+        avatarUrl: null,
+        handle: 'alex',
+      }),
+    );
+  });
+});
+
+describe('createAuthCode', () => {
+  it('inserts a code with 10-minute expiry and forwards every field to db', async () => {
+    vi.mocked(db.insertAuthCode).mockResolvedValue();
+    const before = Date.now();
+    const code = await createAuthCode(
+      'user-uuid',
+      'client-id',
+      'http://localhost:9876/cb',
+      'challenge',
+      'S256',
+      'page:create',
+    );
+    expect(code).toBeTruthy();
+    expect(code).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(db.insertAuthCode).toHaveBeenCalledTimes(1);
+    const [arg] = vi.mocked(db.insertAuthCode).mock.calls[0] ?? [];
+    if (!arg) throw new Error('insertAuthCode call was not recorded');
+    expect(arg.code).toBe(code);
+    expect(arg.userId).toBe('user-uuid');
+    expect(arg.clientId).toBe('client-id');
+    expect(arg.redirectUri).toBe('http://localhost:9876/cb');
+    expect(arg.codeChallenge).toBe('challenge');
+    expect(arg.codeChallengeMethod).toBe('S256');
+    expect(arg.scope).toBe('page:create');
+    const ttlMs = arg.expiresAt.getTime() - before;
+    expect(ttlMs).toBeGreaterThanOrEqual(10 * 60 * 1000 - 100);
+    expect(ttlMs).toBeLessThanOrEqual(10 * 60 * 1000 + 100);
+  });
+});

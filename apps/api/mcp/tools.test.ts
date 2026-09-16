@@ -8,30 +8,35 @@
  * sees and the per-tool handler logic.
  */
 import { describe, it, expect } from 'vitest';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { registerPagentTools, type PageOps } from './tools.ts';
+import { registerPagentTools, type PageOps, type PagentToolRegistrar } from './tools.ts';
 
 type RegisteredTool = {
   description: string;
-  inputSchema: unknown;
   handler: (...args: unknown[]) => unknown;
 };
 
-function makeServer(): {
-  server: McpServer;
-  tools: Map<string, RegisteredTool>;
-} {
+function makeServer() {
   const tools = new Map<string, RegisteredTool>();
   const server = {
     registerTool(
       name: string,
-      def: { description: string; inputSchema: unknown },
-      handler: (...args: unknown[]) => unknown,
+      def: { title?: string; description?: string },
+      handler: (...args: never[]) => unknown,
     ) {
-      tools.set(name, { ...def, handler });
+      const invoke = (...args: unknown[]): unknown => Reflect.apply(handler, undefined, args);
+      tools.set(name, {
+        description: def.description ?? '',
+        handler: invoke,
+      });
     },
-  } as unknown as McpServer;
+  } satisfies PagentToolRegistrar;
   return { server, tools };
+}
+
+function getTool(tools: Map<string, RegisteredTool>, name: string): RegisteredTool {
+  const tool = tools.get(name);
+  if (!tool) throw new Error(`expected registered tool: ${name}`);
+  return tool;
 }
 
 // Default no-op PageOps. Tests that exercise a specific handler call
@@ -68,8 +73,8 @@ describe('registerPagentTools', () => {
     '%s allows an authenticated call with its required scope',
     async (name, args, requiredScope) => {
       const tools = makeTools();
-      const handler = tools.get(name)?.handler;
-      const result = await handler?.(args, {
+      const handler = getTool(tools, name).handler;
+      const result = await handler(args, {
         authInfo: { scopes: [requiredScope], extra: { sub: 'user-uuid' } },
       });
       expect(result).toBeDefined();
@@ -80,9 +85,9 @@ describe('registerPagentTools', () => {
     '%s rejects an authenticated call without its required scope',
     async (name, args, requiredScope) => {
       const tools = makeTools();
-      const handler = tools.get(name)?.handler;
+      const handler = getTool(tools, name).handler;
       await expect(
-        handler?.(args, {
+        handler(args, {
           authInfo: { scopes: name === 'check_result' ? [] : ['arbitrary'], extra: {} },
         }),
       ).rejects.toThrow(requiredScope);
@@ -91,7 +96,7 @@ describe('registerPagentTools', () => {
 
   it('show_html description mentions view-only and no scripts', () => {
     const tools = makeTools();
-    const desc = tools.get('show_html')!.description;
+    const desc = getTool(tools, 'show_html').description;
     expect(desc).toMatch(/view-only/i);
     expect(desc).toMatch(/script/i);
     expect(desc).toMatch(/JavaScript/i);
@@ -99,13 +104,13 @@ describe('registerPagentTools', () => {
 
   it('show_ui description distinguishes itself from show_html', () => {
     const tools = makeTools();
-    const desc = tools.get('show_ui')!.description;
+    const desc = getTool(tools, 'show_ui').description;
     expect(desc).toMatch(/show_html/);
   });
 
   it('check_result structuredContent includes format', async () => {
     const tools = makeTools();
-    const handler = tools.get('check_result')!.handler;
+    const handler = getTool(tools, 'check_result').handler;
     const out = (await handler({ page_id: 'a'.repeat(32) })) as {
       structuredContent: { state: string; result: unknown; page_id: string; format: string };
     };
@@ -125,7 +130,7 @@ describe('registerPagentTools', () => {
         },
       }),
     );
-    const handler = tools.get('show_html')!.handler;
+    const handler = getTool(tools, 'show_html').handler;
     const out = (await handler({ html: '<p>x</p>' })) as {
       structuredContent: { page_id: string; url: string; expires_at: number };
       content: Array<{ type: string; text: string }>;
@@ -149,7 +154,7 @@ describe('registerPagentTools', () => {
         }),
       }),
     );
-    const handler = tools.get('check_result')!.handler;
+    const handler = getTool(tools, 'check_result').handler;
     const out = (await handler({ page_id: 'd'.repeat(32) })) as {
       structuredContent: { state: string; result: unknown; format: string; page_id: string };
       content: Array<{ type: string; text: string }>;
@@ -179,7 +184,7 @@ describe('registerPagentTools', () => {
         },
       }),
     );
-    const handler = tools.get('show_ui')!.handler;
+    const handler = getTool(tools, 'show_ui').handler;
     await handler(
       { spec: [{ createSurface: { surfaceId: 'm' } }] },
       {
@@ -204,7 +209,7 @@ describe('registerPagentTools', () => {
         },
       }),
     );
-    const handler = tools.get('show_ui')!.handler;
+    const handler = getTool(tools, 'show_ui').handler;
     // Stdio adapter / anon HTTP MCP: extra has no authInfo.
     await handler({ spec: [{ createSurface: { surfaceId: 'm' } }] }, {});
     expect(captured).toBeUndefined();
@@ -220,7 +225,7 @@ describe('registerPagentTools', () => {
         },
       }),
     );
-    const handler = tools.get('show_html')!.handler;
+    const handler = getTool(tools, 'show_html').handler;
     await handler(
       { html: '<p>x</p>' },
       {
@@ -245,7 +250,7 @@ describe('registerPagentTools', () => {
         },
       }),
     );
-    const handler = tools.get('show_html')!.handler;
+    const handler = getTool(tools, 'show_html').handler;
     await handler({ html: '<p>x</p>' }, {});
     expect(captured).toBeUndefined();
   });
@@ -263,7 +268,7 @@ describe('registerPagentTools', () => {
         },
       }),
     );
-    const handler = tools.get('show_ui')!.handler;
+    const handler = getTool(tools, 'show_ui').handler;
     await handler(
       { spec: [{ createSurface: { surfaceId: 'm' } }] },
       {
@@ -271,7 +276,7 @@ describe('registerPagentTools', () => {
           token: 'tok',
           clientId: 'mcp-cli',
           scopes: ['page:create'],
-          extra: { sub: 42 as unknown as string },
+          extra: { sub: 42 },
         },
       },
     );

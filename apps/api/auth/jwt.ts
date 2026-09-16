@@ -12,6 +12,7 @@ import { SignJWT, jwtVerify, importPKCS8, importSPKI, exportJWK } from 'jose';
 import type { JWK, JWTPayload } from 'jose';
 import { randomUUID } from 'node:crypto';
 import { env } from '../schemas.ts';
+import { getApiPublicUrl } from './api-url.ts';
 
 // --- Constants ---------------------------------------------------------------
 
@@ -95,7 +96,7 @@ export async function initKeys(signingKeyB64u: string, publicKeyB64u: string): P
 // --- Issuer / audience derivation -------------------------------------------
 
 /**
- * Issuer URL — derived from PUBLIC_URL with the same dev fallback as app.ts.
+ * Issuer URL derived from the public API origin with a localhost dev fallback.
  *
  * For pagent's co-hosted AS+RS, `iss` and `aud` are identical. Computed on
  * every call (rather than cached) so tests that mutate env / app config
@@ -103,7 +104,7 @@ export async function initKeys(signingKeyB64u: string, publicKeyB64u: string): P
  * invalidate this module.
  */
 export function getIssuer(): string {
-  return env.PUBLIC_URL ?? `http://localhost:${env.PORT}`;
+  return getApiPublicUrl();
 }
 
 // --- Signing -----------------------------------------------------------------

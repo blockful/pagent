@@ -20,6 +20,7 @@ import {
   getIssuer,
 } from './jwt.ts';
 import { SignJWT, decodeJwt, decodeProtectedHeader } from 'jose';
+import { env } from '../schemas.ts';
 
 // --- Test setup --------------------------------------------------------------
 
@@ -78,6 +79,18 @@ async function signTokenWithTyp(typ: string | undefined): Promise<string> {
 // --- Round-trip --------------------------------------------------------------
 
 describe('signAccessToken / verifyAccessToken', () => {
+  it('uses API_PUBLIC_URL as the issuer instead of the renderer origin', () => {
+    const originalPublicUrl = env.PUBLIC_URL;
+    const originalApiUrl = env.API_PUBLIC_URL;
+    env.PUBLIC_URL = 'https://pagent.link';
+    env.API_PUBLIC_URL = 'https://api.pagent.link';
+    try {
+      expect(getIssuer()).toBe('https://api.pagent.link');
+    } finally {
+      env.PUBLIC_URL = originalPublicUrl;
+      env.API_PUBLIC_URL = originalApiUrl;
+    }
+  });
   it('signs a token whose header is alg=EdDSA, typ=at+jwt, kid=pagent-2026-05', async () => {
     const token = await signAccessToken(SAMPLE_CLAIMS);
     const header = decodeProtectedHeader(token);
@@ -170,20 +183,13 @@ describe('signAccessToken / verifyAccessToken', () => {
   });
 
   it('rejects a token with the wrong issuer', async () => {
-    // Sign normally, then temporarily override env.PUBLIC_URL by stubbing
-    // getIssuer. Easier: sign with current iss, then verify after rotating
-    // env.PUBLIC_URL. Since getIssuer reads env on every call, mutating
-    // env.PUBLIC_URL changes what verifyAccessToken expects.
     const token = await signAccessToken(SAMPLE_CLAIMS);
-    // Grab the env module to flip PUBLIC_URL — it's a Zod-parsed object so
-    // we mutate the in-memory copy directly.
-    const { env } = await import('../schemas.ts');
-    const original = env.PUBLIC_URL;
-    (env as { PUBLIC_URL: string | undefined }).PUBLIC_URL = 'https://impostor.example.com';
+    const original = env.API_PUBLIC_URL;
+    env.API_PUBLIC_URL = 'https://impostor.example.com';
     try {
       await expect(verifyAccessToken(token)).rejects.toThrow();
     } finally {
-      (env as { PUBLIC_URL: string | undefined }).PUBLIC_URL = original;
+      env.API_PUBLIC_URL = original;
     }
   });
 

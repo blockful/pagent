@@ -8,7 +8,9 @@
  * they fulfill the page operations: the API speaks Postgres directly,
  * the stdio server speaks to the REST API.
  */
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { AnySchema, ZodRawShapeCompat } from '@modelcontextprotocol/sdk/server/zod-compat.js';
+import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { HTML_MAX_BYTES } from '../limits.ts';
 
@@ -127,7 +129,25 @@ const CHECK_RESULT_DESCRIPTION = [
 
 // --- Registration ------------------------------------------------------------
 
-export function registerPagentTools(server: McpServer, ops: PageOps): void {
+export interface PagentToolRegistrar {
+  registerTool<
+    OutputArgs extends ZodRawShapeCompat | AnySchema,
+    InputArgs extends undefined | ZodRawShapeCompat | AnySchema = undefined,
+  >(
+    name: string,
+    config: {
+      title?: string;
+      description?: string;
+      inputSchema?: InputArgs;
+      outputSchema?: OutputArgs;
+      annotations?: ToolAnnotations;
+      _meta?: Record<string, unknown>;
+    },
+    callback: ToolCallback<InputArgs>,
+  ): unknown;
+}
+
+export function registerPagentTools(server: PagentToolRegistrar, ops: PageOps): void {
   server.registerTool(
     'show_ui',
     {

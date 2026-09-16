@@ -25,7 +25,13 @@ vi.mock('./jwt.ts', () => ({
 
 import { lookupSession } from './session.ts';
 import { verifyAccessToken } from './jwt.ts';
-import { resolveAuth, requireAuth, type AuthVariables, SESSION_COOKIE_NAME } from './middleware.ts';
+import {
+  resolveAuth,
+  requireAuth,
+  requireScope,
+  type AuthVariables,
+  SESSION_COOKIE_NAME,
+} from './middleware.ts';
 
 const BASE = 'http://localhost';
 
@@ -52,6 +58,7 @@ function makeTestApp() {
   app.use('*', resolveAuth());
   app.get('/me', (c) => c.json(c.var.user));
   app.get('/private', requireAuth(), (c) => c.json({ ok: true, user: c.var.user }));
+  app.get('/create', requireScope('page:create'), (c) => c.json({ ok: true }));
   return app;
 }
 
@@ -118,5 +125,56 @@ describe('requireAuth', () => {
     expect(res.status).toBe(401);
     const body = await parseJson(res, authErrorSchema);
     expect(body.error).toBe('unauthorized');
+  });
+});
+
+describe('requireScope', () => {
+  it('returns 403 with an OAuth challenge when a Bearer lacks the required scope', async () => {
+    (verifyAccessToken as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      sub: 'read-only-user',
+      email: 'reader@example.com',
+      handle: 'reader',
+      client_id: 'mcp-cli',
+      scope: 'page:read',
+      iss: 'http://test.local',
+      aud: 'http://test.local',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      iat: Math.floor(Date.now() / 1000),
+      jti: 'jti-read-only',
+    });
+    const app = makeTestApp();
+    const res = await app.fetch(
+      new Request(`${BASE}/create`, { headers: { authorization: 'Bearer valid.jwt' } }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(res.headers.get('WWW-Authenticate')).toBe(
+      'Bearer error="insufficient_scope", scope="page:create"',
+    );
+    const body = await parseJson(res, authErrorSchema);
+    expect(body.error).toBe('insufficient_scope');
+  });
+
+  it('passes cookie-authenticated users without OAuth scope checks', async () => {
+    (lookupSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      id: 'browser-user',
+      email: 'browser@example.com',
+      handle: 'browser',
+      authMethod: 'cookie',
+    });
+    const app = makeTestApp();
+    const res = await app.fetch(
+      new Request(`${BASE}/create`, {
+        headers: { cookie: `${SESSION_COOKIE_NAME}=valid-browser-session` },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+  });
+
+  it('passes anonymous requests so REQUIRE_AUTH remains the anonymous gate', async () => {
+    const app = makeTestApp();
+    const res = await app.fetch(new Request(`${BASE}/create`));
+    expect(res.status).toBe(200);
   });
 });

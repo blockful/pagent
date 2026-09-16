@@ -80,7 +80,8 @@ Each app validates its environment at boot/build with Zod and fails loudly on mi
 | App                                               | Variable                   | Required?           | Validation / default                                                                                |
 | ------------------------------------------------- | -------------------------- | ------------------- | --------------------------------------------------------------------------------------------------- |
 | **api** ([`.env.example`](apps/api/.env.example)) | `DATABASE_URL`             | **always**          | Non-empty string. Boot fails with a `ZodError` otherwise.                                           |
-|                                                   | `PUBLIC_URL`               | **production**      | Valid URL. Used in `show_ui` responses.                                                             |
+|                                                   | `PUBLIC_URL`               | **production**      | HTTPS renderer origin. Used in `show_ui` responses.                                                 |
+|                                                   | `API_PUBLIC_URL`           | **production**      | HTTPS API origin. Used for OAuth issuer, callbacks, magic links, and discovery metadata.            |
 |                                                   | `ALLOWED_ORIGINS`          | **production**      | Comma-separated origin list. CORS allow-list.                                                       |
 |                                                   | `PORT`                     | optional            | Coerced to number. Default `8787`. Railway sets this.                                               |
 |                                                   | `PAGE_TTL_MS`              | optional            | Coerced to number. Default `1800000` (30 min).                                                      |
@@ -217,6 +218,7 @@ To bypass in an emergency: `git push --no-verify` (don't make this a habit).
 2. Set **Root Directory** to `apps/api` so Railway picks up the railway.json.
 3. Set environment variables (see `apps/api/.env.example`):
    - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://pagent.link`). Used in `show_ui` responses. **Required in production.** Boot fails loudly if missing.
+   - `API_PUBLIC_URL` — the Railway public origin of `apps/api` (e.g. `https://api.pagent.link`). Used for OAuth issuer/discovery, default Google callbacks, magic links, and MCP auth metadata. **Required in production.** Must be HTTPS.
    - `ALLOWED_ORIGINS` — comma-separated origins allowed to call the API (set to your Vercel URL). **Required in production.** API boot fails loudly if missing.
    - `PORT` — Railway sets this automatically; the server reads it.
    - `PAGE_TTL_MS` — optional; default 30 minutes.
@@ -249,7 +251,7 @@ permissions-policy are set as HTTP headers via `apps/web/vercel.json`.
 
 ### Order matters
 
-Deploy Railway first to get the API URL. Then deploy Vercel with `VITE_API_URL` set to it. Then go back to Railway and set `PUBLIC_URL` + `ALLOWED_ORIGINS` to the Vercel URL.
+Provision the Railway and Vercel public domains first. Set Railway's `API_PUBLIC_URL` to its own API origin and `PUBLIC_URL` + `ALLOWED_ORIGINS` to the Vercel renderer origin. Set Vercel's `VITE_API_URL` to the Railway origin, then deploy both services.
 
 ## Operations
 
@@ -360,6 +362,7 @@ behaviour without touching code. `apps/api/.env.example` is the source of truth.
 | ----------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `PORT`                        | `8787`                    | Port the server listens on. Railway overrides this automatically.                                         |
 | `PUBLIC_URL`                  | _(required in prod)_      | Base URL of the renderer, returned in `show_ui` responses. Redeploy required after change.                |
+| `API_PUBLIC_URL`              | _(required in prod)_      | API origin used for OAuth issuer, callbacks, magic links, and MCP discovery. Restart required.            |
 | `PAGE_TTL_MS`                 | `1800000` (30 min)        | How long a page lives before expiring. Raising it keeps pages alive longer but grows the DB.              |
 | `ALLOWED_ORIGINS`             | _(required in prod)_      | Comma-separated origins the CORS middleware allows. Add an origin here and restart — no redeploy.         |
 | `RATE_LIMIT_MAX`              | `30`                      | Maximum requests per window per client IP on `POST /new`. Raise for load tests; restart picks it up.      |

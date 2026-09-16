@@ -16,6 +16,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { MAX_BODY_BYTES, ALLOWED_ORIGINS } from '../app.ts';
 import { clientKey } from '../client-key.ts';
 import { env } from '../schemas.ts';
@@ -24,17 +25,15 @@ import { logger } from '../logger.ts';
 import { verifyAccessToken } from '../auth/jwt.ts';
 import { RateLimiter } from './rate-limit.ts';
 import { registerPagentTools, type PageOps } from './tools.ts';
+import type { McpHttpConfig } from './http-config.ts';
 
-export type McpHttpConfig = {
-  publicUrl: string;
-  pageTtlMs: number;
-  /** Override for the request body cap. Defaults to MAX_BODY_BYTES from
-   *  app.ts so REST and MCP enforce the same limit unless tests need otherwise. */
-  maxBodyBytes?: number;
-  /** Override the rate limiter (e.g. for tests). Defaults to a per-IP limiter
-   *  using RATE_LIMIT_MAX / RATE_LIMIT_WINDOW_MS — same envs as the REST side. */
-  rateLimiter?: RateLimiter;
-};
+declare module 'node:http' {
+  interface IncomingMessage {
+    auth?: AuthInfo;
+  }
+}
+
+export type { McpHttpConfig } from './http-config.ts';
 
 // Mirrors apps/api/request-id.ts — caller-supplied IDs accepted within bounds,
 // otherwise generated.
@@ -176,7 +175,7 @@ export function makeMcpHttpHandler(cfg: McpHttpConfig) {
       (req.method === 'GET' || req.method === 'POST' || req.method === 'DELETE')
     ) {
       const authHeader = req.headers.authorization;
-      const resourceMetadataUrl = `${cfg.publicUrl}/.well-known/oauth-protected-resource`;
+      const resourceMetadataUrl = `${cfg.apiPublicUrl}/.well-known/oauth-protected-resource`;
       if (!authHeader?.startsWith('Bearer ')) {
         res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl}"`);
         respondJson(res, 401, {
@@ -194,7 +193,7 @@ export function makeMcpHttpHandler(cfg: McpHttpConfig) {
         // `req.auth` per the SDK's contract). We carry the verified claims
         // plus the raw bearer so downstream code can re-mint scoped requests
         // without re-decoding the JWT.
-        (req as unknown as { auth: unknown }).auth = {
+        req.auth = {
           token,
           clientId: claims.client_id,
           scopes: claims.scope.split(/\s+/).filter(Boolean),

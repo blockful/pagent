@@ -4,7 +4,7 @@
  * The flow:
  *   1. `sendMagicLink(email, ctx)` mints a 32-byte random token, stores its
  *      SHA-256 hash + the authorize context in `magic_links` with a 15-min
- *      TTL, and emails the user the URL `${PUBLIC_URL}/oauth/magic?token=<raw>`.
+ *      TTL, and emails the user the URL `${API_PUBLIC_URL}/oauth/magic?token=<raw>`.
  *   2. The user clicks the link. `verifyMagicLink(token)` re-hashes the raw
  *      value, looks the row up, atomically flips `consumed_at`, and returns
  *      the stored email + context so the route can mint a Pagent auth code
@@ -20,6 +20,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import nodemailer, { type Transporter } from 'nodemailer';
 import * as db from '../db.ts';
 import { env } from '../schemas.ts';
+import { getApiPublicUrl } from './api-url.ts';
 
 // 32 bytes (256 bits) — matches the auth-code / refresh-token sizing. base64url
 // yields 43 url-safe chars, fits trivially in a `mailto:` body or a `<a href>`.
@@ -40,14 +41,11 @@ function hashToken(token: string): string {
 }
 
 /**
- * Build the absolute magic link URL. We derive the base from PUBLIC_URL so
- * dev (localhost:8787) and prod (api.pagent.link) both work without
- * per-environment branching. The token is appended raw — URL-safe base64
- * doesn't need percent-encoding.
+ * Build the absolute magic link URL from the externally reachable API origin.
+ * The token is URL-safe base64 and does not need percent-encoding.
  */
 function buildMagicUrl(token: string): string {
-  const base = env.PUBLIC_URL ?? `http://localhost:${env.PORT}`;
-  return `${base}/oauth/magic?token=${token}`;
+  return `${getApiPublicUrl()}/oauth/magic?token=${token}`;
 }
 
 /**

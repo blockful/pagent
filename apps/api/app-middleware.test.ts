@@ -82,8 +82,8 @@ describe('security headers', () => {
   it('sets Referrer-Policy', async () => {
     const res = await app.fetch(new Request('http://test/health'));
     const rp = res.headers.get('referrer-policy');
-    expect(rp).not.toBeNull();
-    expect(rp!.length).toBeGreaterThan(0);
+    if (rp === null) throw new TypeError('Referrer-Policy header is missing');
+    expect(rp.length).toBeGreaterThan(0);
   });
 
   it('does NOT set Content-Security-Policy on the JSON API', async () => {

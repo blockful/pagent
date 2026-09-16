@@ -1,0 +1,161 @@
+import type { Context, Hono } from 'hono';
+import { rateLimiter } from 'hono-rate-limiter';
+import { clientKey } from '../client-key.ts';
+import { getClient } from './clients-store.ts';
+import { exchangeGoogleCode } from './google.ts';
+import { renderLoginPage } from './login-page.ts';
+import type { AuthVariables } from './middleware.ts';
+import { normalizeRequestedScope } from './oauth-scopes.ts';
+import { createAuthCode, upsertUser } from './provider.ts';
+import { getClientIp, renderError, setSessionCookie } from './route-shared.ts';
+import {
+  clearBrowserTransaction,
+  startBrowserTransaction,
+  verifyBrowserTransaction,
+} from './route-transaction.ts';
+import { createSession } from './session.ts';
+import { signStateJwt, verifyStateJwt } from './state-jwt.ts';
+
+const AUTHORIZE_WINDOW_MS = 60 * 1000;
+const AUTHORIZE_LIMIT = 30;
+const AUTHORIZE_RETRY_AFTER_SECONDS = Math.ceil(AUTHORIZE_WINDOW_MS / 1000);
+
+type AuthRouter = Hono<{ Variables: AuthVariables }>;
+
+const authorizeLimiter = rateLimiter({
+  windowMs: AUTHORIZE_WINDOW_MS,
+  limit: AUTHORIZE_LIMIT,
+  standardHeaders: 'draft-7',
+  keyGenerator: (c: Context) => clientKey(c.req.header('x-forwarded-for')),
+  handler: (c) => {
+    c.header('Retry-After', String(AUTHORIZE_RETRY_AFTER_SECONDS));
+    return c.json(
+      {
+        error: 'rate_limited',
+        retry_after_seconds: AUTHORIZE_RETRY_AFTER_SECONDS,
+        message: `Too many authorize requests from this IP; retry after ${AUTHORIZE_RETRY_AFTER_SECONDS} seconds`,
+      },
+      429,
+    );
+  },
+});
+
+export function registerLoginRoutes(authRoutes: AuthRouter): void {
+  authRoutes.get('/oauth/authorize', authorizeLimiter, async (c) => {
+    const query = c.req.query();
+    if (query.browser_session === '1') {
+      const browserTransactionHash = startBrowserTransaction(c);
+      const signedState = await signStateJwt({ browserSession: true, browserTransactionHash });
+      return c.html(renderLoginPage({ signedState }));
+    }
+
+    const { client_id, redirect_uri, code_challenge, code_challenge_method, scope, state } = query;
+    if (typeof client_id !== 'string' || client_id.length === 0) {
+      return renderError(c, 'Missing required parameter: client_id');
+    }
+    if (typeof redirect_uri !== 'string' || redirect_uri.length === 0) {
+      return renderError(c, 'Missing required parameter: redirect_uri');
+    }
+    if (typeof code_challenge !== 'string' || code_challenge.length === 0) {
+      return renderError(c, 'Missing required parameter: code_challenge');
+    }
+    if (code_challenge_method !== 'S256') {
+      return renderError(c, 'code_challenge_method must be S256');
+    }
+
+    const client = await getClient(client_id);
+    if (!client) return renderError(c, 'Unknown client_id');
+    if (!client.redirect_uris.includes(redirect_uri)) {
+      return renderError(c, 'redirect_uri does not match a registered URI for this client');
+    }
+    const normalizedScope = normalizeRequestedScope(typeof scope === 'string' ? scope : undefined);
+    if (!normalizedScope.ok) {
+      return renderError(c, `Unsupported scope: ${normalizedScope.unsupportedScope}`);
+    }
+
+    const signedState = await signStateJwt({
+      clientId: client_id,
+      redirectUri: redirect_uri,
+      codeChallenge: code_challenge,
+      scope: normalizedScope.scope,
+      state: typeof state === 'string' && state.length > 0 ? state : undefined,
+    });
+    return c.html(renderLoginPage({ signedState }));
+  });
+
+  authRoutes.get('/oauth/callback/google', async (c) => {
+    const code = c.req.query('code');
+    const state = c.req.query('state');
+    if (typeof code !== 'string' || code.length === 0) {
+      return renderError(c, 'Google callback missing code parameter');
+    }
+    if (typeof state !== 'string' || state.length === 0) {
+      return renderError(c, 'Google callback missing state parameter');
+    }
+
+    let claims: Awaited<ReturnType<typeof verifyStateJwt>>;
+    try {
+      claims = await verifyStateJwt(state);
+    } catch {
+      return renderError(c, 'Authorization session expired or invalid. Please restart sign-in.');
+    }
+
+    if (claims.browserSession) {
+      const validTransaction = verifyBrowserTransaction(c, claims.browserTransactionHash);
+      clearBrowserTransaction(c);
+      if (!validTransaction) {
+        return renderError(c, 'Authorization session expired or invalid. Please restart sign-in.');
+      }
+      let profile: Awaited<ReturnType<typeof exchangeGoogleCode>>;
+      try {
+        profile = await exchangeGoogleCode(code);
+      } catch {
+        return renderError(c, 'Google sign-in failed. Please try again.');
+      }
+      const user = await upsertUser({
+        email: profile.email,
+        name: profile.name,
+        avatarUrl: profile.picture,
+      });
+      const sessionToken = await createSession(
+        user.id,
+        getClientIp(c),
+        c.req.header('user-agent') ?? undefined,
+      );
+      setSessionCookie(c, sessionToken);
+      return c.redirect('/', 302);
+    }
+
+    if (!claims.clientId || !claims.redirectUri || !claims.codeChallenge) {
+      return renderError(c, 'Authorization state missing required fields.');
+    }
+    const client = await getClient(claims.clientId);
+    if (!client || !client.redirect_uris.includes(claims.redirectUri)) {
+      return renderError(c, 'Client registration changed during sign-in. Please restart.');
+    }
+
+    let profile: Awaited<ReturnType<typeof exchangeGoogleCode>>;
+    try {
+      profile = await exchangeGoogleCode(code);
+    } catch {
+      return renderError(c, 'Google sign-in failed. Please try again.');
+    }
+    const user = await upsertUser({
+      email: profile.email,
+      name: profile.name,
+      avatarUrl: profile.picture,
+    });
+    const pagentCode = await createAuthCode(
+      user.id,
+      claims.clientId,
+      claims.redirectUri,
+      claims.codeChallenge,
+      'S256',
+      claims.scope ?? null,
+    );
+    const target = new URL(claims.redirectUri);
+    target.searchParams.set('code', pagentCode);
+    if (claims.state) target.searchParams.set('state', claims.state);
+    return c.redirect(target.toString(), 302);
+  });
+}

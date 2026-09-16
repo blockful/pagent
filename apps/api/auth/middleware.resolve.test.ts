@@ -42,6 +42,10 @@ const authUserSchema = z.object({
   authMethod: z.enum(['cookie', 'bearer']),
 });
 const optionalAuthUserSchema = authUserSchema.nullable();
+const resolvedAuthSchema = z.object({
+  user: optionalAuthUserSchema,
+  authScopes: z.array(z.string()).nullable(),
+});
 
 async function parseJson<T>(res: Response, schema: z.ZodType<T>): Promise<T> {
   return schema.parse(await res.json());
@@ -56,6 +60,7 @@ function makeTestApp() {
   const app = new Hono<{ Variables: AuthVariables }>();
   app.use('*', resolveAuth());
   app.get('/me', (c) => c.json(c.var.user));
+  app.get('/auth', (c) => c.json({ user: c.var.user, authScopes: c.var.authScopes }));
   app.get('/private', requireAuth(), (c) => c.json({ ok: true, user: c.var.user }));
   return app;
 }
@@ -134,6 +139,29 @@ describe('resolveAuth — Bearer path', () => {
     expect(verifyAccessToken).toHaveBeenCalledWith('valid.jwt.token');
   });
 
+  it('retains the canonical scopes from the verified Bearer JWT', async () => {
+    (verifyAccessToken as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      sub: 'user-uuid-2',
+      email: 'bob@example.com',
+      handle: 'bob',
+      client_id: 'mcp-cli',
+      scope: '  page:read\tpage:create  page:read ',
+      iss: 'http://test.local',
+      aud: 'http://test.local',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      iat: Math.floor(Date.now() / 1000),
+      jti: 'jti-scopes',
+    });
+    const app = makeTestApp();
+    const res = await app.fetch(
+      new Request(`${BASE}/auth`, { headers: { authorization: 'Bearer valid.jwt.token' } }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = await parseJson(res, resolvedAuthSchema);
+    expect(body.authScopes).toEqual(['page:read', 'page:create']);
+  });
+
   it('falls through to anonymous when Bearer JWT verification fails', async () => {
     (verifyAccessToken as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('expired'));
     const app = makeTestApp();
@@ -206,6 +234,13 @@ describe('resolveAuth — anonymous', () => {
     expect(body).toBeNull();
     expect(lookupSession).not.toHaveBeenCalled();
     expect(verifyAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('sets auth scopes to null', async () => {
+    const app = makeTestApp();
+    const res = await app.fetch(new Request(`${BASE}/auth`));
+    const body = await parseJson(res, resolvedAuthSchema);
+    expect(body.authScopes).toBeNull();
   });
 });
 

@@ -30,6 +30,7 @@ beforeAll(async () => {
   const started = await startServer(
     makeMcpHttpHandler({
       publicUrl: 'http://test.local',
+      apiPublicUrl: 'https://api.test.local',
       pageTtlMs: 60_000,
       rateLimiter,
     }),
@@ -123,6 +124,7 @@ describe('HTTP layer', () => {
     const started = await startServer(
       makeMcpHttpHandler({
         publicUrl: 'http://test.local',
+        apiPublicUrl: 'https://api.test.local',
         pageTtlMs: 60_000,
         maxBodyBytes: 200,
         rateLimiter: new RateLimiter(1000, 60_000),

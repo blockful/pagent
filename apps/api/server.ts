@@ -5,6 +5,7 @@ import * as db from './db.ts';
 import { env } from './schemas.ts';
 import { app, PORT, PUBLIC_URL, PAGE_TTL_MS } from './app.ts';
 import { initKeys } from './auth/jwt.ts';
+import { getApiPublicUrl } from './auth/api-url.ts';
 import { makeMcpHttpHandler } from './mcp/http.ts';
 import { logger } from './logger.ts';
 import { metrics } from './metrics.ts';
@@ -45,7 +46,11 @@ sweepTimer.unref();
 // to the underlying response stream — Hono can't host that cleanly); every
 // other path falls through to the Hono app.
 const honoListener = getRequestListener(app.fetch);
-const mcpHandler = makeMcpHttpHandler({ publicUrl: PUBLIC_URL, pageTtlMs: PAGE_TTL_MS });
+const mcpHandler = makeMcpHttpHandler({
+  publicUrl: PUBLIC_URL,
+  apiPublicUrl: getApiPublicUrl(),
+  pageTtlMs: PAGE_TTL_MS,
+});
 
 const server: HttpServer = createServer((req, res) => {
   const path = req.url?.split('?', 1)[0];

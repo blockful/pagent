@@ -15,7 +15,7 @@
  *
  * Spec: docs/superpowers/specs/2026-05-17-auth-design.md §6.2.
  */
-import type { Context, MiddlewareHandler, Next } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { verifyAccessToken } from './jwt.ts';
 import { lookupSession } from './session.ts';
@@ -50,6 +50,7 @@ export type AuthUser = {
  */
 export type AuthVariables = {
   user: AuthUser | null;
+  authScopes: readonly string[] | null;
 };
 
 // --- Cookie name -------------------------------------------------------------
@@ -86,7 +87,12 @@ async function tryCookieAuth(c: Context): Promise<AuthUser | null> {
  * fails / claims are expired. We never throw — an invalid Bearer just
  * falls through to the anonymous branch (then `requireAuth` decides 401).
  */
-async function tryBearerAuth(c: Context): Promise<AuthUser | null> {
+type BearerAuth = {
+  readonly user: AuthUser;
+  readonly scopes: readonly string[];
+};
+
+async function tryBearerAuth(c: Context): Promise<BearerAuth | null> {
   const authHeader = c.req.header('authorization');
   if (!authHeader?.startsWith(BEARER_PREFIX)) return null;
   const token = authHeader.slice(BEARER_PREFIX.length).trim();
@@ -94,10 +100,13 @@ async function tryBearerAuth(c: Context): Promise<AuthUser | null> {
   try {
     const claims = await verifyAccessToken(token);
     return {
-      id: claims.sub,
-      email: claims.email,
-      handle: claims.handle || null,
-      authMethod: 'bearer',
+      user: {
+        id: claims.sub,
+        email: claims.email,
+        handle: claims.handle || null,
+        authMethod: 'bearer',
+      },
+      scopes: [...new Set(claims.scope.split(/[ \t\r\n\f]+/).filter(Boolean))],
     };
   } catch {
     // Invalid / expired bearer: fall through to anonymous. The route-level
@@ -126,14 +135,17 @@ export function resolveAuth(): MiddlewareHandler<{ Variables: AuthVariables }> {
     const cookieUser = await tryCookieAuth(c);
     if (cookieUser) {
       c.set('user', cookieUser);
+      c.set('authScopes', null);
       return next();
     }
-    const bearerUser = await tryBearerAuth(c);
-    if (bearerUser) {
-      c.set('user', bearerUser);
+    const bearerAuth = await tryBearerAuth(c);
+    if (bearerAuth) {
+      c.set('user', bearerAuth.user);
+      c.set('authScopes', bearerAuth.scopes);
       return next();
     }
     c.set('user', null);
+    c.set('authScopes', null);
     return next();
   };
 }
@@ -145,8 +157,8 @@ export function resolveAuth(): MiddlewareHandler<{ Variables: AuthVariables }> {
  * (`{ error, message, request_id }`) so clients have a single parsing path.
  */
 export function requireAuth(): MiddlewareHandler<{ Variables: AuthVariables }> {
-  return async (c: Context, next: Next) => {
-    const user = c.get('user') as AuthUser | null | undefined;
+  return async (c, next) => {
+    const user = c.get('user');
     if (!user) {
       return c.json(
         {
@@ -155,6 +167,27 @@ export function requireAuth(): MiddlewareHandler<{ Variables: AuthVariables }> {
           request_id: getRequestId(c),
         },
         401,
+      );
+    }
+    return next();
+  };
+}
+
+export function requireScope(
+  requiredScope: string,
+): MiddlewareHandler<{ Variables: AuthVariables }> {
+  return async (c, next) => {
+    const user = c.get('user');
+    const scopes = c.get('authScopes');
+    if (user?.authMethod === 'bearer' && !scopes?.includes(requiredScope)) {
+      c.header('WWW-Authenticate', `Bearer error="insufficient_scope", scope="${requiredScope}"`);
+      return c.json(
+        {
+          error: 'insufficient_scope',
+          message: `Bearer token requires the ${requiredScope} scope`,
+          request_id: getRequestId(c),
+        },
+        403,
       );
     }
     return next();

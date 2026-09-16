@@ -25,6 +25,7 @@ export type MagicLinkAuthorizeContext = {
   scope?: string;
   state?: string;
   browserSession?: boolean;
+  browserTransactionHash?: string;
 };
 
 export type MagicLinkInsert = {

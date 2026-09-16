@@ -27,6 +27,7 @@ beforeAll(async () => {
   const started = await startServer(
     makeMcpHttpHandler({
       publicUrl: 'http://test.local',
+      apiPublicUrl: 'https://api.test.local',
       pageTtlMs: 60_000,
       rateLimiter,
     }),
