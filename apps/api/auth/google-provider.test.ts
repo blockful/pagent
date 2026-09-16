@@ -148,6 +148,31 @@ describe('upsertUser', () => {
     );
   });
 
+  it('retries handle allocation when the case-insensitive handle index conflicts', async () => {
+    vi.mocked(db.getUserByHandle)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(userRow('winner', 'alex'))
+      .mockResolvedValueOnce(null);
+    const conflict = Object.assign(new Error('duplicate handle'), {
+      code: '23505',
+      constraint_name: 'users_handle_idx',
+    });
+    vi.mocked(db.upsertUser).mockRejectedValueOnce(conflict).mockResolvedValueOnce({
+      id: 'user-uuid',
+      handle: 'alex2',
+      email: 'alex@example.com',
+      name: null,
+      avatar_url: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    const user = await upsertUser({ email: 'alex@example.com' });
+
+    expect(user.handle).toBe('alex2');
+    expect(db.upsertUser).toHaveBeenCalledTimes(2);
+  });
+
   it('does not retry a unique conflict from another constraint', async () => {
     vi.mocked(db.getUserByHandle).mockResolvedValue(null);
     const conflict = Object.assign(new Error('duplicate email'), {

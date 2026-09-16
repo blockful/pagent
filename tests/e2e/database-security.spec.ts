@@ -34,6 +34,36 @@ test('upserts case-variant emails into one canonical user', async () => {
   }
 });
 
+test('reports the expression-index name for case-insensitive handle conflicts', async () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl === undefined) throw new TypeError('DATABASE_URL is required');
+  await db.init(databaseUrl);
+  try {
+    const runId = randomUUID();
+    const handle = `idx-${runId.slice(0, 12)}`;
+    await db.upsertUser({
+      email: `handle-index-a-${runId}@example.test`,
+      name: null,
+      avatarUrl: null,
+      handle,
+    });
+
+    const conflictingInsert = db.upsertUser({
+      email: `handle-index-b-${runId}@example.test`,
+      name: null,
+      avatarUrl: null,
+      handle: handle.toUpperCase(),
+    });
+
+    await expect(conflictingInsert).rejects.toMatchObject({
+      code: '23505',
+      constraint_name: 'users_handle_idx',
+    });
+  } finally {
+    await db.shutdown();
+  }
+});
+
 test('allocates distinct handles when signups with the same local part race', async () => {
   const databaseUrl = process.env.DATABASE_URL;
   if (databaseUrl === undefined) throw new TypeError('DATABASE_URL is required');

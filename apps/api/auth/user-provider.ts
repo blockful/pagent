@@ -15,7 +15,7 @@ function isHandleConflict(error: unknown): boolean {
     'code' in error &&
     error.code === '23505' &&
     'constraint_name' in error &&
-    error.constraint_name === 'users_handle_key'
+    (error.constraint_name === 'users_handle_key' || error.constraint_name === 'users_handle_idx')
   );
 }
 
