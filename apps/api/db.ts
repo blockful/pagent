@@ -36,7 +36,6 @@ export {
   getRefreshTokenByHash,
   insertRefreshToken,
   revokeAllRefreshTokensForFamily,
-  revokeRefreshToken,
   rotateRefreshToken,
 } from './db/refresh-tokens.ts';
 export type {

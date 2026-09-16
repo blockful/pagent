@@ -1,6 +1,10 @@
 # Audit Log — Design
 
-Status: draft, awaiting user review (2026-05-17).
+Status: proposed, not implemented (reviewed against the 2026-09-15 runtime).
+
+Everything below describes a future feature unless explicitly labeled as an
+existing dependency. There is no `audit_log` table, `GET /audit` route, or
+`get_audit_log` MCP tool in the current runtime.
 
 ## 1. Overview and motivation
 
@@ -25,8 +29,8 @@ requirements, and power product analytics.
 2. **Fire-and-forget writes.** Audit emission must never block or fail
    the primary operation. If the audit INSERT throws, log the error and
    continue.
-3. **Opt-in identity.** When a `user_id` is available (from the auth
-   layer shipping in v2), it is captured. Otherwise `user_id = null`.
+3. **Opt-in identity.** When a `user_id` is available from the shipped auth
+   layer, it is captured. Otherwise `user_id = null`.
 4. **Minimal PII.** Only IP address and User-Agent are stored as
    request-level context. No email, no name, no bearer token.
 
@@ -67,8 +71,8 @@ Notes on column choices:
   `created_at`, not `id`. If UUID v7 becomes available via an extension,
   switch — but do not block on it.
 - **user_id** — Nullable FK to `users(id)` with `ON DELETE SET NULL`.
-  Auth ships in v2 alongside the audit log, so the FK constraint is
-  present from day one. `user_id` is `NULL` for system-initiated events
+  Auth already ships, so the FK constraint can be present from day one.
+  `user_id` is `NULL` for system-initiated events
   (e.g. `page.expired`) and for unauthenticated requests.
 - **action** — Free-text, not an enum. Enums require a migration to
   add a value; free-text with an application-level allowlist is cheaper
@@ -78,17 +82,18 @@ Notes on column choices:
   is intentional — adding a resource type should be deliberate.
 - **metadata** — JSONB bag for action-specific details. Schema per
   action type is documented in section 3 below.
-- **ip_address** — Railway client IP from `X-Real-IP`, extracted by
-  the existing `clientKey()` utility. Stored as text, not inet, to
-  avoid parse failures on malformed headers.
+- **ip_address** — Railway client IP from `X-Real-IP`, validated through the
+  trusted-ingress `clientKey()` contract. The helper's `anonymous` rate-limit
+  sentinel must be converted to `NULL`; it is not an IP address and must not
+  be persisted. Stored as text, not inet, to avoid parse failures.
 - **user_agent** — Raw `User-Agent` header value, truncated to 512
   characters at write time.
 
-### Initial migration (in `db.init()`)
+### Initial migration (in `db/connection.ts`)
 
 Because Pagent uses boot-time DDL (not a migration runner), the audit
-log table is created in the same `db.init()` function that creates
-`pages`. Auth ships in the same v2 batch, so the `users` FK is present
+log table would be created in the same `init()` function that creates
+`pages`. Auth is already present, so the `users` FK can be installed
 from day one.
 
 ```sql
@@ -132,7 +137,7 @@ Index rationale:
 | Index | Serves | Why not a different shape |
 |---|---|---|
 | `resource_idx` | `GET /audit?resource_id=X` — the primary read path. Composite on `(resource_type, resource_id, created_at DESC)` so the planner can satisfy the filter + sort in one scan. | A single-column index on `resource_id` would still require a sort step for `ORDER BY created_at DESC`. |
-| `user_idx` | `GET /audit?user_id=X` — secondary path. Partial index (`WHERE user_id IS NOT NULL`) saves space while the feature runs without auth (all rows have `user_id = NULL`). | Full index would waste pages on NULL-keyed rows that the query never matches. |
+| `user_idx` | `GET /audit?user_id=X` — secondary path. Partial index (`WHERE user_id IS NOT NULL`) saves space for system and anonymous events. | Full index would waste pages on NULL-keyed rows that the query never matches. |
 | `created_at_idx` | Retention `DELETE ... WHERE created_at < now() - interval '90 days'`. | Without this, the purge does a full table scan. |
 | `action_idx` | Optional action filter on the API: `GET /audit?action=page.expired`. | Compound with `created_at DESC` so the planner can push both predicates + sort. |
 
@@ -315,7 +320,7 @@ section 8).
 
 ## 4. REST API endpoint
 
-### `GET /audit`
+### Proposed `GET /audit`
 
 Query audit log events. Supports filtering by resource, user, and
 action, with cursor-based pagination.
@@ -413,7 +418,7 @@ const auditQuerySchema = z.object({
 
 #### Route registration
 
-In `app.ts`, after the existing routes:
+In a new `app/audit-routes.ts`, registered from `app.ts`:
 
 ```typescript
 app.get('/audit', auditHandler);
@@ -441,7 +446,8 @@ A new MCP tool registered alongside `show_ui`, `show_html`, and
 The tool only supports `page_id` queries — it cannot query by
 `user_id` (the agent does not know the user's identity) or by action
 type (too niche for the tool surface). Agents that need richer queries
-can call `GET /audit` directly.
+could call the REST endpoint directly with an authenticated Bearer token once
+the feature ships.
 
 #### Response
 
@@ -506,7 +512,7 @@ export interface PageOps {
 ```
 
 The in-process adapter (`mcp/http.ts`) queries the DB directly. The
-stdio adapter (`apps/mcp/server.ts`) calls `GET /audit?resource_id=<page_id>&resource_type=page&limit=<limit>`.
+stdio adapter (`apps/mcp/server.ts`) would call `GET /audit?resource_id=<page_id>&resource_type=page&limit=<limit>`.
 
 ---
 
@@ -520,7 +526,7 @@ uses the `emitAuditEvent()` helper (section 6.1).
 New file: `apps/api/audit.ts`.
 
 ```typescript
-import * as db from './db.ts';
+import * as db from './db/audit.ts';
 import { logger } from './logger.ts';
 
 export type AuditEvent = {
@@ -602,16 +608,17 @@ export async function createPage(
 ): Promise<ShowUiResult>;
 ```
 
-The REST handler (`app.ts` `newPageHandler`) extracts IP/UA from the
-Hono context. The MCP in-process handler (`mcp/http.ts`) extracts from
+The REST handler (`app/page-routes.ts` `newPageHandler`) extracts IP/UA from
+the Hono context. The MCP in-process handler (`mcp/http.ts`) extracts from
 the raw `IncomingMessage`. The MCP stdio handler has no request context
 (events emitted by the REST API it calls, not by the stdio process).
 
-#### `page.submitted` — `apps/api/app.ts`
+#### `page.submitted` — `apps/api/app/page-routes.ts`
 
 In `submitResultHandler`, after `db.submitPage()` returns `{ kind: 'ok' }`:
 
 ```typescript
+const ipKey = clientKey(c.req.header('x-real-ip'));
 emitAuditEvent({
   action: 'page.submitted',
   resource_type: 'page',
@@ -622,12 +629,12 @@ emitAuditEvent({
     action_surface_id: action.surfaceId,
     latency_ms: Date.now() - outcome.createdAt.getTime(),
   },
-  ip_address: clientKey(c.req.header('x-real-ip')),
+  ip_address: ipKey === 'anonymous' ? undefined : ipKey,
   user_agent: c.req.header('user-agent')?.slice(0, 512),
 });
 ```
 
-#### `page.received` — `apps/api/db.ts` or `apps/api/store.ts`
+#### `page.received` — `apps/api/db/pages.ts` or `apps/api/store.ts`
 
 In `fetchAndAdvanceResult()`, when `state === 'submitted'` and the
 UPDATE to `'received'` succeeds. This is the trickiest call site
@@ -636,7 +643,7 @@ options:
 
 - **Option A (preferred):** Thread request context into
   `store.advanceResult()` and emit there.
-- **Option B:** Emit in `getResultHandler` in `app.ts` by checking the
+- **Option B:** Emit in `getResultHandler` in `app/page-routes.ts` by checking the
   returned `stateAtRead === 'submitted'` (meaning it just transitioned).
 
 Option A is preferred because the MCP in-process path also calls
@@ -677,7 +684,7 @@ emitAuditEvents(expired.map((row) => ({
 
 ## 7. Access control
 
-Auth ships in the same v2 batch. The access-control rules are:
+The shipped auth layer would enforce these access-control rules:
 
 | Query | Who can read |
 |---|---|
@@ -689,7 +696,7 @@ Implementation:
 
 ```typescript
 // Pseudocode in auditHandler:
-const authedUser = c.get('userId'); // set by auth middleware
+const authedUser = c.get('user')?.id;
 
 if (query.user_id && query.user_id !== authedUser) {
   return c.json({ error: 'forbidden', message: 'Cannot query another user\'s audit log' }, 403);
@@ -705,7 +712,7 @@ if (query.resource_id) {
 
 ### Unauthenticated fallback
 
-If a request arrives without a valid bearer token, `GET /audit` returns
+If a request arrives without a valid bearer token, `GET /audit` would return
 401. Page IDs are 128-bit random hex (unguessable), but the audit log
 should not be accessible without authentication.
 
@@ -858,7 +865,7 @@ default of 90.
 
 | Column | PII? | Content | Risk |
 |---|---|---|---|
-| `user_id` | Yes (when auth ships) | Links to user identity. | Medium. Mitigated by access control. |
+| `user_id` | Yes | Links to the shipped user identity. | Medium. Mitigated by access control. |
 | `ip_address` | Yes | Client IP address from trusted Railway `X-Real-IP`. | Medium. IP is PII under GDPR. |
 | `user_agent` | Borderline | Browser/agent UA string. Can fingerprint devices. | Low. Generic string, not unique to a person. |
 | `metadata` | Depends | Action-specific JSONB. Never contains the full result payload, but does contain the URL, format, and byte sizes. | Low. No user-typed input is stored in metadata. |
@@ -869,11 +876,12 @@ default of 90.
    `audit_log` rows where `user_id` matches must be deleted. The
    `ON DELETE SET NULL` FK means deleting the user row nullifies the
    audit entries rather than cascading — this may not satisfy a strict
-   GDPR erasure request. When auth ships, implement a dedicated
+   GDPR erasure request. When implementing audit logs, add a dedicated
    `deleteUserAuditData(userId)` function that hard-deletes rows.
 
-2. **Right to access.** `GET /audit?user_id=X` already provides this.
-   The response can be exported as JSON for a data portability request.
+2. **Right to access.** The proposed `GET /audit?user_id=X` route would
+   provide this after implementation. Its response could be exported as JSON
+   for a data portability request.
 
 3. **IP address retention.** 90-day retention limits the exposure
    window. For stricter compliance, IP addresses could be hashed (one-way)
@@ -897,10 +905,10 @@ as the REST endpoint.
 
 ---
 
-## Appendix A — DB function signatures for `db.ts`
+## Appendix A — DB function signatures for proposed `db/audit.ts`
 
 ```typescript
-// --- New functions to add to db.ts ---
+// New functions for db/audit.ts
 
 export type AuditEventRow = {
   id: string;
@@ -948,7 +956,7 @@ export async function purgeOldAuditEvents(retentionDays: number): Promise<number
 
 ## Appendix B — OpenAPI addition
 
-The `GET /audit` endpoint should be added to `docs/openapi.yaml` under
+The `GET /audit` endpoint would be added to `docs/openapi.yaml` under
 a new `Audit` tag. The response schema references the event shape from
 section 4. The OpenAPI doc is served from memory at boot, so the YAML
 file is the single source of truth.
@@ -973,8 +981,8 @@ Increment `auditEventsFailed` in the catch block of `emitAuditEvent()`.
 
 | Test | Location | What it covers |
 |---|---|---|
-| `db.test.ts` — audit INSERT/query | `apps/api/db.test.ts` | `insertAuditEvent`, `insertAuditEvents`, `queryAuditLog`, `purgeOldAuditEvents` against a mocked SQL client. |
-| `app.test.ts` — GET /audit | `apps/api/app.test.ts` | Route handler: query param validation, pagination, cursor decode, 400 on missing filters. DB module mocked. |
-| `app.test.ts` — audit emission | `apps/api/app.test.ts` | Verify that `POST /new`, `POST /:id/result`, and `GET /:id/result` call `emitAuditEvent` with the correct action and metadata. |
+| `db/audit.test.ts` — audit INSERT/query | `apps/api/db/audit.test.ts` | `insertAuditEvent`, `insertAuditEvents`, `queryAuditLog`, `purgeOldAuditEvents` against a mocked SQL client. |
+| `app/audit-routes.test.ts` — GET /audit | `apps/api/app/audit-routes.test.ts` | Route handler: query param validation, pagination, cursor decode, 400 on missing filters. DB module mocked. |
+| `app/page-routes.test.ts` — audit emission | `apps/api/app/page-routes.test.ts` | Verify that `POST /new`, `POST /:id/result`, and `GET /:id/result` call `emitAuditEvent` with the correct action and metadata. |
 | `tools.test.ts` — get_audit_log | `apps/api/mcp/tools.test.ts` | MCP tool registration, input validation, text + structured output formatting. |
 | `server integration` — sweep emits page.expired | Test or manual | Verify the TTL sweep calls `emitAuditEvents` with `page.expired` for each deleted row. |

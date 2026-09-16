@@ -88,10 +88,13 @@ let A2uiLitTabs = (() => {
       display: block;
     }
     .a2ui-tabs-headers {
-      display: inline-flex;
-      height: 2.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      min-height: 2.5rem;
+      max-width: 100%;
+      box-sizing: border-box;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-start;
       gap: 0.25rem;
       border-radius: 0.375rem;
       background: var(--a2ui-color-muted, #f4f4f5);
@@ -100,9 +103,12 @@ let A2uiLitTabs = (() => {
     }
     .a2ui-tabs-header {
       display: inline-flex;
+      min-width: 0;
+      max-width: 100%;
       align-items: center;
       justify-content: center;
-      white-space: nowrap;
+      white-space: normal;
+      overflow-wrap: anywhere;
       padding: 0.375rem 0.75rem;
       background: transparent;
       color: var(--a2ui-color-muted-fg, #71717a);

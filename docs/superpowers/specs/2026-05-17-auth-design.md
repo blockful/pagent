@@ -35,16 +35,16 @@ Third-party auth services add a runtime dependency, a billing
 relationship, and (for Supabase Auth specifically) a tight coupling to
 Supabase's session model that doesn't map cleanly to the MCP OAuth
 flow's requirement for the RS to also be the AS. The MCP TypeScript SDK
-already ships `mcpAuthRouter`, `requireBearerAuth`, and
-`OAuthServerProvider` — implementing the provider interface against
-Postgres is less work than adapting an external service to satisfy it.
+supplies the transport and `AuthInfo` contract; Pagent implements its OAuth
+routes and Postgres-backed provider functions directly so the same Hono
+application owns discovery, authorization, tokens, and browser sessions.
 
 ## 2. Database schema
 
 All tables live in the existing Supabase Postgres database. Schema
 bootstrap follows the same pattern as the existing `pages` table:
-`CREATE TABLE IF NOT EXISTS` in `db.ts`'s `init()`, run on every boot,
-idempotent.
+`CREATE TABLE IF NOT EXISTS` in `db/connection.ts`'s `init()`, run on every
+boot, idempotent.
 
 ### 2.1 `users`
 
@@ -259,8 +259,8 @@ GET /.well-known/oauth-authorization-server
 }
 ```
 
-This endpoint is served by the MCP SDK's `mcpAuthRouter` or manually
-if we need to customize. It MUST be public (no auth required).
+This endpoint is served by Pagent's Hono discovery routes. It is public (no
+auth required).
 
 ### 3.2 Protected Resource metadata (RFC 9728)
 
@@ -355,16 +355,15 @@ and renders the login page with two options:
 2. **"Allow and send magic link"** — shows an email input. On submit, sends a
    Magic Link email and shows a "check your email" message.
 
-After successful authentication (Google callback or Magic Link click),
-the server:
+After successful authentication (Google callback or Magic Link click), the
+server follows one of two mutually exclusive completion paths:
 
-1. Upserts the user in the `users` table (create on first login, update
-   `name`/`avatar_url` on subsequent logins).
-2. Generates an authorization code.
-3. Redirects to `redirect_uri?code=...&state=...`.
-
-If the request came from a browser session (not an MCP client), the
-server also sets a session cookie.
+1. Both paths upsert the user in the `users` table (create on first login,
+   update `name`/`avatar_url` on subsequent logins).
+2. An OAuth-client request generates an authorization code and redirects to
+   `redirect_uri?code=...&state=...`; it does not create a browser session.
+3. A renderer browser-session request creates the session cookie and redirects
+   to the renderer `PUBLIC_URL`; it does not generate an authorization code.
 
 **Error cases:**
 
@@ -439,8 +438,8 @@ token_type_hint=refresh_token&
 client_id=...
 ```
 
-**Response** `200` (always — per RFC 7009, even if the token was already
-revoked or invalid). When the supplied opaque refresh token is recognized and
+**Response** `200` for handled revocation attempts — per RFC 7009, even if the token was already
+revoked or invalid. The endpoint-wide abuse limit can return `429`. When the supplied opaque refresh token is recognized and
 its optional `client_id` binding matches, revocation invalidates every refresh
 token in that token's per-grant family. Access-token revocation remains a
 no-op in V1 because access tokens are short-lived JWTs without a denylist.
@@ -821,8 +820,10 @@ Expired or cross-client presentations are rejected before revocation.
 
 The Ed25519 key pair is stored as environment variables:
 
-- `JWT_SIGNING_KEY` — the 64-byte Ed25519 private key, base64url-encoded.
-- `JWT_PUBLIC_KEY` — the 32-byte Ed25519 public key, base64url-encoded.
+- `JWT_SIGNING_KEY` — a PKCS#8 DER-encoded Ed25519 private key, then
+  base64url-encoded.
+- `JWT_PUBLIC_KEY` — an SPKI DER-encoded Ed25519 public key, then
+  base64url-encoded.
 
 Key generation (run once, store the output):
 
@@ -853,20 +854,17 @@ without sharing the private key:
 
 ### 5.4 Token validation
 
-The `OAuthTokenVerifier` implementation (for the MCP SDK's
-`requireBearerAuth` middleware) validates JWTs locally:
+`verifyAccessToken()` validates JWTs locally and returns the checked claims:
 
 ```ts
-class PagentTokenVerifier implements OAuthTokenVerifier {
-  async verifyAccessToken(token: string): Promise<AuthInfo> {
-    // 1. Decode and verify JWT signature (Ed25519)
-    // 2. Check exp > now (reject expired)
-    // 3. Check iss === expected issuer
-    // 4. Check aud === expected audience
-    // 5. Return AuthInfo { token, clientId, scopes, expiresAt, extra: { sub, email, handle } }
-  }
-}
+const claims = await verifyAccessToken(token);
 ```
+
+Signature (Ed25519), expiry, issuer, audience, client, scope, subject, email,
+and handle are checked before claims are returned. REST middleware maps them
+to `c.var.user` and `c.var.authScopes`. The raw Node MCP handler maps them to
+the SDK's `AuthInfo` shape and assigns `req.auth` before invoking
+`StreamableHTTPServerTransport`.
 
 No DB roundtrip on every request. The JWT is self-contained. The only
 reason to hit the DB would be for revocation checks (checking `jti`
@@ -890,22 +888,22 @@ subject to Bearer-token scope checks.
 ### 6.1 Architecture
 
 Auth integrates into the existing Hono app and the raw Node HTTP MCP
-handler via two middleware layers:
+handler via two native layers:
 
 ```
                             ┌─────────────────────────────────────┐
                             │         server.ts (Node HTTP)       │
                             │                                     │
   ┌─────────────────────┐   │  path = /mcp ?                     │
-  │  MCP SDK auth       │◀──│  YES → mcpHandler (raw Node)       │
-  │  requireBearerAuth  │   │        ↓                            │
-  │  (Express compat)   │   │  bearerAuthMiddleware               │
+  │  Pagent MCP auth    │◀──│  YES → mcpHandler (raw Node)       │
+  │  verifyAccessToken  │   │        ↓                            │
+  │  + req.auth         │   │  StreamableHTTPServerTransport      │
   └─────────────────────┘   │        ↓                            │
                             │  StreamableHTTPServerTransport      │
                             │                                     │
   ┌─────────────────────┐   │  path != /mcp ?                    │
   │  Hono middleware     │◀──│  YES → Hono app                    │
-  │  authMiddleware()    │   │        ↓                            │
+  │  resolveAuth()       │   │        ↓                            │
   │  (cookie + Bearer)   │   │  resolve user from cookie or JWT   │
   └─────────────────────┘   │        ↓                            │
                             │  route handlers                     │
@@ -914,7 +912,7 @@ handler via two middleware layers:
 
 ### 6.2 Hono auth middleware
 
-New file: `apps/api/auth/middleware.ts`.
+Implemented in `apps/api/auth/middleware.ts`.
 
 ```ts
 import type { Context, Next } from 'hono';
@@ -922,12 +920,13 @@ import type { Context, Next } from 'hono';
 type AuthUser = {
   id: string;        // user UUID
   email: string;
-  handle: string;
+  handle: string | null;
   authMethod: 'cookie' | 'bearer';
 };
 
 type AuthVariables = {
   user: AuthUser | null;
+  authScopes: readonly string[] | null;
 };
 
 /**
@@ -947,6 +946,7 @@ export function resolveAuth(): MiddlewareHandler {
       const user = await lookupSession(sessionToken);
       if (user) {
         c.set('user', { ...user, authMethod: 'cookie' });
+        c.set('authScopes', null);
         return next();
       }
     }
@@ -954,15 +954,25 @@ export function resolveAuth(): MiddlewareHandler {
     // Try Bearer token (API / MCP clients)
     const authHeader = c.req.header('authorization');
     if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.slice(7);
-      const user = await verifyJwt(token);
-      if (user) {
-        c.set('user', { ...user, authMethod: 'bearer' });
+      try {
+        const token = authHeader.slice(7).trim();
+        const claims = await verifyAccessToken(token);
+        c.set('user', {
+          id: claims.sub,
+          email: claims.email,
+          handle: claims.handle || null,
+          authMethod: 'bearer',
+        });
+        c.set('authScopes', claims.scope.split(/\s+/).filter(Boolean));
         return next();
+      } catch {
+        // Invalid Bearer credentials resolve as anonymous here; protected
+        // routes apply requireAuth() and return the standard 401 response.
       }
     }
 
     c.set('user', null);
+    c.set('authScopes', null);
     return next();
   };
 }
@@ -1007,12 +1017,16 @@ if (env.REQUIRE_AUTH) {
     return;
   }
 
-  const token = authHeader.slice(7);
+  const token = authHeader.slice(7).trim();
   try {
-    const authInfo = await tokenVerifier.verifyAccessToken(token);
-    // Attach auth info for the transport. IncomingMessage is augmented with
-    // the SDK-supported `auth` property in apps/api/mcp/http.ts.
-    req.auth = authInfo;
+    const claims = await verifyAccessToken(token);
+    req.auth = {
+      token,
+      clientId: claims.client_id,
+      scopes: claims.scope.split(/\s+/).filter(Boolean),
+      expiresAt: claims.exp,
+      extra: { sub: claims.sub, email: claims.email, handle: claims.handle },
+    };
   } catch (err) {
     respondJson(res, 401, {
       error: 'invalid_token',
@@ -1166,8 +1180,8 @@ cookie before any user mutation or authorization-code issuance.
 
 ### 8.1 Phase 1: Schema + endpoints (auth optional)
 
-1. Add all auth tables to `db.ts`'s `init()` via `CREATE TABLE IF NOT
-   EXISTS`. Add `owner_id` column to `pages` via `ALTER TABLE ... ADD
+1. Add all auth tables to `db/connection.ts`'s `init()` via `CREATE TABLE IF
+   NOT EXISTS`. Add `owner_id` column to `pages` via `ALTER TABLE ... ADD
    COLUMN IF NOT EXISTS`. Family-ID defaults are installed before backfill and
    `NOT NULL` enforcement, and the backfill/constraint step is serialized by
    a transaction advisory lock so old replicas can keep inserting during a
@@ -1298,7 +1312,7 @@ New npm packages for `@pagent/api`:
 | Package         | Version | Purpose                                           |
 | --------------- | ------- | ------------------------------------------------- |
 | `jose`          | `^6.x`  | JWT signing, verification, JWK/JWKS, Ed25519      |
-| `nodemailer`    | `^6.x`  | Sending magic link emails via SMTP                 |
+| `nodemailer`    | `^10.x` | Sending magic link emails via SMTP                 |
 
 **Why `jose`?** The `jose` library is the standard choice for JWT in
 Node.js. It supports Ed25519 natively, has zero dependencies, handles
@@ -1320,63 +1334,53 @@ tokens read from `PAGENT_TOKEN` in its existing `fetch` calls.
 
 ### MCP SDK usage
 
-The auth implementation uses these existing SDK exports:
+The auth implementation uses these SDK exports:
 
-| Export                        | From                                          | Usage                                           |
-| ----------------------------- | --------------------------------------------- | ------------------------------------------------ |
-| `OAuthServerProvider`         | `@modelcontextprotocol/sdk/server/auth/provider` | Interface — implement for Pagent's Postgres store |
-| `OAuthRegisteredClientsStore` | `@modelcontextprotocol/sdk/server/auth/clients`  | Interface — implement for `oauth_clients` table   |
-| `mcpAuthRouter`               | `@modelcontextprotocol/sdk/server/auth/router`   | Express router for AS metadata + endpoints        |
-| `requireBearerAuth`           | `@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth` | Express middleware for /mcp auth   |
-| `AuthInfo`                    | `@modelcontextprotocol/sdk/server/auth/types`    | Type for verified token info                      |
+| Export                          | From                                             | Usage                                     |
+| ------------------------------- | ------------------------------------------------ | ----------------------------------------- |
+| `StreamableHTTPServerTransport` | `@modelcontextprotocol/sdk/server/streamableHttp` | Runs the stateless `/mcp` HTTP transport  |
+| `AuthInfo`                      | `@modelcontextprotocol/sdk/server/auth/types`     | Types the verified `req.auth` information |
 
-**Important:** The SDK's `mcpAuthRouter` and `requireBearerAuth` are
-Express middleware. Since Pagent's MCP handler already bypasses Hono
-and writes directly to Node's `IncomingMessage`/`ServerResponse`,
-Express compatibility is straightforward — Express middleware works on
-raw Node HTTP objects. For the well-known metadata endpoints, we have
-two options:
-
-1. **Use the SDK's Express router** — mount it on a minimal Express app
-   that handles only `/.well-known/*` and `/oauth/*`, multiplexed in
-   `server.ts` alongside the Hono listener and MCP handler.
-2. **Implement the metadata endpoints in Hono directly** — serve the
-   JSON responses from Hono routes, which avoids adding Express as a
-   dependency.
-
-Option 2 is preferred. The metadata endpoints are static JSON — there
-is no benefit to pulling in Express just to serve two `GET` routes. The
-`mcpAuthRouter`'s real value is in the `/oauth/register`,
-`/oauth/authorize`, and `/oauth/token` handlers, which implement
-non-trivial OAuth logic. We implement those ourselves using Hono routes
-backed by the `OAuthServerProvider` interface, keeping the provider
-implementation (which is the complex part) reusable.
+Pagent does not mount the SDK's Express auth router or bearer middleware.
+Hono serves the OAuth and discovery routes, while the raw MCP handler verifies
+the Bearer token directly and supplies the SDK transport with `req.auth`.
 
 ## File layout
 
-New files under `apps/api/auth/`:
+The implemented auth module is split by responsibility:
 
 ```
 apps/api/auth/
-  provider.ts        # OAuthServerProvider implementation (Postgres-backed)
-  clients-store.ts   # OAuthRegisteredClientsStore implementation
+  provider.ts        # public provider-function facade
+  auth-code-provider.ts
+  token-provider.ts
+  user-provider.ts
+  clients-store.ts   # Postgres-backed dynamic clients
   jwt.ts             # JWT signing, verification, JWKS
   middleware.ts      # Hono resolveAuth() + requireAuth() middleware
   magic-link.ts      # Magic link generation, validation, email sending
   google.ts          # Google OAuth helper (redirect URL builder, token exchange)
   login-page.ts      # Server-rendered HTML login page
-  routes.ts          # Hono routes for /oauth/*, /auth/*, /.well-known/*
+  routes.ts          # composes route-discovery/consent/login/magic/session/token
   session.ts         # Session create/validate/delete helpers
 ```
 
-New files under `apps/api/auth/` tests:
+Tests follow the same split rather than a monolithic provider/routes suite:
 
 ```
 apps/api/auth/
   jwt.test.ts
-  middleware.test.ts
-  provider.test.ts
-  routes.test.ts
+  middleware.resolve.test.ts
+  middleware.require.test.ts
+  provider.exchange.test.ts
+  provider.refresh.test.ts
+  provider.revoke.test.ts
+  routes-browser-session.test.ts
+  routes-discovery.test.ts
+  routes-register.test.ts
+  routes-revoke.test.ts
+  routes-session.test.ts
+  routes-token.test.ts
   session.test.ts
 ```
 

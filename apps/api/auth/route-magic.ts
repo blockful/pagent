@@ -1,4 +1,5 @@
 import type { Context, Hono } from 'hono';
+import { PUBLIC_URL } from '../app/config.ts';
 import { clientKey } from '../client-key.ts';
 import { RateLimiter } from '../mcp/rate-limit.ts';
 import { env } from '../schemas.ts';
@@ -214,7 +215,7 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
         c.req.header('user-agent') ?? undefined,
       );
       setSessionCookie(c, sessionToken);
-      return c.redirect('/', 302);
+      return c.redirect(PUBLIC_URL, 302);
     }
     if (!ctx.redirectUri) {
       return renderError(

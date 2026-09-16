@@ -26,7 +26,6 @@ vi.mock('../db.ts', () => ({
   getAuthCodeForReplay: vi.fn(),
   insertRefreshToken: vi.fn(),
   getRefreshTokenByHash: vi.fn(),
-  revokeRefreshToken: vi.fn(),
   revokeAllRefreshTokensForFamily: vi.fn(),
   insertSession: vi.fn(() => Promise.resolve()),
   getSessionWithUserByTokenHash: vi.fn(() => Promise.resolve(null)),

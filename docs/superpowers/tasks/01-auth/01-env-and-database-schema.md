@@ -13,7 +13,7 @@ Extend the env schema with all auth-related variables and add the six new auth t
   CORS, and trusted Railway ingress settings. Crypto/SMTP variables are
   required when `REQUIRE_AUTH=true`; production origins and
   `TRUSTED_PROXY_MODE=railway` are always required in production.
-- `apps/api/schemas.env.test.ts` — tests the environment contract and safe
+- `apps/api/schemas.env-auth.test.ts` — tests the environment contract and safe
   production boolean parsing.
 - `apps/api/db/connection.ts` — idempotently creates `users`, `sessions`,
   `oauth_clients`, `auth_codes`, `refresh_tokens`, and `magic_links`, including

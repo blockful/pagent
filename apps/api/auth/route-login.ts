@@ -1,5 +1,6 @@
 import type { Context, Hono } from 'hono';
 import { rateLimiter } from 'hono-rate-limiter';
+import { PUBLIC_URL } from '../app/config.ts';
 import { clientKey } from '../client-key.ts';
 import { getClient, isAllowedOAuthRedirectUri } from './clients-store.ts';
 import { renderConsentPage } from './consent-page.ts';
@@ -162,7 +163,7 @@ export function registerLoginRoutes(authRoutes: AuthRouter): void {
         c.req.header('user-agent') ?? undefined,
       );
       setSessionCookie(c, sessionToken);
-      return c.redirect('/', 302);
+      return c.redirect(PUBLIC_URL, 302);
     }
 
     if (!claims.clientId || !claims.redirectUri || !claims.codeChallenge) {

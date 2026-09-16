@@ -215,7 +215,7 @@ test('does not consume a browser-bound magic link when an unbound scanner opens 
     maxRedirects: 0,
   });
   expect(browser?.status()).toBe(302);
-  expect(browser?.headers().location).toBe('/');
+  expect(browser?.headers().location).toBe(RENDERER_URL);
   await expect(db.getActiveMagicLink(tokenHash)).resolves.toBeNull();
 });
 

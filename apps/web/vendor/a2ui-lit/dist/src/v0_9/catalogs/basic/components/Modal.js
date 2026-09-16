@@ -82,14 +82,18 @@ let A2uiLitModal = (() => {
         static { this.styles = css `
     :host {
       display: inline-block;
+      max-width: 100%;
     }
     dialog {
       border: 1px solid var(--a2ui-color-border, #e4e4e7);
       border-radius: 0.5rem;
       padding: 1.5rem;
-      min-width: 300px;
-      max-width: 32rem;
-      width: 100%;
+      box-sizing: border-box;
+      min-width: 0;
+      width: min(32rem, calc(100vw - 2rem));
+      max-width: calc(100vw - 2rem);
+      max-height: calc(100vh - 2rem);
+      overflow: auto;
       background: var(--a2ui-color-surface, #fff);
       color: var(--a2ui-color-on-surface, #0a0a0a);
       box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);

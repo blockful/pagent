@@ -57,7 +57,6 @@ describe('POST /oauth/token', () => {
     vi.mocked(db.getUserById).mockReset();
     vi.mocked(db.insertRefreshToken).mockReset();
     vi.mocked(db.getRefreshTokenByHash).mockReset();
-    vi.mocked(db.revokeRefreshToken).mockReset();
     vi.mocked(db.revokeAllRefreshTokensForFamily).mockReset();
   });
 

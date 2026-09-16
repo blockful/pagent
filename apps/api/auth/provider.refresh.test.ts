@@ -14,7 +14,6 @@ vi.mock('../db.ts', () => ({
   getUserById: vi.fn(),
   insertRefreshToken: vi.fn(),
   revokeAllRefreshTokensForFamily: vi.fn(),
-  revokeRefreshToken: vi.fn(),
   rotateRefreshToken: vi.fn(),
 }));
 
@@ -84,8 +83,6 @@ describe('refreshToken', () => {
       }),
     );
     expect(db.insertRefreshToken).not.toHaveBeenCalled();
-    expect(db.revokeRefreshToken).not.toHaveBeenCalled();
-
     expect(db.getRefreshTokenByHash).toHaveBeenCalledWith(sha256Hex(oldRaw));
     expect(db.revokeAllRefreshTokensForFamily).not.toHaveBeenCalled();
   });

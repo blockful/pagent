@@ -1,6 +1,7 @@
 import { createHash, generateKeyPairSync, type KeyObject } from 'node:crypto';
 import { SignJWT, exportJWK } from 'jose';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PUBLIC_URL } from '../app/config.ts';
 import { env } from '../schemas.ts';
 import { BASE, NOW, SESSION_COOKIE_NAME, app, db } from './routes-test-support.ts';
 import { signStateJwt } from './state-jwt.ts';
@@ -56,7 +57,7 @@ describe('Browser session login flow', () => {
     expect(res.headers.get('set-cookie')).toContain(`${AUTH_TRANSACTION_COOKIE_NAME}=`);
   });
 
-  it('Magic link verify with browser_session=true sets cookie and redirects to /', async () => {
+  it('Magic link verify with browser_session=true sets cookie and redirects to the renderer', async () => {
     const magicLink = {
       email: 'alex@blockful.io',
       authorizeContext: {
@@ -79,7 +80,7 @@ describe('Browser session login flow', () => {
       }),
     );
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('/');
+    expect(res.headers.get('location')).toBe(PUBLIC_URL);
     const setCookie = res.headers.get('set-cookie');
     expect(setCookie).toContain(`${SESSION_COOKIE_NAME}=`);
     expect(setCookie).toContain('HttpOnly');
@@ -94,7 +95,7 @@ describe('Browser session login flow', () => {
     expect(db.insertAuthCode).not.toHaveBeenCalled();
   });
 
-  it('Google callback with browser_session=true sets cookie and redirects to /', async () => {
+  it('Google callback with browser_session=true sets cookie and redirects to the renderer', async () => {
     const browserState = await signStateJwt({
       browserSession: true,
       browserTransactionHash: BROWSER_TRANSACTION_HASH,
@@ -160,7 +161,7 @@ describe('Browser session login flow', () => {
         ),
       );
       expect(res.status).toBe(302);
-      expect(res.headers.get('location')).toBe('/');
+      expect(res.headers.get('location')).toBe(PUBLIC_URL);
       const setCookie = res.headers.get('set-cookie');
       expect(setCookie).toContain(`${SESSION_COOKIE_NAME}=`);
       expect(setCookie).toContain('HttpOnly');

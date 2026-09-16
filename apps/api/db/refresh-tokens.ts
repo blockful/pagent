@@ -117,19 +117,6 @@ export async function getRefreshTokenByHash(tokenHash: string): Promise<RefreshT
 }
 
 /**
- * Mark a single refresh token revoked. Idempotent: a second call against the
- * same id is a no-op. Used by the explicit /oauth/revoke endpoint.
- */
-export async function revokeRefreshToken(id: string): Promise<void> {
-  const c = client();
-  await c`
-    update refresh_tokens
-    set revoked_at = now()
-    where id = ${id} and revoked_at is null
-  `;
-}
-
-/**
  * Revoke every still-active refresh token in a grant family.
  * This is the "token family revocation" path triggered when a revoked token
  * is replayed — per OAuth 2.1 §6.1, the safe response is to assume the whole

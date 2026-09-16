@@ -22,6 +22,7 @@ vi.mock('../db.ts', () => ({
 
 import * as db from '../db.ts';
 import { app } from '../app.ts';
+import { PUBLIC_URL } from '../app/config.ts';
 import { signStateJwt } from './state-jwt.ts';
 import {
   BASE,
@@ -411,7 +412,7 @@ describe('GET /oauth/callback/google', () => {
       ),
     );
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('/');
+    expect(res.headers.get('location')).toBe(PUBLIC_URL);
     expect(db.upsertGoogleUser).toHaveBeenCalledTimes(1);
     expect(db.insertSession).toHaveBeenCalledTimes(1);
     const setCookie = res.headers.get('set-cookie');

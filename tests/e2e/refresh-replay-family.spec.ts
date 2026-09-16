@@ -45,7 +45,7 @@ test('a replayed old grant cannot revoke a later authorization grant for the sam
       scope: 'page:create',
       expiresAt: new Date(Date.now() + 10 * 60_000),
     });
-    await db.revokeRefreshToken(stale.id);
+    await db.revokeAllRefreshTokensForFamily(stale.family_id);
 
     const code = `refresh-family-code-${runId}`;
     const verifier = `refresh-family-verifier-${runId}`;

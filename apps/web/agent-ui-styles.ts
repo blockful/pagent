@@ -67,6 +67,19 @@ export const agentUIStyles = css`
   .surface-wrap.is-awaiting .a2ui-host {
     pointer-events: none;
   }
+  .a2ui-host,
+  .a2ui-host > a2ui-surface {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+  .a2ui-host {
+    overflow-wrap: anywhere;
+    word-break: normal;
+    line-break: auto;
+  }
+  .a2ui-host > a2ui-surface {
+    display: block;
+  }
   .awaiting-banner {
     position: sticky;
     top: 12px;

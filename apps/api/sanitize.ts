@@ -21,9 +21,20 @@ const FORBID_TAGS = [
   'link', // no external stylesheets
   'base', // we inject our own <base> in the renderer scaffold
   'meta', // no <meta http-equiv=refresh>; renderer injects its own meta-CSP
+  // show_html is view-only: remove data-entry and submission controls while
+  // preserving their text nodes where DOMPurify permits it.
+  'form',
+  'input',
+  'button',
+  'select',
+  'option',
+  'optgroup',
+  'datalist',
+  'textarea',
+  'keygen',
 ];
 
-const FORBID_ATTR = ['formaction', 'srcdoc', 'xlink:href'];
+const FORBID_ATTR = ['formaction', 'srcdoc', 'xlink:href', 'autofocus', 'contenteditable'];
 
 // Allow https links, mailto, in-page anchors, and inline image data URIs only.
 // Explicitly blocks javascript:, vbscript:, data:text/html, data:application/*.
@@ -45,10 +56,14 @@ export function sanitize(html: string): {
   // for the next caller.
   DOMPurify.removeAllHooks();
   DOMPurify.addHook('uponSanitizeElement', (_node, data) => {
-    if (data.allowedTags[data.tagName] === false) removedTags++;
+    if (FORBID_TAGS.includes(data.tagName) || data.allowedTags[data.tagName] === false) {
+      removedTags++;
+    }
   });
   DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
-    if (!data.allowedAttributes[data.attrName]) removedAttrs++;
+    if (FORBID_ATTR.includes(data.attrName) || !data.allowedAttributes[data.attrName]) {
+      removedAttrs++;
+    }
   });
 
   try {

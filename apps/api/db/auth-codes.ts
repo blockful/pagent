@@ -7,7 +7,7 @@ import type { RefreshTokenInsert } from './refresh-tokens.ts';
 // 10-minute TTL per spec §3.4. The `code` itself is the PK so a second-use
 // race against `consumed_at` can be detected as a unique-violation. The
 // callback issues these after a successful Google handshake; the token
-// endpoint (Task 06) consumes them.
+// endpoint (Task 07) consumes them.
 
 export type AuthCodeInsert = {
   code: string;

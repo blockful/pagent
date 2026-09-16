@@ -33,6 +33,7 @@ vi.mock('nodemailer', () => ({
 
 import * as db from '../db.ts';
 import { app } from '../app.ts';
+import { PUBLIC_URL } from '../app/config.ts';
 import { BASE, clientRow, setupMagicLinkTest, sha256Hex } from './magic-link-test-support.ts';
 import { AUTH_TRANSACTION_COOKIE_NAME } from './route-transaction.ts';
 import { firstCallArgument } from './test-call-support.ts';
@@ -336,7 +337,7 @@ describe('GET /oauth/magic', () => {
     );
 
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('/');
+    expect(res.headers.get('location')).toBe(PUBLIC_URL);
     expect(db.upsertUser).toHaveBeenCalledTimes(1);
     expect(db.insertSession).toHaveBeenCalledTimes(1);
     const setCookie = res.headers.get('set-cookie');

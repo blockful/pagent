@@ -12,10 +12,10 @@ Implement the OAuth token endpoint (`POST /oauth/token`) supporting both the `au
 - `apps/api/auth/provider.ts` — exposes token operations:
   - `exchangeAuthCode(code, clientId, redirectUri, codeVerifier): Promise<TokenResponse>` — validates expiry, PKCE, client, and redirect before mutation. It atomically consumes the code and inserts the initial refresh token under the per-grant family lock. A correctly bound replay revokes only that grant family.
   - `refreshToken(refreshToken, clientId): Promise<TokenResponse>` — looks up by `SHA-256(token)`, validates expiry and client binding before replay handling, rotates atomically while preserving `family_id`, and revokes only that grant family on a correctly bound replay.
-  - `revokeToken(token, tokenTypeHint, clientId): Promise<void>` — recognizes opaque refresh tokens and revokes their whole per-grant family; it always returns success per RFC 7009.
+  - `revokeToken(token, tokenTypeHint, clientId): Promise<void>` — recognizes opaque refresh tokens and revokes their whole per-grant family; handled revocation attempts return success per RFC 7009.
 - `apps/api/auth/route-token.ts` — registers:
   - `POST /oauth/token` — parses `application/x-www-form-urlencoded` body, dispatches on `grant_type` to `exchangeAuthCode()` or `refreshToken()`. Rate-limited to 20/IP/min.
-  - `POST /oauth/revoke` — parses body, calls `revokeToken()`. Returns 200 always.
+  - `POST /oauth/revoke` — parses body, calls `revokeToken()`. Returns 200 for handled attempts, including unknown or already-revoked tokens; the endpoint-wide abuse limit can return 429.
 - `apps/api/auth/provider.exchange.test.ts`, `provider.refresh.test.ts`, and
   `provider.revoke.test.ts` — test:
   - Authorization code exchange: valid code + verifier returns JWT + refresh token.
@@ -26,7 +26,7 @@ Implement the OAuth token endpoint (`POST /oauth/token`) supporting both the `au
   - Old refresh token is revoked after rotation.
   - Presenting a revoked refresh token revokes the entire token family.
   - Unsupported `grant_type` returns `unsupported_grant_type`.
-  - Token revocation always returns 200.
+  - Handled token revocation attempts return 200 without leaking token validity; rate-limited requests return 429.
 
 ## Acceptance criteria
 
