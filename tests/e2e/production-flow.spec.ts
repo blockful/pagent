@@ -71,7 +71,7 @@ async function connectStdioClient(): Promise<Client> {
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,
-      args: ['--experimental-strip-types', 'apps/mcp/server.ts'],
+      args: ['apps/mcp/server.bundle.js'],
       cwd: process.cwd(),
       env: { ...getDefaultEnvironment(), PAGENT_URL: apiUrl },
       stderr: 'pipe',
