@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   getDefaultEnvironment,
@@ -25,6 +26,33 @@ const resultSchema = z.object({
     result: z.unknown().nullable(),
   }),
 });
+
+async function expectDemoDashboardFitsPreview(page: Page) {
+  const iframe = page.locator('pagent-demo iframe');
+  await expect(iframe).toHaveAttribute('sandbox', '');
+
+  const dashboard = iframe.contentFrame();
+  await expect(dashboard.getByText('96%')).toBeVisible();
+  await expect(dashboard.locator('.bar')).toHaveCount(6);
+
+  const layout = await dashboard.locator('html').evaluate((root) => {
+    const chart = root.querySelector('.bars');
+    const lastMetric = root.querySelector('.stat:last-child');
+    if (!(chart instanceof HTMLElement) || !(lastMetric instanceof HTMLElement)) {
+      throw new TypeError('Expected the demo dashboard chart and final metric');
+    }
+    return {
+      viewportHeight: window.innerHeight,
+      documentHeight: root.scrollHeight,
+      chartBottom: chart.getBoundingClientRect().bottom,
+      lastMetricBottom: lastMetric.getBoundingClientRect().bottom,
+    };
+  });
+
+  expect(layout.documentHeight).toBeLessThanOrEqual(layout.viewportHeight);
+  expect(layout.chartBottom).toBeLessThanOrEqual(layout.viewportHeight);
+  expect(layout.lastMetricBottom).toBeLessThanOrEqual(layout.viewportHeight);
+}
 
 const testSpec = [
   {
@@ -98,6 +126,19 @@ test('production API and SPA expose their public entry points', async ({ page, r
   await page.getByRole('button', { name: 'Submit' }).click();
   await expect(page.getByText('Your agent would receive')).toBeVisible();
   await expect(page.getByText(/Production readiness/)).toBeVisible();
+});
+
+test('demo dashboard keeps every metric and chart bar visible at desktop and mobile widths', async ({
+  page,
+}) => {
+  for (const viewport of [
+    { width: 1440, height: 1000 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/demo');
+    await expectDemoDashboardFitsPreview(page);
+  }
 });
 
 test('stdio MCP creates a page, the browser submits it, and the agent receives it', async ({
