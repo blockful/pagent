@@ -65,10 +65,25 @@ describe('OpenAPI surface', () => {
   it('GET /openapi.json includes all expected paths', async () => {
     const res = await app.fetch(new Request('http://test/openapi.json'));
     const body = openApiDocumentSchema.parse(await res.json());
-    expect(body.paths).toHaveProperty('/new');
-    expect(body.paths).toHaveProperty('/{id}');
-    expect(body.paths).toHaveProperty('/{id}/result');
-    expect(body.paths).toHaveProperty('/health');
+    const expectedPaths = [
+      '/health',
+      '/new',
+      '/{id}',
+      '/{id}/result',
+      '/.well-known/oauth-authorization-server',
+      '/.well-known/oauth-protected-resource',
+      '/.well-known/jwks.json',
+      '/oauth/register',
+      '/oauth/authorize',
+      '/oauth/callback/google',
+      '/oauth/magic/send',
+      '/oauth/magic',
+      '/oauth/token',
+      '/oauth/revoke',
+      '/auth/me',
+      '/auth/logout',
+    ];
+    for (const path of expectedPaths) expect(body.paths).toHaveProperty(path);
   });
 
   it('GET /docs returns HTML with Scalar marker', async () => {

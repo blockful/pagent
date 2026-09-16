@@ -38,6 +38,7 @@ import {
   sendMagicLink,
   verifyMagicLink,
 } from './magic-link.ts';
+import { firstCallArgument } from './test-call-support.ts';
 
 setupMagicLinkTest();
 
@@ -86,7 +87,10 @@ describe('sendMagicLink', () => {
     expect(token.length).toBe(43);
 
     expect(db.insertMagicLink).toHaveBeenCalledTimes(1);
-    const insertArg = vi.mocked(db.insertMagicLink).mock.calls[0]![0];
+    const insertArg = firstCallArgument(
+      vi.mocked(db.insertMagicLink).mock.calls,
+      'insertMagicLink',
+    );
     expect(insertArg.email).toBe('alex@blockful.io');
     // The DB sees the hash, never the raw token.
     expect(insertArg.tokenHash).toBe(sha256Hex(token));
@@ -99,7 +103,7 @@ describe('sendMagicLink', () => {
     expect(ttlMs).toBeLessThanOrEqual(15 * 60 * 1000 + 100);
 
     expect(mockSendMail).toHaveBeenCalledTimes(1);
-    const mailArg = mockSendMail.mock.calls[0]![0];
+    const mailArg = firstCallArgument(mockSendMail.mock.calls, 'sendMail');
     expect(mailArg.to).toBe('alex@blockful.io');
     expect(mailArg.from).toBe(env.SMTP_FROM);
     expect(mailArg.subject).toBe('Sign in to Pagent');

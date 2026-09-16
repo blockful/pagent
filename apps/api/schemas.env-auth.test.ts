@@ -237,6 +237,22 @@ describe('envSchema (auth)', () => {
     expect(r.success).toBe(true);
   });
 
+  it('rejects a weak configured AUTH_STATE_SECRET during the grace period', () => {
+    const r = envSchema.safeParse({
+      DATABASE_URL: 'x',
+      NODE_ENV: 'production',
+      REQUIRE_AUTH: false,
+      PUBLIC_URL: 'https://pagent.link',
+      API_PUBLIC_URL: 'https://api.pagent.link',
+      ALLOWED_ORIGINS: 'https://pagent.link',
+      AUTH_STATE_SECRET: 'weak',
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.some((issue) => issue.path.includes('AUTH_STATE_SECRET'))).toBe(true);
+    }
+  });
+
   it('treats empty-string auth vars as unset (so superRefine reports them as missing)', () => {
     // Regression for Railway: setting REQUIRE_AUTH=true with the auth vars as
     // empty placeholders must fail-fast at boot, not pass silently.

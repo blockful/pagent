@@ -175,6 +175,341 @@ paths:
               schema:
                 type: string
 
+  /.well-known/oauth-authorization-server:
+    get:
+      operationId: getOAuthAuthorizationServerMetadata
+      tags: [Auth]
+      summary: OAuth 2.1 authorization-server metadata
+      responses:
+        '200':
+          description: OAuth issuer, endpoints, grants, PKCE methods, and supported scopes.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /.well-known/oauth-protected-resource:
+    get:
+      operationId: getOAuthProtectedResourceMetadata
+      tags: [Auth]
+      summary: OAuth protected-resource metadata for API and MCP clients
+      responses:
+        '200':
+          description: Resource identifier, authorization server, bearer method, and scopes.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /.well-known/jwks.json:
+    get:
+      operationId: getJsonWebKeySet
+      tags: [Auth]
+      summary: Public Ed25519 keys used to verify Pagent access tokens
+      responses:
+        '200':
+          description: JSON Web Key Set.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+
+  /oauth/register:
+    post:
+      operationId: registerOAuthClient
+      tags: [Auth]
+      summary: Dynamically register a public OAuth client
+      description: Rate-limited to 10 registrations per source IP per hour.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [redirect_uris]
+              additionalProperties: true
+              properties:
+                redirect_uris:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    format: uri
+                client_name:
+                  type: string
+      responses:
+        '201':
+          description: Registered OAuth client metadata, including its generated client ID.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Invalid client metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '429':
+          description: Registration rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error429'
+
+  /oauth/authorize:
+    get:
+      operationId: authorizeOAuthClient
+      tags: [Auth]
+      summary: Start an OAuth authorization-code flow or browser session
+      description: |
+        OAuth clients supply `client_id`, `redirect_uri`, an S256 PKCE challenge,
+        and optional scopes/state. The renderer uses `browser_session=1` to start
+        its cookie-backed browser login. The response is an HTML login page.
+      parameters:
+        - name: client_id
+          in: query
+          schema: { type: string }
+        - name: redirect_uri
+          in: query
+          schema: { type: string, format: uri }
+        - name: code_challenge
+          in: query
+          schema: { type: string }
+        - name: code_challenge_method
+          in: query
+          schema: { type: string, enum: [S256] }
+        - name: scope
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string }
+        - name: browser_session
+          in: query
+          schema: { type: string, enum: ['1'] }
+      responses:
+        '200':
+          description: HTML login page offering Google and magic-link sign-in.
+          content:
+            text/html:
+              schema: { type: string }
+        '429':
+          description: Authorization rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error429'
+
+  /oauth/callback/google:
+    get:
+      operationId: completeGoogleAuthorization
+      tags: [Auth]
+      summary: Complete Google sign-in
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '302':
+          description: Redirect to the OAuth client with a code, or to the renderer after browser login.
+        '400':
+          description: HTML error page for an invalid or expired authorization transaction.
+          content:
+            text/html:
+              schema: { type: string }
+
+  /oauth/magic/send:
+    post:
+      operationId: sendMagicLink
+      tags: [Auth]
+      summary: Send a single-use magic sign-in link
+      description: Accepts JSON or form data and rate-limits each normalized email address.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MagicLinkRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MagicLinkRequest'
+      responses:
+        '200':
+          description: The link was accepted for delivery.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, message]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+                  message: { type: string }
+        '400':
+          description: Invalid email or malformed request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '429':
+          description: Per-email rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error429'
+        '503':
+          description: SMTP is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+
+  /oauth/magic:
+    get:
+      operationId: completeMagicLinkAuthorization
+      tags: [Auth]
+      summary: Consume a single-use magic sign-in link
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '302':
+          description: Redirect to the OAuth client with a code, or to the renderer after browser login.
+        '400':
+          description: HTML error page for an invalid, expired, or already-used link.
+          content:
+            text/html:
+              schema: { type: string }
+
+  /oauth/token:
+    post:
+      operationId: exchangeOAuthToken
+      tags: [Auth]
+      summary: Exchange an authorization code or rotate a refresh token
+      description: Public-client OAuth token endpoint. Authorization codes require S256 PKCE.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, client_id]
+              properties:
+                grant_type:
+                  type: string
+                  enum: [authorization_code, refresh_token]
+                client_id: { type: string }
+                code: { type: string }
+                redirect_uri: { type: string, format: uri }
+                code_verifier: { type: string }
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: Access token and refresh token.
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthTokenResponse'
+        '400':
+          description: Invalid request, grant, client, or unsupported grant type.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '429':
+          description: Token endpoint rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error429'
+
+  /oauth/revoke:
+    post:
+      operationId: revokeOAuthToken
+      tags: [Auth]
+      summary: Revoke a refresh token family
+      description: Returns 200 even when the token is unknown, as required by RFC 7009.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+                token_type_hint: { type: string }
+                client_id: { type: string }
+      responses:
+        '200':
+          description: Revocation request accepted.
+        '429':
+          description: Revocation endpoint rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error429'
+
+  /auth/me:
+    get:
+      operationId: getCurrentBrowserUser
+      tags: [Auth]
+      summary: Return the current cookie-authenticated browser user
+      security:
+        - CookieAuth: []
+      responses:
+        '200':
+          description: Current user profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Missing, expired, or invalid browser session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+
+  /auth/logout:
+    post:
+      operationId: logoutBrowserSession
+      tags: [Auth]
+      summary: Revoke and clear the current browser session
+      security:
+        - CookieAuth: []
+        - {}
+      responses:
+        '200':
+          description: Session cleared; idempotent when no cookie is present.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+
   /new:
     post:
       operationId: createPage
@@ -200,6 +535,10 @@ paths:
         done.
 
         Rate-limited to 30 requests per minute per source IP.
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+        - {}
       requestBody:
         required: true
         content:
@@ -442,6 +781,10 @@ paths:
 
         **What to do next:** parse the `result` object and continue the agent
         conversation. `result` is null until the user submits.
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+        - {}
       responses:
         '200':
           description: State and result returned.
@@ -474,6 +817,20 @@ paths:
                 $ref: '#/components/schemas/Error500'
 
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        OAuth access token. When `REQUIRE_AUTH=true`, `POST /new` requires
+        `page:create` and `GET /{id}/result` requires `page:read`.
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: pagent_session
+      description: HttpOnly browser session cookie issued after interactive login.
+
   parameters:
     PageId:
       name: id
@@ -499,6 +856,45 @@ components:
         minimum: 1
 
   schemas:
+    OAuthError:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        error_description: { type: string }
+        message: { type: string }
+
+    MagicLinkRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+        state:
+          type: string
+          description: Signed authorization state emitted by `GET /oauth/authorize`.
+
+    OAuthTokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in, refresh_token]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, enum: [Bearer] }
+        expires_in: { type: integer, minimum: 1 }
+        refresh_token: { type: string }
+        scope: { type: string }
+
+    UserProfile:
+      type: object
+      required: [id, handle, email]
+      properties:
+        id: { type: string, format: uuid }
+        handle: { type: string }
+        email: { type: string, format: email }
+        name: { type: [string, 'null'] }
+        avatar_url: { type: [string, 'null'], format: uri }
+
     PageId:
       type: string
       pattern: '^[a-f0-9]{32}$'

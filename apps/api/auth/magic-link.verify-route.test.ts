@@ -34,6 +34,7 @@ import * as db from '../db.ts';
 import { app } from '../app.ts';
 import { BASE, clientRow, setupMagicLinkTest, sha256Hex } from './magic-link-test-support.ts';
 import { AUTH_TRANSACTION_COOKIE_NAME } from './route-transaction.ts';
+import { firstCallArgument } from './test-call-support.ts';
 
 const BROWSER_TRANSACTION_TOKEN = 'magic-browser-transaction-token';
 const BROWSER_TRANSACTION_HASH = createHash('sha256')
@@ -91,7 +92,8 @@ describe('GET /oauth/magic', () => {
     const res = await app.fetch(new Request(`${BASE}/oauth/magic?token=fake-token`));
 
     expect(res.status).toBe(302);
-    const location = res.headers.get('location')!;
+    const location = res.headers.get('location');
+    if (location === null) throw new Error('expected callback redirect location');
     const parsed = new URL(location);
     expect(parsed.origin + parsed.pathname).toBe('http://localhost:9876/callback');
     expect(parsed.searchParams.get('code')).toBeTruthy();
@@ -100,7 +102,7 @@ describe('GET /oauth/magic', () => {
     // The auth code was inserted with the same PKCE challenge from the
     // stored context.
     expect(db.insertAuthCode).toHaveBeenCalledTimes(1);
-    const codeArg = vi.mocked(db.insertAuthCode).mock.calls[0]![0];
+    const codeArg = firstCallArgument(vi.mocked(db.insertAuthCode).mock.calls, 'insertAuthCode');
     expect(codeArg.userId).toBe('11111111-2222-3333-4444-555555555555');
     expect(codeArg.clientId).toBe(clientRow.client_id);
     expect(codeArg.redirectUri).toBe('http://localhost:9876/callback');

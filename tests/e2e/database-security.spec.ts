@@ -1,8 +1,57 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import * as db from '../../apps/api/db.ts';
+import { upsertUser as upsertAuthUser } from '../../apps/api/auth/user-provider.ts';
 
 test.describe.configure({ mode: 'serial' });
+
+test('upserts case-variant emails into one canonical user', async () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl === undefined) throw new TypeError('DATABASE_URL is required');
+  await db.init(databaseUrl);
+  try {
+    const runId = randomUUID();
+    const mixedCaseEmail = `Case-${runId}@Example.TEST`;
+    const original = await db.upsertUser({
+      email: mixedCaseEmail,
+      name: 'Original',
+      avatarUrl: null,
+      handle: `case-${runId}`,
+    });
+    const updated = await db.upsertUser({
+      email: mixedCaseEmail.toLowerCase(),
+      name: 'Updated',
+      avatarUrl: null,
+      handle: `replacement-${runId}`,
+    });
+
+    expect(updated.id).toBe(original.id);
+    expect(updated.handle).toBe(original.handle);
+    expect(updated.email).toBe(mixedCaseEmail.toLowerCase());
+    expect(updated.name).toBe('Updated');
+  } finally {
+    await db.shutdown();
+  }
+});
+
+test('allocates distinct handles when signups with the same local part race', async () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl === undefined) throw new TypeError('DATABASE_URL is required');
+  await db.init(databaseUrl);
+  try {
+    const localPart = `race-${randomUUID()}`;
+    const users = await Promise.all(
+      Array.from({ length: 4 }, (_, index) =>
+        upsertAuthUser({ email: `${localPart}@example-${index}.test` }),
+      ),
+    );
+
+    expect(new Set(users.map((user) => user.id)).size).toBe(4);
+    expect(new Set(users.map((user) => user.handle)).size).toBe(4);
+  } finally {
+    await db.shutdown();
+  }
+});
 
 async function createTokenFamily() {
   const runId = randomUUID();

@@ -6,6 +6,18 @@ import * as db from '../db.ts';
 // applied on read elsewhere; here we only need to produce a value that
 // matches.
 const HANDLE_REGEX = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
+const HANDLE_ALLOCATION_ATTEMPTS = 10;
+
+function isHandleConflict(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === '23505' &&
+    'constraint_name' in error &&
+    error.constraint_name === 'users_handle_key'
+  );
+}
 
 /**
  * Reduce the email local part to handle-shaped characters.
@@ -83,15 +95,23 @@ export interface UserProfile {
  * `handle` when issuing the authorization code.
  */
 export async function upsertUser(profile: UserProfile): Promise<db.UserRow> {
+  const email = profile.email.trim().toLowerCase();
   // Local part of the email is the seed for the handle. RFC 5321 caps local
   // parts at 64 chars, sanitizeHandle further truncates to 40 — so even
   // pathologically long inputs are bounded.
-  const localPart = profile.email.split('@')[0] ?? '';
-  const handle = await generateUniqueHandle(localPart);
-  return db.upsertUser({
-    email: profile.email,
-    name: profile.name ?? null,
-    avatarUrl: profile.avatarUrl ?? null,
-    handle,
-  });
+  const localPart = email.split('@')[0] ?? '';
+  for (let attempt = 0; attempt < HANDLE_ALLOCATION_ATTEMPTS; attempt++) {
+    const handle = await generateUniqueHandle(localPart);
+    try {
+      return await db.upsertUser({
+        email,
+        name: profile.name ?? null,
+        avatarUrl: profile.avatarUrl ?? null,
+        handle,
+      });
+    } catch (error) {
+      if (!isHandleConflict(error) || attempt === HANDLE_ALLOCATION_ATTEMPTS - 1) throw error;
+    }
+  }
+  throw new Error('handle allocation exhausted');
 }

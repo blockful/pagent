@@ -5,6 +5,7 @@ import { env } from '../schemas.ts';
 import { BASE, NOW, SESSION_COOKIE_NAME, app, db } from './routes-test-support.ts';
 import { signStateJwt } from './state-jwt.ts';
 import { AUTH_TRANSACTION_COOKIE_NAME } from './route-transaction.ts';
+import { firstCallArgument } from './test-call-support.ts';
 
 const BROWSER_TRANSACTION_TOKEN = 'routes-browser-transaction-token';
 const BROWSER_TRANSACTION_HASH = createHash('sha256')
@@ -82,7 +83,7 @@ describe('Browser session login flow', () => {
     expect(setCookie).toContain('Path=/');
     expect(setCookie?.toLowerCase()).toContain('max-age=2592000');
     expect(db.insertSession).toHaveBeenCalledTimes(1);
-    const insertArg = vi.mocked(db.insertSession).mock.calls[0]![0];
+    const insertArg = firstCallArgument(vi.mocked(db.insertSession).mock.calls, 'insertSession');
     expect(insertArg.userId).toBe(SESSION_USER_ROW.id);
     expect(insertArg.ipAddress).toBe('10.5.0.1');
     expect(insertArg.userAgent).toBe('MockBrowser/1.0');
@@ -157,7 +158,7 @@ describe('Browser session login flow', () => {
       expect(setCookie).toContain('HttpOnly');
       expect(setCookie?.toLowerCase()).toContain('samesite=lax');
       expect(db.insertSession).toHaveBeenCalledTimes(1);
-      const insertArg = vi.mocked(db.insertSession).mock.calls[0]![0];
+      const insertArg = firstCallArgument(vi.mocked(db.insertSession).mock.calls, 'insertSession');
       expect(insertArg.userId).toBe(SESSION_USER_ROW.id);
       expect(insertArg.ipAddress).toBe('203.0.113.77');
       expect(insertArg.userAgent).toBe('MockBrowser/2.0');

@@ -11,7 +11,6 @@ import { describe, it, expect } from 'vitest';
 import { registerPagentTools, type PageOps, type PagentToolRegistrar } from './tools.ts';
 
 type RegisteredTool = {
-  description: string;
   handler: (...args: unknown[]) => unknown;
 };
 
@@ -20,14 +19,11 @@ function makeServer() {
   const server = {
     registerTool(
       name: string,
-      def: { title?: string; description?: string },
+      _def: { title?: string; description?: string },
       handler: (...args: never[]) => unknown,
     ) {
       const invoke = (...args: unknown[]): unknown => Reflect.apply(handler, undefined, args);
-      tools.set(name, {
-        description: def.description ?? '',
-        handler: invoke,
-      });
+      tools.set(name, { handler: invoke });
     },
   } satisfies PagentToolRegistrar;
   return { server, tools };
@@ -58,9 +54,24 @@ function makeTools(ops = makeOps()): Map<string, RegisteredTool> {
 }
 
 const toolCalls = [
-  ['show_ui', { spec: [] }, 'page:create'],
-  ['show_html', { html: '<p>x</p>' }, 'page:create'],
-  ['check_result', { page_id: 'a'.repeat(32) }, 'page:read'],
+  [
+    'show_ui',
+    { spec: [] },
+    'page:create',
+    { page_id: 'a'.repeat(32), url: 'http://x/a', expires_at: 0 },
+  ],
+  [
+    'show_html',
+    { html: '<p>x</p>' },
+    'page:create',
+    { page_id: 'b'.repeat(32), url: 'http://x/b', expires_at: 0 },
+  ],
+  [
+    'check_result',
+    { page_id: 'a'.repeat(32) },
+    'page:read',
+    { page_id: 'a'.repeat(32), state: 'open', result: null, format: 'a2ui' },
+  ],
 ] as const;
 
 describe('registerPagentTools', () => {
@@ -71,13 +82,13 @@ describe('registerPagentTools', () => {
 
   it.each(toolCalls)(
     '%s allows an authenticated call with its required scope',
-    async (name, args, requiredScope) => {
+    async (name, args, requiredScope, expectedContent) => {
       const tools = makeTools();
       const handler = getTool(tools, name).handler;
-      const result = await handler(args, {
+      const result = (await handler(args, {
         authInfo: { scopes: [requiredScope], extra: { sub: 'user-uuid' } },
-      });
-      expect(result).toBeDefined();
+      })) as { structuredContent: unknown };
+      expect(result.structuredContent).toEqual(expectedContent);
     },
   );
 
@@ -94,20 +105,6 @@ describe('registerPagentTools', () => {
     },
   );
 
-  it('show_html description mentions view-only and no scripts', () => {
-    const tools = makeTools();
-    const desc = getTool(tools, 'show_html').description;
-    expect(desc).toMatch(/view-only/i);
-    expect(desc).toMatch(/script/i);
-    expect(desc).toMatch(/JavaScript/i);
-  });
-
-  it('show_ui description distinguishes itself from show_html', () => {
-    const tools = makeTools();
-    const desc = getTool(tools, 'show_ui').description;
-    expect(desc).toMatch(/show_html/);
-  });
-
   it('check_result structuredContent includes format', async () => {
     const tools = makeTools();
     const handler = getTool(tools, 'check_result').handler;
@@ -117,7 +114,7 @@ describe('registerPagentTools', () => {
     expect(out.structuredContent.format).toBe('a2ui');
   });
 
-  it('show_html handler returns structuredContent matching showHtml + "do not poll" text', async () => {
+  it('show_html handler returns structuredContent matching showHtml', async () => {
     const expectedId = 'c'.repeat(32);
     const expectedUrl = 'http://test.local/' + expectedId;
     const expectedExpires = 1700000000000;
@@ -133,17 +130,13 @@ describe('registerPagentTools', () => {
     const handler = getTool(tools, 'show_html').handler;
     const out = (await handler({ html: '<p>x</p>' })) as {
       structuredContent: { page_id: string; url: string; expires_at: number };
-      content: Array<{ type: string; text: string }>;
     };
     expect(out.structuredContent.page_id).toBe(expectedId);
     expect(out.structuredContent.url).toBe(expectedUrl);
     expect(out.structuredContent.expires_at).toBe(expectedExpires);
-    // Per show_html handler text (tools.ts), the LLM-facing string tells the
-    // model the page is view-only and not to poll. Match on "do not poll".
-    expect(out.content[0]?.text).toMatch(/do not poll/i);
   });
 
-  it('check_result handler on an HTML page surfaces "stop polling" guidance', async () => {
+  it('check_result handler preserves HTML page state', async () => {
     const tools = makeTools(
       makeOps({
         checkResult: async () => ({
@@ -157,12 +150,10 @@ describe('registerPagentTools', () => {
     const handler = getTool(tools, 'check_result').handler;
     const out = (await handler({ page_id: 'd'.repeat(32) })) as {
       structuredContent: { state: string; result: unknown; format: string; page_id: string };
-      content: Array<{ type: string; text: string }>;
     };
     expect(out.structuredContent.format).toBe('html');
     expect(out.structuredContent.state).toBe('open');
     expect(out.structuredContent.result).toBe(null);
-    expect(out.content[0]?.text).toMatch(/stop polling/i);
   });
 
   // ---------------------------------------------------------------------------

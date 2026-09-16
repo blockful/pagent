@@ -24,6 +24,18 @@ import { setupGoogleAuthTest } from './google-test-support.ts';
 beforeAll(setupGoogleAuthTest);
 beforeEach(() => vi.clearAllMocks());
 
+function userRow(id: string, handle: string): db.UserRow {
+  return {
+    id,
+    handle,
+    email: `${handle}@example.test`,
+    name: null,
+    avatar_url: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+  };
+}
+
 describe('sanitizeHandle', () => {
   it('lowercases and strips non-alphanumeric chars', () => {
     expect(sanitizeHandle('Alex.Netto')).toBe('alexnetto');
@@ -57,8 +69,8 @@ describe('generateUniqueHandle', () => {
 
   it('appends a numeric suffix on collision', async () => {
     vi.mocked(db.getUserByHandle)
-      .mockResolvedValueOnce({ id: '1' } as never)
-      .mockResolvedValueOnce({ id: '2' } as never)
+      .mockResolvedValueOnce(userRow('1', 'alex'))
+      .mockResolvedValueOnce(userRow('2', 'alex2'))
       .mockResolvedValueOnce(null);
     const h = await generateUniqueHandle('alex');
     expect(h).toBe('alex3');
@@ -87,6 +99,65 @@ describe('upsertUser', () => {
         handle: 'alex',
       }),
     );
+  });
+
+  it('canonicalizes email casing before persistence', async () => {
+    vi.mocked(db.getUserByHandle).mockResolvedValue(null);
+    vi.mocked(db.upsertUser).mockResolvedValue({
+      id: 'user-uuid',
+      handle: 'alex',
+      email: 'alex@example.com',
+      name: null,
+      avatar_url: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    await upsertUser({ email: ' Alex@Example.COM ' });
+
+    expect(db.upsertUser).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'alex@example.com', handle: 'alex' }),
+    );
+  });
+
+  it('retries handle allocation after a concurrent unique conflict', async () => {
+    vi.mocked(db.getUserByHandle)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(userRow('winner', 'alex'))
+      .mockResolvedValueOnce(null);
+    const conflict = Object.assign(new Error('duplicate handle'), {
+      code: '23505',
+      constraint_name: 'users_handle_key',
+    });
+    vi.mocked(db.upsertUser).mockRejectedValueOnce(conflict).mockResolvedValueOnce({
+      id: 'user-uuid',
+      handle: 'alex2',
+      email: 'alex@example.com',
+      name: null,
+      avatar_url: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    const user = await upsertUser({ email: 'alex@example.com' });
+
+    expect(user.handle).toBe('alex2');
+    expect(db.upsertUser).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ email: 'alex@example.com', handle: 'alex2' }),
+    );
+  });
+
+  it('does not retry a unique conflict from another constraint', async () => {
+    vi.mocked(db.getUserByHandle).mockResolvedValue(null);
+    const conflict = Object.assign(new Error('duplicate email'), {
+      code: '23505',
+      constraint_name: 'users_email_idx',
+    });
+    vi.mocked(db.upsertUser).mockRejectedValue(conflict);
+
+    await expect(upsertUser({ email: 'alex@example.com' })).rejects.toBe(conflict);
+    expect(db.upsertUser).toHaveBeenCalledOnce();
   });
 });
 

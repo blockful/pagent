@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BASE, NOW, app, db } from './routes-test-support.ts';
+import { firstCallArgument } from './test-call-support.ts';
 
 function registerRow(overrides: Partial<Parameters<typeof db.insertOAuthClient>[0]> = {}) {
   return {
@@ -97,7 +98,7 @@ describe('POST /oauth/register', () => {
       postRegister({ redirect_uris: ['http://localhost:9876/callback'] }, '10.0.0.6'),
     );
     expect(res.status).toBe(201);
-    const arg = vi.mocked(db.insertOAuthClient).mock.calls[0]![0];
+    const arg = firstCallArgument(vi.mocked(db.insertOAuthClient).mock.calls, 'insertOAuthClient');
     expect(arg.grant_types).toEqual(['authorization_code', 'refresh_token']);
     expect(arg.response_types).toEqual(['code']);
     expect(arg.token_endpoint_auth_method).toBe('none');

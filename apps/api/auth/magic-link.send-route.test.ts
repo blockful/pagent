@@ -33,6 +33,7 @@ import { app } from '../app.ts';
 import { env } from '../schemas.ts';
 import { postMagicSend, setupMagicLinkTest } from './magic-link-test-support.ts';
 import { signStateJwt } from './state-jwt.ts';
+import { firstCallArgument } from './test-call-support.ts';
 
 setupMagicLinkTest();
 
@@ -159,7 +160,7 @@ describe('POST /oauth/magic/send', () => {
       postMagicSend({ email: 'alex@blockful.io', state }, { contentType: 'json' }),
     );
     expect(res.status).toBe(200);
-    const arg = vi.mocked(db.insertMagicLink).mock.calls[0]![0];
+    const arg = firstCallArgument(vi.mocked(db.insertMagicLink).mock.calls, 'insertMagicLink');
     expect(arg.authorizeContext.clientId).toBe('mcp-cli');
     expect(arg.authorizeContext.redirectUri).toBe('http://localhost:9876/cb');
     expect(arg.authorizeContext.codeChallenge).toBe('challenge');
@@ -180,7 +181,7 @@ describe('POST /oauth/magic/send', () => {
     );
 
     expect(res.status).toBe(200);
-    const arg = vi.mocked(db.insertMagicLink).mock.calls[0]![0];
+    const arg = firstCallArgument(vi.mocked(db.insertMagicLink).mock.calls, 'insertMagicLink');
     expect(arg.authorizeContext).toEqual({
       browserSession: true,
       browserTransactionHash: 'signed-browser-transaction-hash',
@@ -206,7 +207,7 @@ describe('POST /oauth/magic/send', () => {
       ),
     );
     expect(res.status).toBe(200);
-    const arg = vi.mocked(db.insertMagicLink).mock.calls[0]![0];
+    const arg = firstCallArgument(vi.mocked(db.insertMagicLink).mock.calls, 'insertMagicLink');
     expect(arg.authorizeContext).toEqual({});
   });
 
@@ -214,9 +215,9 @@ describe('POST /oauth/magic/send', () => {
     vi.mocked(db.insertMagicLink).mockResolvedValueOnce();
 
     await app.fetch(postMagicSend({ email: 'Alex@Blockful.IO' }, { contentType: 'json' }));
-    const arg = vi.mocked(db.insertMagicLink).mock.calls[0]![0];
+    const arg = firstCallArgument(vi.mocked(db.insertMagicLink).mock.calls, 'insertMagicLink');
     expect(arg.email).toBe('alex@blockful.io');
-    const mailArg = mockSendMail.mock.calls[0]![0];
+    const mailArg = firstCallArgument(mockSendMail.mock.calls, 'sendMail');
     expect(mailArg.to).toBe('alex@blockful.io');
   });
 });

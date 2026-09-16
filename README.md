@@ -77,22 +77,29 @@ The repo doubles as a Claude Code plugin and a self-hosted marketplace: `.claude
 
 Each app validates its environment at boot/build with Zod and fails loudly on missing or malformed values — no silent defaults that bite in production. `.env.example` files in each app are the source of truth.
 
-| App                                               | Variable                   | Required?           | Validation / default                                                                                |
-| ------------------------------------------------- | -------------------------- | ------------------- | --------------------------------------------------------------------------------------------------- |
-| **api** ([`.env.example`](apps/api/.env.example)) | `DATABASE_URL`             | **always**          | Non-empty string. Boot fails with a `ZodError` otherwise.                                           |
-|                                                   | `PUBLIC_URL`               | **production**      | HTTPS renderer origin. Used in `show_ui` responses.                                                 |
-|                                                   | `API_PUBLIC_URL`           | **production**      | HTTPS API origin. Used for OAuth issuer, callbacks, magic links, and discovery metadata.            |
-|                                                   | `ALLOWED_ORIGINS`          | **production**      | Comma-separated origin list. CORS allow-list.                                                       |
-|                                                   | `PORT`                     | optional            | Coerced to number. Default `8787`. Railway sets this.                                               |
-|                                                   | `PAGE_TTL_MS`              | optional            | Coerced to number. Default `1800000` (30 min).                                                      |
-|                                                   | `RATE_LIMIT_MAX`           | optional            | Positive integer. Default `30`.                                                                     |
-|                                                   | `RATE_LIMIT_WINDOW_MS`     | optional            | Positive integer. Default `60000`.                                                                  |
-|                                                   | `NODE_ENV`                 | optional            | One of `development` \| `production` \| `test`. Gates the production-only refinements above.        |
-|                                                   | `LOG_LEVEL`                | optional            | Pino level. Default `info`.                                                                         |
-|                                                   | `OTEL_EXPORTER_OTLP_*`     | optional            | OpenTelemetry exporter config. Leave `OTEL_EXPORTER_OTLP_ENDPOINT` unset to disable tracing.        |
-| **web** ([`.env.example`](apps/web/.env.example)) | `VITE_API_URL`             | **`vite build`**    | Valid URL. Inlined at build time and embedded in CSP. `vite dev` allows it unset (uses Vite proxy). |
-|                                                   | `API_PORT` / `CLIENT_PORT` | optional (dev only) | Valid port (1–65535). Defaults `8787` / `8788`.                                                     |
-| **mcp** ([`.env.example`](apps/mcp/.env.example)) | `PAGENT_URL`               | optional            | Valid URL when set. Default `https://api.pagent.link`.                                              |
+| App                                               | Variable                                                                       | Required?             | Validation / default                                                                                   |
+| ------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------ |
+| **api** ([`.env.example`](apps/api/.env.example)) | `DATABASE_URL`                                                                 | **always**            | Non-empty string. Boot fails with a `ZodError` otherwise.                                              |
+|                                                   | `PUBLIC_URL`                                                                   | **production**        | HTTPS renderer origin. Used in `show_ui` responses.                                                    |
+|                                                   | `API_PUBLIC_URL`                                                               | **production**        | HTTPS API origin. Used for OAuth issuer, callbacks, magic links, and discovery metadata.               |
+|                                                   | `ALLOWED_ORIGINS`                                                              | **production**        | Comma-separated origin list. CORS allow-list.                                                          |
+|                                                   | `PORT`                                                                         | optional              | Coerced to number. Default `8787`. Railway sets this.                                                  |
+|                                                   | `PAGE_TTL_MS`                                                                  | optional              | Coerced to number. Default `1800000` (30 min).                                                         |
+|                                                   | `RATE_LIMIT_MAX`                                                               | optional              | Positive integer. Default `30`.                                                                        |
+|                                                   | `RATE_LIMIT_WINDOW_MS`                                                         | optional              | Positive integer. Default `60000`.                                                                     |
+|                                                   | `REQUIRE_AUTH`                                                                 | optional              | Boolean. Default `false`; set `true` to protect page creation/results and enable the full OAuth flow.  |
+|                                                   | `JWT_SIGNING_KEY` / `JWT_PUBLIC_KEY`                                           | when auth is required | Base64url DER Ed25519 private/public key pair used to sign and verify access tokens.                   |
+|                                                   | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`                                    | when auth is required | Google OAuth credentials. `GOOGLE_REDIRECT_URI` defaults to `{API_PUBLIC_URL}/oauth/callback/google`.  |
+|                                                   | `AUTH_STATE_SECRET`                                                            | when configured       | OAuth state HMAC secret; at least 32 UTF-8 bytes. Required when auth is enabled.                       |
+|                                                   | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS`                                        | when auth is required | SMTP credentials for magic links. `SMTP_PORT` defaults to `587`; `SMTP_FROM` to `noreply@pagent.link`. |
+|                                                   | `SESSION_MAX_AGE_DAYS` / `REFRESH_TOKEN_MAX_DAYS` / `ACCESS_TOKEN_TTL_SECONDS` | optional              | Defaults `30` / `90` / `3600`.                                                                         |
+|                                                   | `NODE_ENV`                                                                     | optional              | One of `development` \| `production` \| `test`. Gates the production-only refinements above.           |
+|                                                   | `LOG_LEVEL`                                                                    | optional              | Pino level. Default `info`.                                                                            |
+|                                                   | `OTEL_EXPORTER_OTLP_*`                                                         | optional              | OpenTelemetry exporter config. Leave `OTEL_EXPORTER_OTLP_ENDPOINT` unset to disable tracing.           |
+| **web** ([`.env.example`](apps/web/.env.example)) | `VITE_API_URL`                                                                 | **`vite build`**      | Valid URL. Inlined at build time and embedded in CSP. `vite dev` allows it unset (uses Vite proxy).    |
+|                                                   | `API_PORT` / `CLIENT_PORT`                                                     | optional (dev only)   | Valid port (1–65535). Defaults `8787` / `8788`.                                                        |
+| **mcp** ([`.env.example`](apps/mcp/.env.example)) | `PAGENT_URL`                                                                   | optional              | Valid URL when set. Default `https://api.pagent.link`.                                                 |
+|                                                   | `PAGENT_TOKEN`                                                                 | when auth is required | OAuth bearer token used by the stdio MCP transport for protected API calls.                            |
 
 When validation fails, the process logs the offending field and exits with a non-zero code — CI catches misconfigured deploys (`build:web` runs in CI with a placeholder `VITE_API_URL`) before they ship.
 
@@ -223,6 +230,12 @@ To bypass in an emergency: `git push --no-verify` (don't make this a habit).
    - `PORT` — Railway sets this automatically; the server reads it.
    - `PAGE_TTL_MS` — optional; default 30 minutes.
    - `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` — optional. Per-IP rate limit on `POST /new`. Defaults: 30 / 60000 (30 req/min). Tune up for load tests.
+   - `REQUIRE_AUTH` — set to `true` to enforce authentication and scopes on protected page and MCP operations. Leave `false` only for the documented rollout grace period.
+   - `JWT_SIGNING_KEY` / `JWT_PUBLIC_KEY` — base64url-encoded DER Ed25519 key pair. Required when `REQUIRE_AUTH=true`.
+   - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — Google OAuth credentials. `GOOGLE_REDIRECT_URI` is optional and defaults to `${API_PUBLIC_URL}/oauth/callback/google`.
+   - `AUTH_STATE_SECRET` — secret used to authenticate OAuth state. Required when auth is enabled; any configured value must be at least 32 UTF-8 bytes.
+   - `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` — SMTP credentials for magic-link login. Required when auth is enabled. `SMTP_PORT` and `SMTP_FROM` have defaults.
+   - `SESSION_MAX_AGE_DAYS` / `REFRESH_TOKEN_MAX_DAYS` / `ACCESS_TOKEN_TTL_SECONDS` — optional auth lifetime controls. Defaults: 30 / 90 / 3600.
    - `OTEL_EXPORTER_OTLP_ENDPOINT` — optional. Grafana Cloud OTLP HTTP base URL (e.g. `https://otlp-gateway-prod-us-central-0.grafana.net/otlp`). Leave unset to disable observability entirely. See `apps/api/.env.example` for the rest of the OTel envs.
 4. Deploy. Railway runs `npm install` (which walks up to the workspace root) and starts the API with `npm -w @pagent/api run start`.
 

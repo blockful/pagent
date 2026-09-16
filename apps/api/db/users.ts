@@ -41,13 +41,16 @@ export async function upsertUser(input: UserUpsertInput): Promise<UserRow> {
     const rows = await c<UserRow[]>`
       insert into users (email, name, avatar_url, handle)
       values (${input.email}, ${input.name}, ${input.avatarUrl}, ${input.handle})
-      on conflict (email) do update set
+      on conflict (lower(email)) do update set
+        email = excluded.email,
         name = excluded.name,
         avatar_url = excluded.avatar_url,
         updated_at = now()
       returning id, handle, email, name, avatar_url, created_at, updated_at
     `;
-    return rows[0]!;
+    const row = rows[0];
+    if (!row) throw new Error('user upsert returned no row');
+    return row;
   });
 }
 

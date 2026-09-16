@@ -184,13 +184,13 @@ export const envSchema = z.preprocess(
             });
           }
         }
-        if (cfg.AUTH_STATE_SECRET && Buffer.byteLength(cfg.AUTH_STATE_SECRET, 'utf8') < 32) {
-          ctx.addIssue({
-            code: 'custom',
-            path: ['AUTH_STATE_SECRET'],
-            message: 'AUTH_STATE_SECRET must be at least 32 UTF-8 bytes when REQUIRE_AUTH=true.',
-          });
-        }
+      }
+      if (cfg.AUTH_STATE_SECRET && Buffer.byteLength(cfg.AUTH_STATE_SECRET, 'utf8') < 32) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['AUTH_STATE_SECRET'],
+          message: 'AUTH_STATE_SECRET must be at least 32 UTF-8 bytes whenever configured.',
+        });
       }
     }),
 );
