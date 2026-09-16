@@ -9,6 +9,7 @@ export default defineConfig({
       DATABASE_URL: 'postgresql://test:test@localhost/test',
       PORT: '0',
       LOG_LEVEL: 'silent',
+      TRUSTED_PROXY_MODE: 'railway',
     },
     coverage: {
       provider: 'v8',

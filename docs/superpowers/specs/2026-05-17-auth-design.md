@@ -1,20 +1,20 @@
 # Auth — Design
 
-Status: draft, awaiting user review (2026-05-17).
+Status: implemented; this document describes the shipped design as of 2026-09-15.
 
 ## 1. Overview and motivation
 
-Pagent has no authentication. Every page is anonymous, every API call is
-unauthenticated, and every MCP tool invocation is unguarded. This was
-acceptable for an MVP where the blast radius of abuse is capped by the
-30-minute TTL and per-IP rate limits, but it blocks every feature on the
-V2 roadmap: page ownership, user dashboards, audit logs, custom URLs,
-webhooks — all require a notion of "who."
+Pagent originally shipped without authentication: pages, API calls, and MCP
+tool invocations were anonymous. The implemented auth system adds user
+identity and page ownership while retaining a configurable grace period for
+anonymous page creation. It establishes the foundation required by dashboard,
+audit-log, custom-URL, and webhook features.
 
 This spec introduces:
 
-- **Users** — identified by email, created via Google OAuth or Magic
-  Link (passwordless email).
+- **Users** — created via Google OAuth or Magic Link (passwordless email).
+  Google identities are bound to the provider's immutable subject; verified
+  email remains unique profile/contact data.
 - **Sessions** — httpOnly cookies for browser clients (the renderer at
   `pagent.link` and any future dashboard).
 - **OAuth 2.1 Authorization Server** — co-hosted with the API, issuing
@@ -35,16 +35,16 @@ Third-party auth services add a runtime dependency, a billing
 relationship, and (for Supabase Auth specifically) a tight coupling to
 Supabase's session model that doesn't map cleanly to the MCP OAuth
 flow's requirement for the RS to also be the AS. The MCP TypeScript SDK
-already ships `mcpAuthRouter`, `requireBearerAuth`, and
-`OAuthServerProvider` — implementing the provider interface against
-Postgres is less work than adapting an external service to satisfy it.
+supplies the transport and `AuthInfo` contract; Pagent implements its OAuth
+routes and Postgres-backed provider functions directly so the same Hono
+application owns discovery, authorization, tokens, and browser sessions.
 
 ## 2. Database schema
 
 All tables live in the existing Supabase Postgres database. Schema
 bootstrap follows the same pattern as the existing `pages` table:
-`CREATE TABLE IF NOT EXISTS` in `db.ts`'s `init()`, run on every boot,
-idempotent.
+`CREATE TABLE IF NOT EXISTS` in `db/connection.ts`'s `init()`, run on every
+boot, idempotent.
 
 ### 2.1 `users`
 
@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS users (
   id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   handle     text        UNIQUE,          -- nullable: set during onboarding (Custom URLs feature), not at creation
   email      text        UNIQUE NOT NULL,
+  google_sub text,
   name       text,
   avatar_url text,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -61,6 +62,8 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users (lower(email));
 CREATE UNIQUE INDEX IF NOT EXISTS users_handle_idx ON users (lower(handle));
+CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub_idx
+  ON users (google_sub) WHERE google_sub IS NOT NULL;
 ```
 
 **`handle`** is a short, URL-safe username (e.g. `alex`). Auto-generated
@@ -95,8 +98,9 @@ cleartext. Lookup is by hash: `WHERE token_hash = SHA256(cookie_value)
 AND expires_at > now()`.
 
 Session lifetime: 30 days, sliding — each authenticated request extends
-`expires_at` by 30 days. A TTL sweep (same pattern as the existing page
-sweep) reaps expired rows.
+`expires_at` by 30 days. The server's 60-second TTL sweep reaps expired
+session rows alongside other expired auth artifacts; session reads still
+require `expires_at > now()` so cleanup timing never affects authorization.
 
 ### 2.3 `oauth_clients`
 
@@ -141,6 +145,7 @@ CREATE TABLE IF NOT EXISTS auth_codes (
   code_challenge_method  text        NOT NULL DEFAULT 'S256',
   scope                  text,
   resource               text,
+  refresh_token_family_id uuid       NOT NULL DEFAULT gen_random_uuid(),
   created_at             timestamptz NOT NULL DEFAULT now(),
   expires_at             timestamptz NOT NULL,
   consumed_at            timestamptz
@@ -163,6 +168,7 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id    uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   client_id  text        NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+  family_id  uuid        NOT NULL DEFAULT gen_random_uuid(),
   token_hash text        NOT NULL UNIQUE,
   scope      text,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -171,15 +177,18 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS refresh_tokens_user_id_idx ON refresh_tokens (user_id);
+CREATE INDEX IF NOT EXISTS refresh_tokens_family_id_idx ON refresh_tokens (family_id);
 CREATE INDEX IF NOT EXISTS refresh_tokens_expires_at_idx ON refresh_tokens (expires_at);
 ```
 
 `token_hash` stores `SHA-256(raw_refresh_token)`. Like session tokens,
 the raw value is never stored server-side. On rotation the old row gets
-`revoked_at = now()` and a new row is inserted. If a revoked token is
-presented, all refresh tokens for that `(user_id, client_id)` pair are
-revoked (token family revocation — defense against stolen refresh
-tokens per OAuth 2.1 Section 6.1).
+`revoked_at = now()` and a successor with the same `family_id` is inserted.
+If a non-expired revoked token is replayed by its bound client, only active
+tokens derived from that authorization grant are revoked. Independent later
+grants for the same user and client have different family IDs and remain valid.
+Expired refresh-token rows are reclaimed by the server's periodic auth-artifact
+sweep; exchanges still reject expired rows before cleanup runs.
 
 ### 2.6 `magic_links`
 
@@ -187,16 +196,21 @@ Passwordless email login tokens. Short-lived (15 minutes).
 
 ```sql
 CREATE TABLE IF NOT EXISTS magic_links (
-  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  email      text        NOT NULL,
-  token_hash text        NOT NULL UNIQUE,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  expires_at timestamptz NOT NULL,
-  consumed_at timestamptz
+  id                uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  email             text        NOT NULL,
+  token_hash        text        NOT NULL UNIQUE,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  expires_at        timestamptz NOT NULL,
+  consumed_at       timestamptz,
+  authorize_context jsonb
 );
 
 CREATE INDEX IF NOT EXISTS magic_links_expires_at_idx ON magic_links (expires_at);
 ```
+
+Expired authorization codes and magic links are likewise reclaimed by the
+periodic auth-artifact sweep. Their validation paths enforce expiry first, so
+the sweep is retention work rather than an authorization control.
 
 ### 2.7 Changes to `pages`
 
@@ -240,13 +254,13 @@ GET /.well-known/oauth-authorization-server
   "grant_types_supported": ["authorization_code", "refresh_token"],
   "token_endpoint_auth_methods_supported": ["none"],
   "code_challenge_methods_supported": ["S256"],
-  "scopes_supported": ["page:create", "page:read", "page:write"],
-  "service_documentation": "https://github.com/anthropics/agent-ui-session#readme"
+  "scopes_supported": ["page:create", "page:read"],
+  "service_documentation": "https://github.com/blockful/pagent#readme"
 }
 ```
 
-This endpoint is served by the MCP SDK's `mcpAuthRouter` or manually
-if we need to customize. It MUST be public (no auth required).
+This endpoint is served by Pagent's Hono discovery routes. It is public (no
+auth required).
 
 ### 3.2 Protected Resource metadata (RFC 9728)
 
@@ -260,10 +274,10 @@ GET /.well-known/oauth-protected-resource
 {
   "resource": "https://api.pagent.link",
   "authorization_servers": ["https://api.pagent.link"],
-  "scopes_supported": ["page:create", "page:read", "page:write"],
+  "scopes_supported": ["page:create", "page:read"],
   "bearer_methods_supported": ["header"],
   "resource_name": "Pagent API",
-  "resource_documentation": "https://github.com/anthropics/agent-ui-session#readme"
+  "resource_documentation": "https://github.com/blockful/pagent#readme"
 }
 ```
 
@@ -323,34 +337,44 @@ GET /oauth/authorize?
   scope=page:create+page:read
 ```
 
-This endpoint serves a login page. The login page is a minimal HTML
-page (server-rendered, not the Vite SPA) with two options:
+For OAuth clients, this endpoint first serves a minimal consent page
+(server-rendered, not the Vite SPA). The page labels all dynamically
+registered client metadata as unverified and shows the self-asserted client
+name, client ID, exact return destination, and requested scopes. It contains
+only explicit **Allow** and **Cancel** POST actions; identity-provider links
+are not present yet.
 
-1. **"Continue with Google"** — redirects to Google's OAuth consent
+The pending request is bound to an HttpOnly, SameSite browser transaction.
+`POST /oauth/authorize/consent` verifies both the signed request and that
+transaction. Cancel clears it and renders a local confirmation without
+redirecting to the client. Allow re-signs the request with consent recorded
+and renders the login page with two options:
+
+1. **"Allow and continue with Google"** — redirects to Google's OAuth consent
    screen with Pagent as the relying party.
-2. **"Sign in with email"** — shows an email input. On submit, sends a
+2. **"Allow and send magic link"** — shows an email input. On submit, sends a
    Magic Link email and shows a "check your email" message.
 
-After successful authentication (Google callback or Magic Link click),
-the server:
+After successful authentication (Google callback or Magic Link click), the
+server follows one of two mutually exclusive completion paths:
 
-1. Upserts the user in the `users` table (create on first login, update
-   `name`/`avatar_url` on subsequent logins).
-2. Generates an authorization code.
-3. Redirects to `redirect_uri?code=...&state=...`.
-
-If the request came from a browser session (not an MCP client), the
-server also sets a session cookie.
+1. Both paths upsert the user in the `users` table (create on first login,
+   update `name`/`avatar_url` on subsequent logins).
+2. An OAuth-client request generates an authorization code and redirects to
+   `redirect_uri?code=...&state=...`; it does not create a browser session.
+3. A renderer browser-session request creates the session cookie and redirects
+   to the renderer `PUBLIC_URL`; it does not generate an authorization code.
 
 **Error cases:**
 
-| Status | Error                  | When                                              |
-| ------ | ---------------------- | ------------------------------------------------- |
-| 400    | `invalid_request`      | Missing required parameters                        |
-| 400    | `invalid_client`       | `client_id` not found                              |
-| 400    | `invalid_redirect_uri` | `redirect_uri` not in client's registered URIs     |
+| Status | Response        | When                                                         |
+| ------ | --------------- | ------------------------------------------------------------ |
+| 400    | HTML error page | `response_type` is missing or is not `code`                   |
+| 400    | HTML error page | Another required parameter is missing or PKCE is not `S256`  |
+| 400    | HTML error page | `client_id` is unknown                                       |
+| 400    | HTML error page | `redirect_uri` is unsafe or not an exact registered URI      |
 
-Errors on the authorize endpoint are shown on the login page itself
+Errors on the authorize endpoint are shown on a local HTML error page
 (not redirected), per OAuth 2.1 Section 4.1.2.1 — redirect-based
 errors only go to the redirect URI if we trust it.
 
@@ -395,13 +419,13 @@ token is revoked.
 
 **Error cases:**
 
-| Status | Error                  | When                                              |
-| ------ | ---------------------- | ------------------------------------------------- |
-| 400    | `invalid_grant`        | Code expired, already consumed, or verifier fails  |
-| 400    | `invalid_client`       | `client_id` not found or mismatch                  |
-| 400    | `invalid_request`      | Missing required parameters                        |
-| 400    | `unsupported_grant_type` | Not `authorization_code` or `refresh_token`      |
-| 429    | `rate_limited`         | Too many token requests                            |
+| Status | Error                    | When                                                                    |
+| ------ | ------------------------ | ----------------------------------------------------------------------- |
+| 400    | `invalid_grant`          | Code/refresh token invalid or expired, PKCE fails, or client binding mismatches |
+| 401    | `invalid_client`         | `client_id` is not registered                                           |
+| 400    | `invalid_request`        | Missing required parameters                                             |
+| 400    | `unsupported_grant_type` | Not `authorization_code` or `refresh_token`                            |
+| 429    | `rate_limited`           | Too many token requests                                                 |
 
 ### 3.6 Token revocation (RFC 7009)
 
@@ -414,8 +438,11 @@ token_type_hint=refresh_token&
 client_id=...
 ```
 
-**Response** `200` (always — per RFC 7009, even if the token was already
-revoked or invalid).
+**Response** `200` for handled revocation attempts — per RFC 7009, even if the token was already
+revoked or invalid. The endpoint-wide abuse limit can return `429`. When the supplied opaque refresh token is recognized and
+its optional `client_id` binding matches, revocation invalidates every refresh
+token in that token's per-grant family. Access-token revocation remains a
+no-op in V1 because access tokens are short-lived JWTs without a denylist.
 
 ### 3.7 Google OAuth callback (internal)
 
@@ -424,9 +451,11 @@ GET /oauth/callback/google?code=...&state=...
 ```
 
 Internal endpoint. Not part of the public OAuth contract. Receives the
-authorization code from Google, exchanges it for user info, upserts the
-user, then redirects back into the Pagent authorize flow (issues a
-Pagent auth code and redirects to the MCP client's `redirect_uri`).
+authorization code from Google, verifies the ID token and
+`email_verified=true`, then identifies the user by Google's immutable `sub`.
+Email-only accounts are not auto-linked; they must use Magic Link until an
+authenticated account-linking flow exists. A successful callback resumes the
+Pagent authorize flow and redirects to the MCP client's `redirect_uri`.
 
 ### 3.8 Magic Link verification (internal)
 
@@ -434,14 +463,19 @@ Pagent auth code and redirects to the MCP client's `redirect_uri`).
 GET /oauth/magic?token=...
 ```
 
-Internal endpoint. When the user clicks the link in their email, this
-endpoint validates the token, upserts the user, and redirects back into
-the Pagent authorize flow.
+Internal endpoint. It first inspects the active token without consuming it,
+then verifies the same HttpOnly browser transaction that initiated sign-in.
+OAuth-client links additionally require explicit consent and a still-valid
+registered redirect. Only after those checks pass does the endpoint atomically
+consume the token, upsert the user, and continue the Pagent authorize flow.
+Email scanners and other unbound browsers receive an HTML 400 response without
+burning an otherwise active one-time link.
 
 ### 3.9 Browser session endpoints
 
-These are for the web renderer and future dashboard, not for MCP
-clients.
+These implemented API endpoints are for a future web-renderer/dashboard
+integration, not for MCP clients. The current renderer does not initiate
+browser sign-in or call these endpoints.
 
 ```
 POST /auth/logout
@@ -455,8 +489,9 @@ GET /auth/me
 Cookie: pagent_session=...
 ```
 
-Returns the current user's profile. Used by the renderer to show a
-logged-in state.
+Returns the current user's profile. A future renderer/dashboard integration
+can use it to show a logged-in state. Cross-origin browser fetches will also
+need credentialed CORS enabled for the exact renderer origin.
 
 **Response** `200`:
 
@@ -517,11 +552,16 @@ MCP Client                  Pagent API (AS+RS)         Google / Email
     │                             │                         │
     │  Open browser:              │                         │
     │  GET /oauth/authorize?      │                         │
+    │    response_type=code&      │                         │
     │    client_id=...&           │                         │
     │    code_challenge=...&      │                         │
     │    redirect_uri=            │                         │
     │    http://localhost:PORT/   │                         │
     │    callback&state=...       │                         │
+    │─ ─ ─ ─ ─(browser)─ ─ ─ ─ ▶│                         │
+    │                             │  Consent page shown     │
+    │  POST /oauth/authorize/     │                         │
+    │    consent (Allow)          │                         │
     │─ ─ ─ ─ ─(browser)─ ─ ─ ─ ▶│                         │
     │                             │  Login page shown       │
     │                             │  User picks Google      │
@@ -564,7 +604,14 @@ claims (`sub`, `email`, `name`, `picture`) to upsert the user.
 User Browser           Pagent API                  Google OAuth
     │                       │                           │
     │  GET /oauth/authorize │                           │
-    │  (login page shown)   │                           │
+    │  ?response_type=code… │                           │
+    │──────────────────────▶│                           │
+    │  Consent page         │                           │
+    │◀──────────────────────│                           │
+    │  POST /oauth/authorize/consent (Allow)            │
+    │──────────────────────▶│                           │
+    │  Login page           │                           │
+    │◀──────────────────────│                           │
     │  Clicks "Google"      │                           │
     │──────────────────────▶│                           │
     │                       │  302 to                   │
@@ -612,8 +659,13 @@ encodes both:
 - The original authorize request parameters (client_id, redirect_uri,
   code_challenge, scope) so the callback can resume the flow.
 
-This is a signed, encrypted JWT (JWE) to prevent tampering. It is
-short-lived (15 min) and single-use.
+This is a signed HS256 JWT, not an encrypted JWE. Its fields are values the
+client already supplied, so confidentiality is not required; the signature,
+issuer, audience, and 15-minute expiry prevent undetected tampering and
+cross-purpose use. The state token itself is not stored or consumed as a
+single-use record. For OAuth-client flows, explicit consent produces a fresh
+signed state and subsequent use is additionally bound to the initiating
+browser's HttpOnly transaction cookie.
 
 ### 4.3 Magic Link flow
 
@@ -621,7 +673,14 @@ short-lived (15 min) and single-use.
 User Browser           Pagent API                  Email Service
     │                       │                           │
     │  GET /oauth/authorize │                           │
-    │  (login page shown)   │                           │
+    │  ?response_type=code… │                           │
+    │──────────────────────▶│                           │
+    │  Consent page         │                           │
+    │◀──────────────────────│                           │
+    │  POST /oauth/authorize/consent (Allow)            │
+    │──────────────────────▶│                           │
+    │  Login page           │                           │
+    │◀──────────────────────│                           │
     │  Enters email, clicks │                           │
     │  "Send link"          │                           │
     │──────────────────────▶│                           │
@@ -657,29 +716,26 @@ User Browser           Pagent API                  Email Service
     │◀──────────────────────│                           │
 ```
 
-The Magic Link email includes the full authorize context (client_id,
-redirect_uri, code_challenge, scope, state) encoded in the magic link
-URL or stored server-side keyed by the magic link token. Server-side
-storage is preferred — it keeps the email link shorter and avoids
-leaking OAuth parameters in email logs.
+The Magic Link row stores the full authorize context (`client_id`,
+`redirect_uri`, `code_challenge`, scope, state, consent, and browser-transaction
+hash) server-side keyed by the magic link token hash. The email URL contains
+only the raw one-time token, keeping OAuth parameters out of email logs.
 
 ### 4.4 Browser session flow (renderer / dashboard)
 
-For browser-based access (the renderer, a future dashboard), users
-authenticate via the same `/oauth/authorize` login page. After
-authentication, in addition to issuing an auth code for the OAuth flow,
-the server sets an httpOnly session cookie:
+For browser-based access (the renderer, a future dashboard), users authenticate
+via `/oauth/authorize?browser_session=1`. After authentication, the server sets
+an HttpOnly session cookie; this direct browser path does not issue an OAuth
+authorization code:
 
 ```
 Set-Cookie: pagent_session=<random-128-bit-hex>;
   HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000
 ```
 
-The cookie is set only when the authorize request comes from a
-browser context (detected by the presence of a session-initiating query
-parameter `browser_session=1` or by the absence of a registered
-`client_id` — the renderer doesn't register as an OAuth client, it just
-needs a session).
+The cookie is set only for the explicit session-initiating query parameter
+`browser_session=1`; merely omitting `client_id` from an OAuth request is an
+HTML 400 error.
 
 Direct browser login (not part of an MCP OAuth flow) uses a simplified
 path:
@@ -756,19 +812,20 @@ table.
 **Lifetime:** 90 days. Rotated on every use — the exchange returns a
 new refresh token and revokes the old one.
 
-**Token family revocation:** If a revoked refresh token is presented,
-all refresh tokens for that `(user_id, client_id)` pair are revoked
-immediately. This detects token theft: the legitimate client used the
-refresh token (rotating it), and now the attacker tries to use the old
-one. Both parties lose their tokens, forcing re-authentication. This
-follows OAuth 2.1 Section 6.1 guidance.
+**Token family revocation:** If a non-expired revoked refresh token is
+presented by its bound client, every active refresh token with the same
+per-grant `family_id` is revoked immediately. This detects token theft without
+letting an obsolete token invalidate a later, independent authorization grant.
+Expired or cross-client presentations are rejected before revocation.
 
 ### 5.3 Signing key management
 
 The Ed25519 key pair is stored as environment variables:
 
-- `JWT_SIGNING_KEY` — the 64-byte Ed25519 private key, base64url-encoded.
-- `JWT_PUBLIC_KEY` — the 32-byte Ed25519 public key, base64url-encoded.
+- `JWT_SIGNING_KEY` — a PKCS#8 DER-encoded Ed25519 private key, then
+  base64url-encoded.
+- `JWT_PUBLIC_KEY` — an SPKI DER-encoded Ed25519 public key, then
+  base64url-encoded.
 
 Key generation (run once, store the output):
 
@@ -799,20 +856,17 @@ without sharing the private key:
 
 ### 5.4 Token validation
 
-The `OAuthTokenVerifier` implementation (for the MCP SDK's
-`requireBearerAuth` middleware) validates JWTs locally:
+`verifyAccessToken()` validates JWTs locally and returns the checked claims:
 
 ```ts
-class PagentTokenVerifier implements OAuthTokenVerifier {
-  async verifyAccessToken(token: string): Promise<AuthInfo> {
-    // 1. Decode and verify JWT signature (Ed25519)
-    // 2. Check exp > now (reject expired)
-    // 3. Check iss === expected issuer
-    // 4. Check aud === expected audience
-    // 5. Return AuthInfo { token, clientId, scopes, expiresAt, extra: { sub, email, handle } }
-  }
-}
+const claims = await verifyAccessToken(token);
 ```
+
+Signature (Ed25519), expiry, issuer, audience, client, scope, subject, email,
+and handle are checked before claims are returned. REST middleware maps them
+to `c.var.user` and `c.var.authScopes`. The raw Node MCP handler maps them to
+the SDK's `AuthInfo` shape and assigns `req.auth` before invoking
+`StreamableHTTPServerTransport`.
 
 No DB roundtrip on every request. The JWT is self-contained. The only
 reason to hit the DB would be for revocation checks (checking `jti`
@@ -821,37 +875,37 @@ lifetime is the revocation mechanism for V1.
 
 ### 5.5 Scopes
 
-| Scope          | Grants                                              |
-| -------------- | --------------------------------------------------- |
-| `page:create`  | `POST /new`, `show_ui`, `show_html` MCP tools       |
-| `page:read`    | `GET /:id`, `GET /:id/result`, `check_result` tool  |
-| `page:write`   | `POST /:id/result` (submit from browser)             |
+| Scope         | Grants                                             |
+| ------------- | -------------------------------------------------- |
+| `page:create` | `POST /new`, `show_ui`, `show_html` MCP tools      |
+| `page:read`   | `GET /:id/result`, `check_result` MCP tool         |
 
-Default scope (if none requested): `page:create page:read`. The
-`page:write` scope is implicitly granted to session-cookie-authenticated
-browser users (the renderer needs it to submit forms).
+Default scope (if none requested): `page:create page:read`. `GET /:id`
+and the renderer's `POST /:id/result` submission route are public and do
+not require an OAuth scope. Session-cookie-authenticated requests are not
+subject to Bearer-token scope checks.
 
 ## 6. Middleware design
 
 ### 6.1 Architecture
 
 Auth integrates into the existing Hono app and the raw Node HTTP MCP
-handler via two middleware layers:
+handler via two native layers:
 
 ```
                             ┌─────────────────────────────────────┐
                             │         server.ts (Node HTTP)       │
                             │                                     │
   ┌─────────────────────┐   │  path = /mcp ?                     │
-  │  MCP SDK auth       │◀──│  YES → mcpHandler (raw Node)       │
-  │  requireBearerAuth  │   │        ↓                            │
-  │  (Express compat)   │   │  bearerAuthMiddleware               │
+  │  Pagent MCP auth    │◀──│  YES → mcpHandler (raw Node)       │
+  │  verifyAccessToken  │   │        ↓                            │
+  │  + req.auth         │   │  StreamableHTTPServerTransport      │
   └─────────────────────┘   │        ↓                            │
                             │  StreamableHTTPServerTransport      │
                             │                                     │
   ┌─────────────────────┐   │  path != /mcp ?                    │
   │  Hono middleware     │◀──│  YES → Hono app                    │
-  │  authMiddleware()    │   │        ↓                            │
+  │  resolveAuth()       │   │        ↓                            │
   │  (cookie + Bearer)   │   │  resolve user from cookie or JWT   │
   └─────────────────────┘   │        ↓                            │
                             │  route handlers                     │
@@ -860,7 +914,7 @@ handler via two middleware layers:
 
 ### 6.2 Hono auth middleware
 
-New file: `apps/api/auth/middleware.ts`.
+Implemented in `apps/api/auth/middleware.ts`.
 
 ```ts
 import type { Context, Next } from 'hono';
@@ -868,12 +922,13 @@ import type { Context, Next } from 'hono';
 type AuthUser = {
   id: string;        // user UUID
   email: string;
-  handle: string;
+  handle: string | null;
   authMethod: 'cookie' | 'bearer';
 };
 
 type AuthVariables = {
   user: AuthUser | null;
+  authScopes: readonly string[] | null;
 };
 
 /**
@@ -893,6 +948,7 @@ export function resolveAuth(): MiddlewareHandler {
       const user = await lookupSession(sessionToken);
       if (user) {
         c.set('user', { ...user, authMethod: 'cookie' });
+        c.set('authScopes', null);
         return next();
       }
     }
@@ -900,15 +956,25 @@ export function resolveAuth(): MiddlewareHandler {
     // Try Bearer token (API / MCP clients)
     const authHeader = c.req.header('authorization');
     if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.slice(7);
-      const user = await verifyJwt(token);
-      if (user) {
-        c.set('user', { ...user, authMethod: 'bearer' });
+      try {
+        const token = authHeader.slice(7).trim();
+        const claims = await verifyAccessToken(token);
+        c.set('user', {
+          id: claims.sub,
+          email: claims.email,
+          handle: claims.handle || null,
+          authMethod: 'bearer',
+        });
+        c.set('authScopes', claims.scope.split(/\s+/).filter(Boolean));
         return next();
+      } catch {
+        // Invalid Bearer credentials resolve as anonymous here; protected
+        // routes apply requireAuth() and return the standard 401 response.
       }
     }
 
     c.set('user', null);
+    c.set('authScopes', null);
     return next();
   };
 }
@@ -944,7 +1010,7 @@ if (env.REQUIRE_AUTH) {
   if (!authHeader?.startsWith('Bearer ')) {
     // Return 401 with WWW-Authenticate pointing to resource metadata
     res.setHeader('WWW-Authenticate',
-      `Bearer resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource"`
+      `Bearer resource_metadata="${API_PUBLIC_URL}/.well-known/oauth-protected-resource"`
     );
     respondJson(res, 401, {
       error: 'unauthorized',
@@ -953,11 +1019,16 @@ if (env.REQUIRE_AUTH) {
     return;
   }
 
-  const token = authHeader.slice(7);
+  const token = authHeader.slice(7).trim();
   try {
-    const authInfo = await tokenVerifier.verifyAccessToken(token);
-    // Attach auth info for the transport
-    (req as any).auth = authInfo;
+    const claims = await verifyAccessToken(token);
+    req.auth = {
+      token,
+      clientId: claims.client_id,
+      scopes: claims.scope.split(/\s+/).filter(Boolean),
+      expiresAt: claims.exp,
+      extra: { sub: claims.sub, email: claims.email, handle: claims.handle },
+    };
   } catch (err) {
     respondJson(res, 401, {
       error: 'invalid_token',
@@ -983,16 +1054,19 @@ In `apps/api/app.ts`, the middleware chain becomes:
 // Always resolve auth (sets c.var.user or null)
 app.use('*', resolveAuth());
 
-// Conditionally require auth on mutation endpoints
-if (env.REQUIRE_AUTH) {
-  app.use('/new', requireAuth());
-}
+// POST /new and GET /:id/result conditionally use requireAuth().
+// Their requireScope() middleware always checks valid Bearer credentials.
+// GET /:id and POST /:id/result remain public.
 ```
 
-Read endpoints (`GET /:id`, `GET /:id/result`) remain public — pages
-are accessed by their unguessable 128-bit ID. Ownership checks (e.g.,
-"only the owner can delete") are deferred to V2 when we add
-page-management endpoints.
+`GET /:id` remains public because the renderer addresses pages by their
+unguessable 128-bit ID. `GET /:id/result` requires authentication when
+`REQUIRE_AUTH=true`; when the flag is false, anonymous polling remains
+available for rollout compatibility. Scope checks are independent of that
+anonymous gate: any valid Bearer used with `POST /new` or
+`GET /:id/result` must include `page:create` or `page:read`, respectively,
+even during grace mode. `POST /:id/result` remains public for renderer
+submissions.
 
 ### 6.5 `owner_id` injection
 
@@ -1035,9 +1109,11 @@ validated at the token endpoint.
 | Auth code      | URL parameter (transient) | Single-use; 10-minute expiry         |
 | Magic link     | Email (transient)         | Single-use; 15-minute expiry         |
 
-Server-side, all secrets are stored as SHA-256 hashes — session tokens,
-refresh tokens, magic link tokens, authorization codes. The raw values
-exist only in transit (cookie, URL, email).
+Server-side, session tokens, refresh tokens, and magic link tokens are stored
+as SHA-256 hashes; their raw values exist only in transit. Authorization codes
+are high-entropy opaque values stored as the `auth_codes` primary key. They are
+still short-lived, PKCE-bound, and atomically consumed on first successful
+exchange, but they are not hashed in the current schema.
 
 ### 7.3 Rate limiting on auth endpoints
 
@@ -1048,7 +1124,7 @@ attacks. Separate rate limits from the existing page-creation limiter:
 | --------------------- | ------------ | ------- | ------------------ |
 | `POST /oauth/register`| 10 per IP    | 1 hour  | IP                 |
 | `POST /oauth/token`   | 20 per IP    | 1 min   | IP                 |
-| `POST /oauth/magic/send` | 5 per email | 15 min | Email              |
+| `POST /oauth/magic/send` | 5 per email, 10 per IP, 50 per API process | 15 min | Email + IP + provider bucket |
 | `GET /oauth/authorize`| 30 per IP    | 1 min   | IP                 |
 
 These are in-process (same `RateLimiter` class from
@@ -1056,11 +1132,20 @@ These are in-process (same `RateLimiter` class from
 instance deployment. If we scale horizontally, these move to
 Redis/Upstash.
 
+Production rate-limit identity uses Railway's `X-Real-IP` header. The runtime
+accepts it only when `TRUSTED_PROXY_MODE=railway`; missing, repeated, or
+non-IP values use the shared anonymous bucket, and `X-Forwarded-For` is
+ignored. Staging must confirm traffic cannot bypass Railway ingress before
+enabling that mode.
+
 ### 7.4 CSRF protection
 
 - **OAuth flows:** CSRF is mitigated by the `state` parameter (MCP
-  clients generate it, Pagent echoes it back) and PKCE (the code
-  verifier is never exposed to the browser).
+  clients generate it, Pagent echoes it back), PKCE (the code verifier is
+  never exposed to the browser), and a Pagent-issued HttpOnly transaction
+  cookie whose hash is carried in signed state. Normal client callbacks and
+  Magic Link completion require both explicit consent and that same browser
+  transaction before user mutation or authorization-code issuance.
 - **Session cookies:** `SameSite=Lax` prevents CSRF on state-changing
   requests (POST). The renderer and API are on different origins
   (`pagent.link` vs `api.pagent.link`), but `SameSite=Lax` allows
@@ -1072,32 +1157,40 @@ Redis/Upstash.
 
 The `redirect_uri` in the authorize request is validated against the
 client's registered `redirect_uris` array. Exact string match — no
-wildcards, no pattern matching. This prevents an attacker from using
-Pagent's authorize endpoint to redirect a user to a malicious site.
+wildcards, no pattern matching. Remote web redirects must use HTTPS; HTTP is
+limited to explicit loopback hosts, and browser-executable schemes are
+rejected. The policy is enforced at registration and again at authorize and
+callback time so legacy rows cannot bypass it.
 
 ### 7.6 Email enumeration
 
-The Magic Link flow does not reveal whether an email is registered.
-Both "email found" and "email not found" show the same "check your
-email" message. On the backend, if the email is not registered, no
-email is sent (but the response is identical to avoid timing attacks —
-add a small random delay to normalize response times).
+The Magic Link flow does not query or reveal prior registration. Every
+syntactically valid email address follows the same link-creation, delivery,
+and accepted-response path. A user row is upserted only after the browser-bound
+link is successfully redeemed.
 
 ### 7.7 Google OAuth state parameter
 
-The `state` parameter sent to Google encodes the full authorize context
-as a signed JWT (HMAC-SHA256 with a server-side secret). This prevents:
-- Tampering with the redirect URI or code challenge during the Google
-  round-trip.
-- CSRF attacks on the Google callback (the state is unpredictable).
+The `state` parameter sent to Google encodes the authorize context as a signed
+JWT (HMAC-SHA256 with a server-side secret). The signature prevents tampering
+with the redirect URI, PKCE challenge, consent decision, or browser-transaction
+hash. The signed state is not treated as confidential or sufficient by itself:
+the callback must also match the hash of the HttpOnly browser transaction
+cookie before any user mutation or authorization-code issuance.
 
 ## 8. Migration plan
 
 ### 8.1 Phase 1: Schema + endpoints (auth optional)
 
-1. Add all auth tables to `db.ts`'s `init()` via `CREATE TABLE IF NOT
-   EXISTS`. Add `owner_id` column to `pages` via `ALTER TABLE ... ADD
-   COLUMN IF NOT EXISTS`.
+1. Add all auth tables to `db/connection.ts`'s `init()` via `CREATE TABLE IF
+   NOT EXISTS`. Add `owner_id` column to `pages` via `ALTER TABLE ... ADD
+   COLUMN IF NOT EXISTS`. Family-ID defaults are installed before backfill and
+   `NOT NULL` enforcement, and the backfill/constraint step is serialized by
+   a transaction advisory lock so old replicas can keep inserting during a
+   rolling deploy. Legacy authorization codes without a recoverable family
+   are marked consumed; legacy refresh rows are assigned an ID and revoked.
+   Both cases force one-time reauthentication rather than weakening replay
+   containment.
 2. Deploy all OAuth and auth endpoints.
 3. `REQUIRE_AUTH` defaults to `false`. Everything works exactly as
    before — no user needs to log in, pages are created without owners.
@@ -1106,20 +1199,28 @@ as a signed JWT (HMAC-SHA256 with a server-side secret). This prevents:
 
 ### 8.2 Phase 2: Grace period (auth encouraged)
 
-1. The renderer shows a "Sign in" option but doesn't require it.
+1. Add the renderer's "Sign in" option, browser-session initiation, and
+   credentialed `/auth/me` integration. These UI/CORS pieces are not shipped
+   yet; the API endpoints and callback/session machinery are already present.
 2. MCP clients that support OAuth (e.g. Claude Code with the MCP SDK)
    will go through the auth flow on first connect. MCP clients that
    don't support OAuth continue to work (the `/mcp` endpoint returns
    MCP responses, not 401).
-3. Monitor: what percentage of pages have `owner_id IS NOT NULL`?
+3. Anonymous `POST /new` and `GET /:id/result` requests continue to work.
+   A client that supplies a valid Bearer token must still have the matching
+   route scope; under-scoped Bearer requests return 403 rather than falling
+   back to anonymous access.
+4. Monitor: what percentage of pages have `owner_id IS NOT NULL`?
 
 ### 8.3 Phase 3: Auth required
 
 1. Set `REQUIRE_AUTH=true` in Railway.
-2. `POST /new` and `POST /mcp` (for tool calls that create pages)
-   return 401 without a valid token.
-3. Unauthenticated read access (`GET /:id`, `GET /:id/result`) still
-   works — pages are accessed by unguessable ID.
+2. `POST /new`, `GET /:id/result`, and `POST /mcp` return 401 without a
+   valid authenticated identity. Bearer calls also require their route or
+   tool scope.
+3. Unauthenticated `GET /:id` access still works — pages are accessed by
+   unguessable ID. Browser submissions to `POST /:id/result` also remain
+   public.
 4. The stdio MCP server (`apps/mcp`) now needs to send Bearer tokens
    with its HTTP requests to `SERVICE_URL`. The user provides their
    token via the `PAGENT_TOKEN` env var (or the SDK handles the OAuth
@@ -1127,41 +1228,48 @@ as a signed JWT (HMAC-SHA256 with a server-side secret). This prevents:
 
 ### 8.4 Backward compatibility guarantees
 
-| Behavior                              | During grace period | After REQUIRE_AUTH=true |
-| ------------------------------------- | ------------------- | ----------------------- |
-| `POST /new` without auth              | Works (owner=NULL)  | 401                     |
-| `GET /:id` without auth               | Works               | Works                   |
-| `GET /:id/result` without auth        | Works               | Works                   |
-| `POST /:id/result` without auth       | Works               | Works (cookie auth)     |
-| `POST /mcp` without Bearer            | Works               | 401 with discovery      |
-| Existing pages (owner_id=NULL)        | Readable            | Readable                |
+| Behavior                                      | During grace period | After REQUIRE_AUTH=true |
+| --------------------------------------------- | ------------------- | ----------------------- |
+| `POST /new` without auth                      | Works (owner=NULL)  | 401                     |
+| `POST /new` with under-scoped valid Bearer    | 403                 | 403                     |
+| `GET /:id` without auth                       | Works               | Works                   |
+| `GET /:id/result` without auth                | Works               | 401                     |
+| `GET /:id/result` with under-scoped Bearer    | 403                 | 403                     |
+| `POST /:id/result` without auth               | Works               | Works                   |
+| `POST /mcp` without Bearer                    | Works               | 401 with discovery      |
+| Existing pages (`owner_id = NULL`) via page URL | Readable          | Readable                |
 
 ## 9. Environment variables
 
 New environment variables for the API (`apps/api`):
 
-| Variable                   | Required | Default      | Description                                     |
-| -------------------------- | -------- | ------------ | ----------------------------------------------- |
-| `REQUIRE_AUTH`             | No       | `false`      | If `true`, mutation endpoints require auth       |
-| `JWT_SIGNING_KEY`          | Yes*     | -            | Ed25519 private key, base64url-encoded (DER)     |
-| `JWT_PUBLIC_KEY`           | Yes*     | -            | Ed25519 public key, base64url-encoded (DER)      |
-| `GOOGLE_CLIENT_ID`        | Yes*     | -            | Google OAuth 2.0 client ID                       |
-| `GOOGLE_CLIENT_SECRET`    | Yes*     | -            | Google OAuth 2.0 client secret                   |
-| `GOOGLE_REDIRECT_URI`     | No       | `{PUBLIC_URL}/oauth/callback/google` | Google OAuth callback URI     |
-| `MAGIC_LINK_SECRET`       | Yes*     | -            | HMAC key for signing magic link tokens           |
-| `AUTH_STATE_SECRET`        | Yes*     | -            | HMAC key for signing OAuth state JWTs            |
-| `SESSION_MAX_AGE_DAYS`    | No       | `30`         | Session cookie lifetime in days                  |
-| `REFRESH_TOKEN_MAX_DAYS`  | No       | `90`         | Refresh token lifetime in days                   |
-| `ACCESS_TOKEN_TTL_SECONDS`| No       | `3600`       | JWT access token lifetime in seconds             |
-| `SMTP_HOST`               | Yes*     | -            | SMTP server for magic link emails                |
-| `SMTP_PORT`               | No       | `587`        | SMTP port                                        |
-| `SMTP_USER`               | Yes*     | -            | SMTP username                                    |
-| `SMTP_PASS`               | Yes*     | -            | SMTP password                                    |
-| `SMTP_FROM`               | No       | `noreply@pagent.link` | From address for magic link emails      |
+| Variable                    | Required   | Default                              | Description                                                        |
+| --------------------------- | ---------- | ------------------------------------ | ------------------------------------------------------------------ |
+| `PUBLIC_URL`                | Production | -                                    | HTTPS renderer origin used in generated page URLs                  |
+| `API_PUBLIC_URL`            | Production | -                                    | HTTPS API origin used for OAuth issuer, callbacks, and magic links |
+| `ALLOWED_ORIGINS`           | Production | -                                    | Comma-separated CORS allow-list                                    |
+| `TRUSTED_PROXY_MODE`        | Production | -                                    | Must be `railway`; trusts Railway's `X-Real-IP` and ignores `X-Forwarded-For` |
+| `REQUIRE_AUTH`              | No         | `false`                              | If `true`, page creation, result reads, and MCP require auth       |
+| `JWT_SIGNING_KEY`           | Yes*       | -                                    | Ed25519 private key, base64url-encoded (DER)                       |
+| `JWT_PUBLIC_KEY`            | Yes*       | -                                    | Ed25519 public key, base64url-encoded (DER)                        |
+| `GOOGLE_CLIENT_ID`          | Yes*       | -                                    | Google OAuth 2.0 client ID                                         |
+| `GOOGLE_CLIENT_SECRET`      | Yes*       | -                                    | Google OAuth 2.0 client secret                                     |
+| `GOOGLE_REDIRECT_URI`       | No         | `{API_PUBLIC_URL}/oauth/callback/google` | Google OAuth callback URI                                      |
+| `AUTH_STATE_SECRET`         | Yes*       | -                                    | OAuth state HMAC secret; at least 32 UTF-8 bytes                   |
+| `SESSION_MAX_AGE_DAYS`      | No         | `30`                                 | Session cookie lifetime in days                                    |
+| `REFRESH_TOKEN_MAX_DAYS`    | No         | `90`                                 | Refresh token lifetime in days                                     |
+| `ACCESS_TOKEN_TTL_SECONDS`  | No         | `3600`                               | JWT access token lifetime in seconds                               |
+| `SMTP_HOST`                 | Yes*       | -                                    | SMTP server for magic link emails                                  |
+| `SMTP_PORT`                 | No         | `587`                                | SMTP port                                                          |
+| `SMTP_USER`                 | Yes*       | -                                    | SMTP username                                                      |
+| `SMTP_PASS`                 | Yes*       | -                                    | SMTP password                                                      |
+| `SMTP_FROM`                 | No         | `noreply@pagent.link`                | From address for magic link emails                                 |
 
-*Required when `REQUIRE_AUTH=true` or when auth endpoints are
-used. The API boots without them during the grace period (auth
-endpoints return 503 "auth not configured").
+*Required when `REQUIRE_AUTH=true`. Production additionally requires
+`PUBLIC_URL`, `API_PUBLIC_URL`, `ALLOWED_ORIGINS`, and
+`TRUSTED_PROXY_MODE=railway`; both public URLs must be HTTPS origins. Magic
+links are random opaque tokens stored as hashes and do not use a separate
+`MAGIC_LINK_SECRET`.
 
 New environment variable for the stdio MCP (`apps/mcp`):
 
@@ -1174,14 +1282,19 @@ New environment variable for the stdio MCP (`apps/mcp`):
 The existing `envSchema` in `schemas.ts` is extended:
 
 ```ts
-// Auth-related env vars — optional unless REQUIRE_AUTH is true
-REQUIRE_AUTH: z.coerce.boolean().optional().default(false),
+// Explicit parsing is required because Boolean("false") is true.
+REQUIRE_AUTH: z
+  .union([z.boolean(), z.string()])
+  .optional()
+  .transform((value) =>
+    typeof value === 'boolean' ? value : value === 'true' || value === '1',
+  ),
+API_PUBLIC_URL: z.string().url().optional(),
 JWT_SIGNING_KEY: z.string().optional(),
 JWT_PUBLIC_KEY: z.string().optional(),
 GOOGLE_CLIENT_ID: z.string().optional(),
 GOOGLE_CLIENT_SECRET: z.string().optional(),
 GOOGLE_REDIRECT_URI: z.string().url().optional(),
-MAGIC_LINK_SECRET: z.string().optional(),
 AUTH_STATE_SECRET: z.string().optional(),
 SESSION_MAX_AGE_DAYS: z.coerce.number().int().positive().optional().default(30),
 REFRESH_TOKEN_MAX_DAYS: z.coerce.number().int().positive().optional().default(90),
@@ -1203,7 +1316,7 @@ New npm packages for `@pagent/api`:
 | Package         | Version | Purpose                                           |
 | --------------- | ------- | ------------------------------------------------- |
 | `jose`          | `^6.x`  | JWT signing, verification, JWK/JWKS, Ed25519      |
-| `nodemailer`    | `^6.x`  | Sending magic link emails via SMTP                 |
+| `nodemailer`    | `^10.x` | Sending magic link emails via SMTP                 |
 
 **Why `jose`?** The `jose` library is the standard choice for JWT in
 Node.js. It supports Ed25519 natively, has zero dependencies, handles
@@ -1218,70 +1331,62 @@ from Node.js. Supports SMTP, has TypeScript types, and is well-
 maintained.
 
 No new packages for `@pagent/web` (the renderer). The login page is
-server-rendered by the API; the renderer only reads the session cookie.
+server-rendered by the API. A future renderer integration will call
+`/auth/me` with credentials so the browser attaches the `HttpOnly` session
+cookie; renderer JavaScript must not read the cookie directly.
 
 No new packages for `@pagent/mcp` (the stdio server). It sends Bearer
 tokens read from `PAGENT_TOKEN` in its existing `fetch` calls.
 
 ### MCP SDK usage
 
-The auth implementation uses these existing SDK exports:
+The auth implementation uses these SDK exports:
 
-| Export                        | From                                          | Usage                                           |
-| ----------------------------- | --------------------------------------------- | ------------------------------------------------ |
-| `OAuthServerProvider`         | `@modelcontextprotocol/sdk/server/auth/provider` | Interface — implement for Pagent's Postgres store |
-| `OAuthRegisteredClientsStore` | `@modelcontextprotocol/sdk/server/auth/clients`  | Interface — implement for `oauth_clients` table   |
-| `mcpAuthRouter`               | `@modelcontextprotocol/sdk/server/auth/router`   | Express router for AS metadata + endpoints        |
-| `requireBearerAuth`           | `@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth` | Express middleware for /mcp auth   |
-| `AuthInfo`                    | `@modelcontextprotocol/sdk/server/auth/types`    | Type for verified token info                      |
+| Export                          | From                                             | Usage                                     |
+| ------------------------------- | ------------------------------------------------ | ----------------------------------------- |
+| `StreamableHTTPServerTransport` | `@modelcontextprotocol/sdk/server/streamableHttp` | Runs the stateless `/mcp` HTTP transport  |
+| `AuthInfo`                      | `@modelcontextprotocol/sdk/server/auth/types`     | Types the verified `req.auth` information |
 
-**Important:** The SDK's `mcpAuthRouter` and `requireBearerAuth` are
-Express middleware. Since Pagent's MCP handler already bypasses Hono
-and writes directly to Node's `IncomingMessage`/`ServerResponse`,
-Express compatibility is straightforward — Express middleware works on
-raw Node HTTP objects. For the well-known metadata endpoints, we have
-two options:
-
-1. **Use the SDK's Express router** — mount it on a minimal Express app
-   that handles only `/.well-known/*` and `/oauth/*`, multiplexed in
-   `server.ts` alongside the Hono listener and MCP handler.
-2. **Implement the metadata endpoints in Hono directly** — serve the
-   JSON responses from Hono routes, which avoids adding Express as a
-   dependency.
-
-Option 2 is preferred. The metadata endpoints are static JSON — there
-is no benefit to pulling in Express just to serve two `GET` routes. The
-`mcpAuthRouter`'s real value is in the `/oauth/register`,
-`/oauth/authorize`, and `/oauth/token` handlers, which implement
-non-trivial OAuth logic. We implement those ourselves using Hono routes
-backed by the `OAuthServerProvider` interface, keeping the provider
-implementation (which is the complex part) reusable.
+Pagent does not mount the SDK's Express auth router or bearer middleware.
+Hono serves the OAuth and discovery routes, while the raw MCP handler verifies
+the Bearer token directly and supplies the SDK transport with `req.auth`.
 
 ## File layout
 
-New files under `apps/api/auth/`:
+The implemented auth module is split by responsibility:
 
 ```
 apps/api/auth/
-  provider.ts        # OAuthServerProvider implementation (Postgres-backed)
-  clients-store.ts   # OAuthRegisteredClientsStore implementation
+  provider.ts        # public provider-function facade
+  auth-code-provider.ts
+  token-provider.ts
+  user-provider.ts
+  clients-store.ts   # Postgres-backed dynamic clients
   jwt.ts             # JWT signing, verification, JWKS
   middleware.ts      # Hono resolveAuth() + requireAuth() middleware
   magic-link.ts      # Magic link generation, validation, email sending
   google.ts          # Google OAuth helper (redirect URL builder, token exchange)
   login-page.ts      # Server-rendered HTML login page
-  routes.ts          # Hono routes for /oauth/*, /auth/*, /.well-known/*
+  routes.ts          # composes route-discovery/consent/login/magic/session/token
   session.ts         # Session create/validate/delete helpers
 ```
 
-New files under `apps/api/auth/` tests:
+Tests follow the same split rather than a monolithic provider/routes suite:
 
 ```
 apps/api/auth/
   jwt.test.ts
-  middleware.test.ts
-  provider.test.ts
-  routes.test.ts
+  middleware.resolve.test.ts
+  middleware.require.test.ts
+  provider.exchange.test.ts
+  provider.refresh.test.ts
+  provider.revoke.test.ts
+  routes-browser-session.test.ts
+  routes-discovery.test.ts
+  routes-register.test.ts
+  routes-revoke.test.ts
+  routes-session.test.ts
+  routes-token.test.ts
   session.test.ts
 ```
 
@@ -1322,10 +1427,8 @@ None blocking implementation. Future considerations:
 - **SMTP provider** — `nodemailer` with raw SMTP is the simplest start.
   If deliverability becomes an issue, swap to Resend or SendGrid (the
   `magic-link.ts` module abstracts the transport).
-- **Account linking** — a user who first logs in via Magic Link and
-  later via Google (same email) should be the same user. The `email`
-  column's uniqueness constraint handles this: upsert on email. But
-  there's no "link your Google account to your Magic Link account" UI
-  yet.
+- **Account linking** — Google identities are never auto-linked to an
+  email-only account. Add an authenticated, explicit linking UI before allowing
+  a Magic Link user to attach a Google subject.
 - **Admin endpoints** — user management, client management, session
   revocation. Deferred to V2.

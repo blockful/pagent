@@ -32,6 +32,10 @@ Each directory contains only the runtime artifacts (`dist/`, `package.json`,
 `README.md`, `CHANGELOG.md`, `LICENSE`). Source code, `node_modules/`,
 lock files, and tooling are intentionally excluded.
 
+The vendored Lit runtime carries a local responsive patch for v0.9 Tabs and
+Modal so generated components remain usable at 320px. Reapply and verify that
+patch when refreshing the upstream artifacts.
+
 ## How to refresh
 
 When you need to update to a newer upstream release:

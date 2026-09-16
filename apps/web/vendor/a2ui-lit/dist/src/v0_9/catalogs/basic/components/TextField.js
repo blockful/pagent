@@ -159,6 +159,7 @@ let A2uiBasicTextFieldElement = (() => {
                 ? html `<textarea
             id="data"
             class=${classMap(classes)}
+            aria-label=${props.label || nothing}
             .value=${props.value || ''}
             @input=${onInput}
           ></textarea>`
@@ -166,6 +167,7 @@ let A2uiBasicTextFieldElement = (() => {
             id="data"
             type=${type}
             class=${classMap(classes)}
+            aria-label=${props.label || nothing}
             .value=${props.value || ''}
             @input=${onInput}
           />`}

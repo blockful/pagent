@@ -1,27 +1,21 @@
+import { isIP } from 'node:net';
+import { env } from './schemas.ts';
+
 /**
- * Extract a stable rate-limit key from incoming request headers.
+ * Extract a stable client-IP key under the configured trusted-ingress
+ * contract. Railway documents X-Real-IP as the connecting client's remote IP.
+ * Production explicitly opts into that contract with
+ * `TRUSTED_PROXY_MODE=railway`; without it, forwarded identity is not trusted.
  *
- * Trust the LAST hop of `X-Forwarded-For`. Reverse proxies (Railway, Vercel,
- * Cloudflare) append the real client IP to the right of any incoming chain;
- * leftmost entries are whatever the client sent and so are attacker-
- * controllable. Using the last hop assumes exactly one trusted proxy in
- * front of the API. If you ever stack proxies, raise the index by hand.
- *
- * Falls back to "anonymous" if no X-Forwarded-For is present (or all hops
- * are blank), collapsing local-dev / test traffic into a single bucket.
- *
- * Accepts either a string or string[] so it works with both Hono's header
- * accessor (`c.req.header(...)`) and Node's IncomingMessage.headers shape.
+ * A missing, duplicated, or non-IP header is deliberately collapsed into the
+ * anonymous bucket. That prevents malformed values from minting unbounded
+ * attacker-controlled rate-limit keys.
  */
 const ANONYMOUS = 'anonymous';
 
-export function clientKey(xForwardedFor: string | string[] | undefined): string {
-  if (!xForwardedFor) return ANONYMOUS;
-  const raw = Array.isArray(xForwardedFor) ? xForwardedFor.join(',') : xForwardedFor;
-  const hops = raw
-    .split(',')
-    .map((h) => h.trim())
-    .filter(Boolean);
-  if (hops.length === 0) return ANONYMOUS;
-  return hops[hops.length - 1]!;
+export function clientKey(xRealIp: string | readonly string[] | undefined): string {
+  if (env.TRUSTED_PROXY_MODE !== 'railway' || !xRealIp) return ANONYMOUS;
+  const candidate = typeof xRealIp === 'string' ? xRealIp.trim() : xRealIp.at(0)?.trim();
+  if (typeof xRealIp !== 'string' && xRealIp.length !== 1) return ANONYMOUS;
+  return candidate && isIP(candidate) !== 0 ? candidate : ANONYMOUS;
 }

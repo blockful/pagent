@@ -30,7 +30,8 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pagent_e2e
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pagent_e2e?sslmode=disable
+      PAGENT_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
@@ -45,8 +46,28 @@ jobs:
       - name: Install browser
         run: npx playwright install --with-deps chromium
 
+      - name: Verify production deploy layout
+        run: npm run check:deploy
+
       - name: Audit dependencies
         run: npm audit --audit-level=high
+
+      - name: Prepare deck integration databases
+        env:
+          PGPASSWORD: postgres
+        run: |
+          for database in \
+            pagent_deck_routes_owner_d3a0_test \
+            pagent_deck_schema_d3a0_test \
+            pagent_deck_routes_permissions_d3a0_test \
+            pagent_deck_engagement_d3a0_test \
+            pagent_deck_permissions_d3a0_test \
+            pagent_deck_sharing_d3a0_test \
+            pagent_deck_routes_sharing_d3a0_test \
+            pagent_deck_repository_d3a0_test
+          do
+            createdb --host=127.0.0.1 --port=5432 --username=postgres "$database"
+          done
 
       - name: Typecheck
         run: npm run typecheck
@@ -60,6 +81,14 @@ jobs:
       - name: Unit and integration tests with coverage
         run: npm run test:coverage
 
+      - name: Build and verify the shipped MCP bundle
+        run: |
+          npm run build:mcp
+          if ! git diff --exit-code apps/mcp/server.bundle.js; then
+            echo "::error file=apps/mcp/server.bundle.js::server.bundle.js is stale. Run 'npm run build:mcp' locally and commit the result."
+            exit 1
+          fi
+
       - name: Production end-to-end tests
         run: npm run test:e2e
 
@@ -69,11 +98,3 @@ jobs:
         env:
           VITE_API_URL: https://api.pagent.link
         run: npm run build:web
-
-      - name: Verify MCP bundle is up to date
-        run: |
-          npm run build:mcp
-          if ! git diff --exit-code apps/mcp/server.bundle.js; then
-            echo "::error file=apps/mcp/server.bundle.js::server.bundle.js is stale. Run 'npm run build:mcp' locally and commit the result."
-            exit 1
-          fi

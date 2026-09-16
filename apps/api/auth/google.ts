@@ -12,6 +12,7 @@
  */
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { env } from '../schemas.ts';
+import { getApiPublicUrl } from './api-url.ts';
 
 // Google's documented OAuth 2.0 endpoints. v2/auth is the modern consent
 // screen; oauth2.googleapis.com/token is the universal token endpoint. Both
@@ -48,9 +49,8 @@ const GOOGLE_SCOPES = 'openid email profile';
  * The fields we extract from Google's ID token. Matches the OIDC standard
  * claims for the requested scopes (`openid email profile`).
  *
- * `sub` is Google's stable per-user identifier — never reused, never
- * mutates. We don't currently persist it (email is our natural key), but
- * a future "link this account to another login method" flow would need it.
+ * `sub` is Google's stable per-user identifier — never reused and never
+ * mutable. It is the persisted Google identity key; email is profile data.
  */
 export interface GoogleProfile {
   sub: string;
@@ -61,13 +61,12 @@ export interface GoogleProfile {
 
 /**
  * Returns the absolute redirect_uri sent to Google. Defaults to
- * `${PUBLIC_URL}/oauth/callback/google` when GOOGLE_REDIRECT_URI is unset
+ * `${API_PUBLIC_URL}/oauth/callback/google` when GOOGLE_REDIRECT_URI is unset
  * — matches the .env.example default and keeps dev/prod parity automatic.
  */
 function getRedirectUri(): string {
   if (env.GOOGLE_REDIRECT_URI) return env.GOOGLE_REDIRECT_URI;
-  const base = env.PUBLIC_URL ?? `http://localhost:${env.PORT}`;
-  return `${base}/oauth/callback/google`;
+  return `${getApiPublicUrl()}/oauth/callback/google`;
 }
 
 /**
@@ -165,6 +164,9 @@ export async function exchangeGoogleCode(code: string): Promise<GoogleProfile> {
   }
   if (typeof payload.email !== 'string' || payload.email.length === 0) {
     throw new Error('google id_token missing email claim');
+  }
+  if (payload.email_verified !== true) {
+    throw new Error('google id_token email_verified claim must be true');
   }
   const profile: GoogleProfile = {
     sub: payload.sub,

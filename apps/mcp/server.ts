@@ -57,20 +57,34 @@ function authHeaders(): Record<string, string> {
   return PAGENT_TOKEN ? { Authorization: `Bearer ${PAGENT_TOKEN}` } : {};
 }
 
-type ApiErrorBody = {
-  message?: string;
-  retry_after_seconds?: number;
-  max_bytes?: number;
-};
+const apiErrorBodySchema = z.object({
+  message: z.string().optional(),
+  retry_after_seconds: z.number().optional(),
+  max_bytes: z.number().optional(),
+});
 
-const publishDeckResultSchema = z.object({
+const presentationResultSchema = z.object({
   deckId: z.string().uuid(),
   revisionId: z.string().uuid(),
   revisionNumber: z.number().int().positive(),
 });
 
+const ephemeralResultSchema = z.object({
+  id: z.string(),
+  url: z.string().url(),
+  expires_at: z.number(),
+});
+
+const responseResultSchema = z.object({
+  state: z.enum(['open', 'submitted', 'received']),
+  result: z.unknown(),
+  format: z.enum(['a2ui', 'html']),
+});
+
+const analyticsResultSchema = z.record(z.unknown());
+
 async function readError(res: Response, fallbackVerb: string): Promise<Error> {
-  const body = (await res.json().catch(() => ({}))) as ApiErrorBody;
+  const body = apiErrorBodySchema.catch({}).parse(await res.json().catch(() => ({})));
   const hint = formatRetryHint(body);
   const message = body.message ?? `HTTP ${res.status}`;
   return new Error(`${fallbackVerb} failed (${res.status}): ${message}${hint ? `. ${hint}` : ''}`);
@@ -83,56 +97,61 @@ async function readError(res: Response, fallbackVerb: string): Promise<Error> {
 // header is therefore enough; we don't need to plumb a second copy through
 // the request body.
 const restOps: PageOps = {
-  async publishDeck(input) {
+  async writePresentation(input) {
+    if (PAGENT_TOKEN === undefined) throw new Error('Authentication required for durable pages');
     const res = await fetch(`${SERVICE_URL}/v1/decks`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...authHeaders() },
       body: JSON.stringify(input),
     });
-    if (!res.ok) throw await readError(res, 'publish_deck');
-    const published = publishDeckResultSchema.parse(await res.json());
+    if (!res.ok) throw await readError(res, 'write');
+    const published = presentationResultSchema.parse(await res.json());
     const rendererBase = SERVICE_URL.replace(/^https:\/\/api\./, 'https://').replace(
       /^http:\/\/api\./,
       'http://',
     );
     return {
-      deck_id: published.deckId,
+      page_id: published.deckId,
       revision_id: published.revisionId,
       revision_number: published.revisionNumber,
-      dashboard_url: `${rendererBase}/decks/${published.deckId}`,
-      preview_url: `${rendererBase}/decks/${published.deckId}#preview`,
+      manage_url: `${rendererBase}/pages/${published.deckId}`,
+      preview_url: `${rendererBase}/pages/${published.deckId}#preview`,
     };
   },
-  async showUi(spec, _ownerId) {
+  async writeInteractive(spec, _ownerId) {
     const res = await fetch(`${SERVICE_URL}/new`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ spec }),
     });
-    if (!res.ok) throw await readError(res, 'show_ui');
-    return (await res.json()) as { id: string; url: string; expires_at: number };
+    if (!res.ok) throw await readError(res, 'write');
+    return ephemeralResultSchema.parse(await res.json());
   },
-  async showHtml(html, _ownerId) {
+  async writeDocument(html, _ownerId) {
     const res = await fetch(`${SERVICE_URL}/new`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ format: 'html', spec: html }),
     });
-    if (!res.ok) throw await readError(res, 'show_html');
-    return (await res.json()) as { id: string; url: string; expires_at: number };
+    if (!res.ok) throw await readError(res, 'write');
+    return ephemeralResultSchema.parse(await res.json());
   },
-  async checkResult(page_id) {
-    const res = await fetch(`${SERVICE_URL}/${page_id}/result`, {
+  async readResponse(pageId) {
+    const res = await fetch(`${SERVICE_URL}/${pageId}/result`, {
       headers: { accept: 'application/json', ...authHeaders() },
     });
     if (res.status === 404) return { kind: 'not_found' };
-    if (!res.ok) throw await readError(res, 'check_result');
-    const body = (await res.json()) as {
-      state: 'open' | 'submitted' | 'received';
-      result: unknown | null;
-      format: 'a2ui' | 'html';
-    };
+    if (!res.ok) throw await readError(res, 'read');
+    const body = responseResultSchema.parse(await res.json());
     return { kind: 'state', state: body.state, result: body.result, format: body.format };
+  },
+  async readAnalytics(pageId) {
+    if (PAGENT_TOKEN === undefined) throw new Error('Authentication required for analytics');
+    const res = await fetch(`${SERVICE_URL}/v1/decks/${pageId}/analytics`, {
+      headers: { accept: 'application/json', ...authHeaders() },
+    });
+    if (!res.ok) throw await readError(res, 'read');
+    return analyticsResultSchema.parse(await res.json());
   },
 };
 

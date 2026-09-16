@@ -1,29 +1,26 @@
 import { SignalWatcher } from '@lit-labs/signals';
-import { LitElement, html, css, nothing } from 'lit';
+import { LitElement, html, nothing } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import * as v0_9 from '@a2ui/web_core/v0_9';
 import { basicCatalog } from '@a2ui/lit/v0_9';
 import '@a2ui/lit/v0_9'; // registers <a2ui-surface>
-import './home'; // registers <home-page>
-import './components-showcase'; // registers <components-showcase>
-import './product-components';
-import './product-navigation';
+import { mountAgentUI } from './agent-ui-bootstrap.js';
+import type { PageFormat, PageResponse } from './agent-ui-page.js';
+import {
+  idleSubmission,
+  isSubmissionLocked,
+  receivedSubmission,
+  renderSubmissionBanner,
+  waitingSubmission,
+  type SubmissionState,
+} from './agent-ui-submission.js';
+import { agentUIStyles } from './agent-ui-styles.js';
 import { assertCatalogsAllowed } from './spec-guard.js';
 import { nextPollDelay, pollTimeoutMessage } from './poll-backoff.js';
 import { createSandboxedIframe } from './html-renderer.js';
 
 /** Hard-coded allowlist of catalog URLs the renderer is permitted to use. */
 const ALLOWED_CATALOG_IDS = [basicCatalog.id] as const;
-
-type PageFormat = 'a2ui' | 'html';
-type PageState = 'open' | 'submitted' | 'received';
-type PageResponse = {
-  spec: unknown;
-  format?: PageFormat; // optional for forward-compat with older API responses
-  state: PageState;
-  result: unknown | null;
-  expires_at: number | string;
-};
 
 const pageId = location.pathname.replace(/^\/+/, '').split('/')[0];
 
@@ -41,126 +38,17 @@ class AgentUIApp extends SignalWatcher(LitElement) {
     status: { state: true },
     error: { state: true },
     submitError: { state: true },
-    awaiting: { state: true },
-    awaitingMessage: { state: true },
-    awaitingStalled: { state: true },
+    submissionState: { state: true },
     format: { state: true },
     htmlBody: { state: true },
   };
 
-  static styles = css`
-    :host {
-      display: block;
-    }
-    .status {
-      color: var(--muted, #777);
-      text-align: center;
-      padding: 24px;
-      font-size: 14px;
-    }
-    .pending {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      align-items: center;
-      padding: 64px 16px;
-    }
-    .spinner {
-      width: 40px;
-      height: 40px;
-      border: 4px solid rgba(127, 127, 127, 0.2);
-      border-left-color: var(--primary, #5154b3);
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-    .small-spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(127, 127, 127, 0.25);
-      border-left-color: var(--primary, #5154b3);
-      border-radius: 50%;
-      animation: spin 0.9s linear infinite;
-    }
-    .error {
-      background: var(--error-bg, #ffedea);
-      color: var(--error, #ba1a1a);
-      padding: 16px;
-      border-radius: 8px;
-      margin: 16px 0;
-    }
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
-    }
-    #surfaces {
-      padding: var(--bb-grid-size-3, 12px);
-      animation: fadeIn 0.35s cubic-bezier(0, 0, 0.3, 1);
-      position: relative;
-    }
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(4px);
-      }
-      to {
-        opacity: 1;
-        transform: none;
-      }
-    }
-
-    .surface-wrap {
-      position: relative;
-    }
-    .surface-wrap.is-awaiting .a2ui-host {
-      opacity: 0.45;
-      pointer-events: none;
-      filter: saturate(0.6);
-      transition:
-        opacity 0.2s,
-        filter 0.2s;
-    }
-    .a2ui-host {
-      transition:
-        opacity 0.2s,
-        filter 0.2s;
-    }
-    .awaiting-banner {
-      position: sticky;
-      top: 12px;
-      z-index: 2;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 14px;
-      margin-bottom: 12px;
-      border-radius: 999px;
-      background: light-dark(rgba(255, 255, 255, 0.85), rgba(20, 28, 40, 0.85));
-      backdrop-filter: blur(8px);
-      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.08);
-      color: var(--fg, #1b1b1b);
-      font-size: 14px;
-      width: fit-content;
-      margin-left: auto;
-      margin-right: auto;
-      animation: fadeIn 0.25s ease-out;
-    }
-    .awaiting-banner.is-stalled {
-      background: light-dark(rgba(255, 245, 230, 0.95), rgba(60, 40, 20, 0.85));
-      color: light-dark(#7a4a00, #f6c89f);
-    }
-    .material-symbols {
-      font-family: 'Material Symbols Outlined', sans-serif;
-      font-variation-settings: 'FILL' 1;
-    }
-  `;
+  static styles = agentUIStyles;
 
   declare status: 'connecting' | 'live' | 'closed' | 'error';
   declare error: string | null;
   declare submitError: string | null;
-  declare awaiting: boolean;
-  declare awaitingMessage: string;
-  declare awaitingStalled: boolean;
+  declare submissionState: SubmissionState;
   declare format: PageFormat;
   declare htmlBody: string | null;
 
@@ -169,9 +57,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
     this.status = 'connecting';
     this.error = null;
     this.submitError = null;
-    this.awaiting = false;
-    this.awaitingMessage = 'Sent — waiting for the agent…';
-    this.awaitingStalled = false;
+    this.submissionState = idleSubmission();
     this.format = 'a2ui';
     this.htmlBody = null;
   }
@@ -179,12 +65,11 @@ class AgentUIApp extends SignalWatcher(LitElement) {
   private processor = new v0_9.MessageProcessor(
     [basicCatalog],
     async (action: v0_9.A2uiClientAction) => {
-      if (this.awaiting) return; // already submitted — drop duplicate
+      if (isSubmissionLocked(this.submissionState)) return; // already submitted — drop duplicate
       // Optimistic lock — the page is single-shot, so prevent further submits
       // and surface the "waiting for the agent" banner immediately.
-      this.awaiting = true;
+      this.submissionState = waitingSubmission();
       this.submitError = null;
-      this.awaitingMessage = 'Sent — waiting for the agent…';
       try {
         const res = await fetch(`${API_BASE}/${pageId}/result`, {
           method: 'POST',
@@ -201,14 +86,14 @@ class AgentUIApp extends SignalWatcher(LitElement) {
           console.warn('result POST failed', res.status);
           const body = (await res.json().catch(() => ({}))) as { message?: string };
           this.submitError = body.message ?? 'Submit failed — please try again';
-          this.awaiting = false;
+          this.submissionState = idleSubmission();
           return;
         }
         this.startPollingForReceived();
       } catch (err) {
         console.error('result POST error', err);
         this.submitError = 'Submit failed — please check your connection and try again';
-        this.awaiting = false;
+        this.submissionState = idleSubmission();
       }
     },
   );
@@ -271,17 +156,10 @@ class AgentUIApp extends SignalWatcher(LitElement) {
 
       // If the user reloaded after submitting, restore the locked state.
       if (page.state === 'submitted') {
-        this.awaiting = true;
-        this.awaitingMessage = 'Sent — waiting for the agent…';
+        this.submissionState = waitingSubmission();
         this.startPollingForReceived();
       } else if (page.state === 'received') {
-        this.awaiting = true;
-        this.awaitingMessage = '✓ The agent has your input';
-        // Defensive reset: a previous tick may have set awaitingStalled=true after
-        // the 60s deadline. If the agent then picks up before the user navigates
-        // away, the banner should drop the stalled visual state alongside the
-        // message change.
-        this.awaitingStalled = false;
+        this.submissionState = receivedSubmission();
       }
     } catch (err) {
       console.error('GET page failed', err);
@@ -312,14 +190,13 @@ class AgentUIApp extends SignalWatcher(LitElement) {
   private startPollingForReceived() {
     this.stopPolling();
     this.pollDeadline = Date.now() + POLL_TIMEOUT_MS;
-    this.awaitingStalled = false;
+    this.submissionState = waitingSubmission();
 
     const tick = async (delay: number) => {
       this.pollTimer = null;
       if (!this.isConnected) return;
       if (Date.now() >= this.pollDeadline) {
-        this.awaitingMessage = pollTimeoutMessage();
-        this.awaitingStalled = true;
+        this.submissionState = { kind: 'stalled', message: pollTimeoutMessage() };
         return;
       }
       try {
@@ -329,12 +206,7 @@ class AgentUIApp extends SignalWatcher(LitElement) {
         if (res.ok) {
           const page = (await res.json()) as PageResponse;
           if (page.state === 'received') {
-            this.awaitingMessage = '✓ The agent has your input';
-            // Defensive reset: a previous tick may have set awaitingStalled=true after
-            // the 60s deadline. If the agent then picks up before the user navigates
-            // away, the banner should drop the stalled visual state alongside the
-            // message change.
-            this.awaitingStalled = false;
+            this.submissionState = receivedSubmission();
             return; // stop polling
           }
         }
@@ -377,23 +249,20 @@ class AgentUIApp extends SignalWatcher(LitElement) {
         <div class="status">Loading…</div>
       </div>`;
     }
-    return html`<section id="surfaces" class="surface-wrap ${this.awaiting ? 'is-awaiting' : ''}">
+    const submissionLocked = isSubmissionLocked(this.submissionState);
+    return html`<section
+      id="surfaces"
+      class="surface-wrap ${submissionLocked ? 'is-awaiting' : ''}"
+    >
       ${this.submitError
         ? html`<div class="error" role="alert" aria-live="assertive">${this.submitError}</div>`
         : nothing}
-      ${this.awaiting
-        ? html`<div
-            class="awaiting-banner ${this.awaitingStalled ? 'is-stalled' : ''}"
-            role="status"
-            aria-live="polite"
-          >
-            ${this.awaitingStalled
-              ? html`<span class="material-symbols" aria-hidden="true">info</span>`
-              : html`<div class="small-spinner"></div>`}
-            <span>${this.awaitingMessage}</span>
-          </div>`
-        : nothing}
-      <div class="a2ui-host" aria-disabled=${this.awaiting ? 'true' : 'false'}>
+      ${renderSubmissionBanner(this.submissionState)}
+      <div
+        class="a2ui-host"
+        aria-disabled=${submissionLocked ? 'true' : 'false'}
+        ?inert=${submissionLocked}
+      >
         ${repeat(
           surfaces,
           ([id]) => id,
@@ -434,70 +303,4 @@ class AgentUIApp extends SignalWatcher(LitElement) {
 }
 
 customElements.define('agent-ui-app', AgentUIApp);
-
-// The static index.html ships homepage canonical/og:url values on every SPA
-// route (single document, Vercel catch-all rewrite). Point them at the route
-// actually being served for crawlers that execute JS (e.g. Googlebot) — and
-// at the real origin for self-hosted deployments. Non-JS unfurlers still see
-// the homepage fallback; fixing that requires SSR, which we don't have.
-function setCanonicalUrl(): void {
-  const url = location.origin + location.pathname.replace(/\/$/, '');
-  document.querySelector('link[rel="canonical"]')?.setAttribute('href', url || location.origin);
-  document
-    .querySelector('meta[property="og:url"]')
-    ?.setAttribute('content', url || location.origin);
-}
-setCanonicalUrl();
-
-const root = document.getElementById('app');
-if (root === null) throw new TypeError('App root is missing');
-const deckDetailMatch = /^\/decks\/([0-9a-f-]{36})\/?$/i.exec(location.pathname);
-const shareMatch = /^\/share\/([^/]+)\/?$/.exec(location.pathname);
-if (location.pathname === '/_components') {
-  root.classList.add('is-home');
-  root.appendChild(document.createElement('components-showcase'));
-} else if (location.pathname === '/_product-components') {
-  root.classList.add('is-home');
-  root.appendChild(document.createElement('product-components'));
-} else if (location.pathname === '/demo' || location.pathname === '/demo/') {
-  root.classList.add('is-home');
-  // Lazy chunk: keeps the demo page's spec + dashboard HTML out of the main
-  // bundle that every agent-generated /:id render loads.
-  void import('./demo').then(() => {
-    root.appendChild(document.createElement('pagent-demo'));
-  });
-} else if (location.pathname === '/decks' || location.pathname === '/decks/') {
-  root.classList.add('is-home');
-  void import('./deck-library.ts').then(() =>
-    root.appendChild(document.createElement('deck-library')),
-  );
-} else if (deckDetailMatch !== null) {
-  root.classList.add('is-home');
-  void import('./deck-detail.ts').then(() => {
-    const element = document.createElement('deck-detail-page');
-    element.setAttribute('deckid', deckDetailMatch[1] ?? '');
-    root.appendChild(element);
-  });
-} else if (shareMatch !== null) {
-  root.classList.add('is-home');
-  void import('./deck-viewer.ts').then(() => {
-    const element = document.createElement('deck-viewer');
-    element.setAttribute('sharetoken', decodeURIComponent(shareMatch[1] ?? ''));
-    root.appendChild(element);
-  });
-} else if (location.pathname === '/view' || location.pathname === '/view/') {
-  root.classList.add('is-home');
-  void import('./deck-viewer.ts').then(() =>
-    root.appendChild(document.createElement('deck-viewer')),
-  );
-} else if (location.pathname === '/privacy' || location.pathname === '/privacy/') {
-  root.classList.add('is-home');
-  void import('./privacy-page.ts').then(() =>
-    root.appendChild(document.createElement('privacy-page')),
-  );
-} else if (!pageId) {
-  root.classList.add('is-home');
-  root.appendChild(document.createElement('home-page'));
-} else {
-  root.appendChild(document.createElement('agent-ui-app'));
-}
+mountAgentUI(pageId);

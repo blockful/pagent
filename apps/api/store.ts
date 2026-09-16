@@ -12,7 +12,7 @@ import * as db from './db.ts';
 import type { Page, PageFormat } from './db.ts';
 import { metrics } from './metrics.ts';
 import { sanitize } from './sanitize.ts';
-import type { ShowUiResult, CheckResultOutcome } from './mcp/tools.ts';
+import type { EphemeralPageResult, ResponseReadOutcome } from './mcp/tools.ts';
 
 export type CreatePageConfig = {
   publicUrl: string;
@@ -45,7 +45,7 @@ export async function createPage(
   spec: unknown,
   format: PageFormat,
   cfg: CreatePageConfig,
-): Promise<ShowUiResult> {
+): Promise<EphemeralPageResult> {
   const now = Date.now();
   const page: Page = {
     id: newId(),
@@ -68,7 +68,7 @@ export async function createPage(
 
 /**
  * Sanitize + log + store an HTML submission. Shared between the REST
- * POST /new path and the in-process MCP `show_html` tool so the sanitize
+ * POST /new path and the in-process MCP write tool so the sanitize
  * ritual evolves in one place. Throws SanitizedEmptyError if the input was
  * stripped to empty — the caller is responsible for surfacing the 400.
  *
@@ -80,7 +80,7 @@ export async function createHtmlPage(
   rawHtml: string,
   cfg: CreatePageConfig,
   log: Pick<Logger, 'info'>,
-): Promise<ShowUiResult> {
+): Promise<EphemeralPageResult> {
   const { output, removedTags, removedAttrs } = sanitize(rawHtml);
   log.info(
     { format: 'html', sanitizer_removed_tags: removedTags, sanitizer_removed_attrs: removedAttrs },
@@ -94,7 +94,7 @@ export async function createHtmlPage(
   return createPage(output, 'html', cfg);
 }
 
-export async function advanceResult(id: string): Promise<CheckResultOutcome> {
+export async function advanceResult(id: string): Promise<ResponseReadOutcome> {
   const r = await db.fetchAndAdvanceResult(id);
   if (!r) return { kind: 'not_found' };
   return { kind: 'state', state: r.stateAtRead, result: r.result, format: r.format };

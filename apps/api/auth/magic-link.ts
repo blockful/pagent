@@ -4,7 +4,7 @@
  * The flow:
  *   1. `sendMagicLink(email, ctx)` mints a 32-byte random token, stores its
  *      SHA-256 hash + the authorize context in `magic_links` with a 15-min
- *      TTL, and emails the user the URL `${PUBLIC_URL}/oauth/magic?token=<raw>`.
+ *      TTL, and emails the user the URL `${API_PUBLIC_URL}/oauth/magic?token=<raw>`.
  *   2. The user clicks the link. `verifyMagicLink(token)` re-hashes the raw
  *      value, looks the row up, atomically flips `consumed_at`, and returns
  *      the stored email + context so the route can mint a Pagent auth code
@@ -20,6 +20,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import nodemailer, { type Transporter } from 'nodemailer';
 import * as db from '../db.ts';
 import { env } from '../schemas.ts';
+import { getApiPublicUrl } from './api-url.ts';
 
 // 32 bytes (256 bits) — matches the auth-code / refresh-token sizing. base64url
 // yields 43 url-safe chars, fits trivially in a `mailto:` body or a `<a href>`.
@@ -40,14 +41,11 @@ function hashToken(token: string): string {
 }
 
 /**
- * Build the absolute magic link URL. We derive the base from PUBLIC_URL so
- * dev (localhost:8787) and prod (api.pagent.link) both work without
- * per-environment branching. The token is appended raw — URL-safe base64
- * doesn't need percent-encoding.
+ * Build the absolute magic link URL from the externally reachable API origin.
+ * The token is URL-safe base64 and does not need percent-encoding.
  */
 function buildMagicUrl(token: string): string {
-  const base = env.PUBLIC_URL ?? `http://localhost:${env.PORT}`;
-  return `${base}/oauth/magic?token=${token}`;
+  return `${getApiPublicUrl()}/oauth/magic?token=${token}`;
 }
 
 /**
@@ -168,6 +166,25 @@ export class InvalidMagicLinkError extends Error {
   }
 }
 
+function requireMagicLinkToken(token: string): string {
+  if (typeof token !== 'string' || token.length === 0) {
+    throw new InvalidMagicLinkError();
+  }
+  return hashToken(token);
+}
+
+/**
+ * Inspect an active magic link without consuming it. Routes must use this to
+ * validate browser-bound authorization context before calling
+ * `verifyMagicLink`; otherwise email scanners and unbound browsers could burn
+ * a legitimate user's one-time token.
+ */
+export async function inspectMagicLink(token: string): Promise<db.MagicLinkRow> {
+  const row = await db.getActiveMagicLink(requireMagicLinkToken(token));
+  if (!row) throw new InvalidMagicLinkError();
+  return row;
+}
+
 /**
  * Verify a magic link token. Re-hashes the raw value, atomically consumes
  * the row (UPDATE ... RETURNING), and returns the email + stored authorize
@@ -180,14 +197,7 @@ export class InvalidMagicLinkError extends Error {
 export async function verifyMagicLink(
   token: string,
 ): Promise<{ email: string; authorizeContext: db.MagicLinkAuthorizeContext }> {
-  // Reject the empty string up front — saves a DB round-trip and is the only
-  // input we can validate without leaking timing info (every other failure
-  // mode goes through the DB so timing is bounded by the same query).
-  if (typeof token !== 'string' || token.length === 0) {
-    throw new InvalidMagicLinkError();
-  }
-  const tokenHash = hashToken(token);
-  const row = await db.verifyAndConsumeMagicLink(tokenHash);
+  const row = await db.verifyAndConsumeMagicLink(requireMagicLinkToken(token));
   if (!row) throw new InvalidMagicLinkError();
   return row;
 }

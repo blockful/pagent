@@ -15,6 +15,12 @@ describe('RateLimiter', () => {
     expect(limiter.check('a', NOW).allowed).toBe(true);
   });
 
+  it('previews capacity without allocating or consuming a bucket', () => {
+    expect(limiter.peek('a', NOW)).toMatchObject({ allowed: true, remaining: 2, limit: 3 });
+    expect(limiter.peek('a', NOW)).toMatchObject({ allowed: true, remaining: 2, limit: 3 });
+    expect(limiter.check('a', NOW)).toMatchObject({ allowed: true, remaining: 2 });
+  });
+
   it('rejects the (limit+1)-th request and reports a positive retry', () => {
     for (let i = 0; i < 3; i++) limiter.check('a', NOW);
     const result = limiter.check('a', NOW);

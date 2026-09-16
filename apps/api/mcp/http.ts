@@ -16,26 +16,26 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { MAX_BODY_BYTES, ALLOWED_ORIGINS } from '../app.ts';
 import { clientKey } from '../client-key.ts';
 import { env } from '../schemas.ts';
 import * as store from '../store.ts';
+import { getDeckAnalytics } from '../decks/repository-analytics.ts';
 import { publishDeck } from '../decks/repository-decks.ts';
 import { logger } from '../logger.ts';
 import { verifyAccessToken } from '../auth/jwt.ts';
 import { RateLimiter } from './rate-limit.ts';
 import { registerPagentTools, type PageOps } from './tools.ts';
+import type { McpHttpConfig } from './http-config.ts';
 
-export type McpHttpConfig = {
-  publicUrl: string;
-  pageTtlMs: number;
-  /** Override for the request body cap. Defaults to MAX_BODY_BYTES from
-   *  app.ts so REST and MCP enforce the same limit unless tests need otherwise. */
-  maxBodyBytes?: number;
-  /** Override the rate limiter (e.g. for tests). Defaults to a per-IP limiter
-   *  using RATE_LIMIT_MAX / RATE_LIMIT_WINDOW_MS — same envs as the REST side. */
-  rateLimiter?: RateLimiter;
-};
+declare module 'node:http' {
+  interface IncomingMessage {
+    auth?: AuthInfo;
+  }
+}
+
+export type { McpHttpConfig } from './http-config.ts';
 
 // Mirrors apps/api/request-id.ts — caller-supplied IDs accepted within bounds,
 // otherwise generated.
@@ -43,7 +43,7 @@ const REQUEST_ID_REGEX = /^[A-Za-z0-9_-]{1,128}$/;
 // Headers a browser-side MCP client might preflight. `Mcp-Session-Id` is
 // reserved by the SDK transport even in stateless mode — clients may still
 // echo it on resumed sessions.
-const CORS_ALLOWED_HEADERS = 'Content-Type, Mcp-Session-Id, X-Request-Id';
+const CORS_ALLOWED_HEADERS = 'Authorization, Content-Type, Mcp-Session-Id, X-Request-Id';
 // Methods the SDK's streamable HTTP transport actually serves.
 const CORS_ALLOWED_METHODS = 'GET, POST, DELETE, OPTIONS';
 
@@ -76,19 +76,19 @@ function applyBaseHeaders(req: IncomingMessage, res: ServerResponse, requestId: 
 
 export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
   return {
-    async publishDeck(input, publisher) {
-      if (publisher === undefined) throw new TypeError('Authentication required to publish a deck');
+    async writePresentation(input, publisher) {
+      if (publisher === undefined) throw new TypeError('Authentication required for durable pages');
       const published = await publishDeck(publisher, input);
       const base = cfg.publicUrl.replace(/\/$/, '');
       return {
-        deck_id: published.deckId,
+        page_id: published.deckId,
         revision_id: published.revisionId,
         revision_number: published.revisionNumber,
-        dashboard_url: `${base}/decks/${published.deckId}`,
-        preview_url: `${base}/decks/${published.deckId}#preview`,
+        manage_url: `${base}/pages/${published.deckId}`,
+        preview_url: `${base}/pages/${published.deckId}#preview`,
       };
     },
-    async showUi(spec, ownerId) {
+    async writeInteractive(spec, ownerId) {
       // ownerId arrives from the SDK's RequestHandlerExtra.authInfo.extra.sub
       // (set by the Bearer middleware below). Forwarded unchanged into the
       // store so pages created via authenticated MCP carry the right
@@ -100,7 +100,7 @@ export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
         ownerId,
       });
     },
-    async showHtml(html, ownerId) {
+    async writeDocument(html, ownerId) {
       // No request context here — log at the module logger level. The REST
       // POST /new path passes a request-scoped child logger; this is the MCP
       // path. store.createHtmlPage handles sanitize+log+store in one ritual
@@ -116,8 +116,12 @@ export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
         logger,
       );
     },
-    async checkResult(page_id) {
-      return store.advanceResult(page_id);
+    async readResponse(pageId) {
+      return store.advanceResult(pageId);
+    },
+    async readAnalytics(pageId, readerId) {
+      if (readerId === undefined) throw new TypeError('Authentication required for analytics');
+      return getDeckAnalytics(readerId, pageId, {});
     },
   };
 }
@@ -161,7 +165,7 @@ export function makeMcpHttpHandler(cfg: McpHttpConfig) {
     // Headers follow IETF draft-7 (combined `RateLimit` + `RateLimit-Policy`)
     // to match what hono-rate-limiter emits on the REST side.
     if (req.method === 'POST') {
-      const result = limiter.check(clientKey(req.headers['x-forwarded-for']));
+      const result = limiter.check(clientKey(req.headers['x-real-ip']));
       res.setHeader(
         'RateLimit',
         `limit=${result.limit}, remaining=${result.remaining}, reset=${result.secondsUntilReset}`,
@@ -184,44 +188,42 @@ export function makeMcpHttpHandler(cfg: McpHttpConfig) {
     // can discover the AS without an out-of-band config step. The check sits
     // after rate-limit (no point validating tokens we'd throttle anyway) but
     // before body parse (a 401 should be cheap and not trigger body reads).
-    if (env.REQUIRE_AUTH && req.method === 'POST') {
+    if (req.method === 'GET' || req.method === 'POST' || req.method === 'DELETE') {
       const authHeader = req.headers.authorization;
-      const resourceMetadataUrl = `${cfg.publicUrl}/.well-known/oauth-protected-resource`;
+      const resourceMetadataUrl = `${cfg.apiPublicUrl}/.well-known/oauth-protected-resource`;
       if (!authHeader?.startsWith('Bearer ')) {
-        res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl}"`);
-        respondJson(res, 401, {
-          error: 'unauthorized',
-          message: 'Bearer token required',
-          request_id: requestId,
-        });
-        return;
-      }
-      const token = authHeader.slice('Bearer '.length).trim();
-      try {
-        const claims = await verifyAccessToken(token);
-        // Attach auth info onto the request so the SDK transport can forward
-        // it to tool handlers (the StreamableHTTPServerTransport reads
-        // `req.auth` per the SDK's contract). We carry the verified claims
-        // plus the raw bearer so downstream code can re-mint scoped requests
-        // without re-decoding the JWT.
-        (req as unknown as { auth: unknown }).auth = {
-          token,
-          clientId: claims.client_id,
-          scopes: claims.scope.split(/\s+/).filter(Boolean),
-          expiresAt: claims.exp,
-          extra: { sub: claims.sub, email: claims.email, handle: claims.handle },
-        };
-      } catch {
-        res.setHeader(
-          'WWW-Authenticate',
-          `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`,
-        );
-        respondJson(res, 401, {
-          error: 'invalid_token',
-          message: 'Invalid or expired access token',
-          request_id: requestId,
-        });
-        return;
+        if (env.REQUIRE_AUTH) {
+          res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl}"`);
+          respondJson(res, 401, {
+            error: 'unauthorized',
+            message: 'Bearer token required',
+            request_id: requestId,
+          });
+          return;
+        }
+      } else {
+        const token = authHeader.slice('Bearer '.length).trim();
+        try {
+          const claims = await verifyAccessToken(token);
+          req.auth = {
+            token,
+            clientId: claims.client_id,
+            scopes: claims.scope.split(/\s+/).filter(Boolean),
+            expiresAt: claims.exp,
+            extra: { sub: claims.sub, email: claims.email, handle: claims.handle },
+          };
+        } catch {
+          res.setHeader(
+            'WWW-Authenticate',
+            `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`,
+          );
+          respondJson(res, 401, {
+            error: 'invalid_token',
+            message: 'Invalid or expired access token',
+            request_id: requestId,
+          });
+          return;
+        }
       }
     }
 

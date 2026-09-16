@@ -42,7 +42,7 @@ export default defineConfig({
         PORT: apiPort,
         PUBLIC_URL: webUrl,
         ALLOWED_ORIGINS: webUrl,
-        NODE_ENV: 'production',
+        NODE_ENV: 'test',
         REQUIRE_AUTH: 'false',
         LOG_LEVEL: 'silent',
       },

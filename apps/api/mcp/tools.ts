@@ -1,258 +1,223 @@
-/**
- * Shared MCP tool definitions for pagent.
- *
- * Both the in-process HTTP MCP (apps/api/mcp/http.ts) and the stdio MCP
- * (apps/mcp/server.ts) call registerPagentTools. Tool descriptions —
- * which the model uses to decide whether to invoke the tools — live here
- * so they stay in sync across transports. Adapters differ only in how
- * they fulfill the page operations: the API speaks Postgres directly,
- * the stdio server speaks to the REST API.
- */
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { AnySchema, ZodRawShapeCompat } from '@modelcontextprotocol/sdk/server/zod-compat.js';
+import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { publishDeckBodySchema, type PublishDeckBody } from '../decks/domain.ts';
+import {
+  deckIdSchema,
+  publishDeckBodySchema,
+  type PublishDeckBody,
+} from '../decks/domain.ts';
 import { HTML_MAX_BYTES } from '../limits.ts';
 
-// --- Operations contract -----------------------------------------------------
-
 export type PageState = 'open' | 'submitted' | 'received';
-
 export type PageFormat = 'a2ui' | 'html';
 
-export type ShowUiResult = {
-  id: string;
-  url: string;
-  expires_at: number;
+export type EphemeralPageResult = {
+  readonly id: string;
+  readonly url: string;
+  readonly expires_at: number;
 };
 
-// `format` is required on responses from both the in-process API path (which
-// knows the format from the DB row) and the stdio adapter (which reads it
-// from the REST API's GET /:id/result response).
-export type CheckResultOutcome =
-  | { kind: 'not_found' }
-  | { kind: 'state'; state: PageState; result: unknown; format: PageFormat };
+export type ResponseReadOutcome =
+  | { readonly kind: 'not_found' }
+  | {
+      readonly kind: 'state';
+      readonly state: PageState;
+      readonly result: unknown;
+      readonly format: PageFormat;
+    };
 
 export type PublisherIdentity = {
   readonly id: string;
   readonly email: string;
 };
 
-export type PublishDeckResult = {
-  readonly deck_id: string;
+export type PresentationWriteResult = {
+  readonly page_id: string;
   readonly revision_id: string;
   readonly revision_number: number;
-  readonly dashboard_url: string;
+  readonly manage_url: string;
   readonly preview_url: string;
 };
 
 export interface PageOps {
-  /**
-   * `ownerId` is the authenticated user's UUID, lifted from the MCP request's
-   * authInfo (Bearer-authenticated HTTP MCP) or undefined for unauthenticated
-   * paths (stdio adapter, REQUIRE_AUTH=false). Adapters pass it through to
-   * page creation so the resulting row carries the right owner_id.
-   */
-  showUi(spec: unknown, ownerId?: string): Promise<ShowUiResult>;
-  showHtml(html: string, ownerId?: string): Promise<ShowUiResult>;
-  checkResult(page_id: string): Promise<CheckResultOutcome>;
-  publishDeck(input: PublishDeckBody, publisher?: PublisherIdentity): Promise<PublishDeckResult>;
+  writeInteractive(spec: unknown, ownerId?: string): Promise<EphemeralPageResult>;
+  writeDocument(html: string, ownerId?: string): Promise<EphemeralPageResult>;
+  writePresentation(
+    input: PublishDeckBody,
+    publisher?: PublisherIdentity,
+  ): Promise<PresentationWriteResult>;
+  readResponse(pageId: string): Promise<ResponseReadOutcome>;
+  readAnalytics(pageId: string, readerId?: string): Promise<object>;
 }
 
-/**
- * Extract the user id from the MCP tool handler's `extra.authInfo`. The HTTP
- * MCP path (apps/api/mcp/http.ts) sets `req.auth.extra.sub = claims.sub`
- * after Bearer verification; the SDK forwards that onto tool handlers as
- * `extra.authInfo.extra.sub`. Returns undefined for the stdio adapter (no
- * auth context) or for unauthenticated HTTP MCP calls in grace mode — the
- * adapter then inserts the page with owner_id = NULL.
- */
-const publisherExtraSchema = z
+type ToolExtra = {
+  readonly authInfo?: {
+    readonly scopes: readonly string[];
+    readonly extra?: Readonly<Record<string, unknown>>;
+  };
+};
+
+class InsufficientScopeError extends Error {
+  constructor(readonly requiredScope: string) {
+    super(`Insufficient OAuth scope: ${requiredScope} is required`);
+    this.name = 'InsufficientScopeError';
+  }
+}
+
+function ownerIdFromExtra(extra: ToolExtra | undefined): string | undefined {
+  const sub = extra?.authInfo?.extra?.sub;
+  return typeof sub === 'string' ? sub : undefined;
+}
+
+function publisherFromExtra(extra: ToolExtra | undefined): PublisherIdentity | undefined {
+  const id = ownerIdFromExtra(extra);
+  const email = extra?.authInfo?.extra?.email;
+  return id !== undefined && typeof email === 'string' ? { id, email } : undefined;
+}
+
+function requireScope(extra: ToolExtra | undefined, scope: string): void {
+  if (extra?.authInfo !== undefined && !extra.authInfo.scopes.includes(scope)) {
+    throw new InsufficientScopeError(scope);
+  }
+}
+
+const interactiveWriteSchema = z
   .object({
-    authInfo: z
-      .object({
-        extra: z.object({ sub: z.string(), email: z.string().email().optional() }).passthrough(),
-      })
-      .passthrough(),
+    type: z.literal('interactive'),
+    spec: z.array(z.record(z.unknown())),
   })
-  .passthrough();
+  .strict();
 
-function publisherFromExtra(extra: unknown): PublisherIdentity | undefined {
-  const parsed = publisherExtraSchema.safeParse(extra);
-  if (!parsed.success || parsed.data.authInfo.extra.email === undefined) return undefined;
-  return { id: parsed.data.authInfo.extra.sub, email: parsed.data.authInfo.extra.email };
-}
+const documentWriteSchema = z
+  .object({
+    type: z.literal('document'),
+    html: z.string().min(1).max(HTML_MAX_BYTES),
+  })
+  .strict();
 
-function ownerIdFromExtra(extra: unknown): string | undefined {
-  const parsed = publisherExtraSchema.safeParse(extra);
-  return parsed.success ? parsed.data.authInfo.extra.sub : undefined;
-}
+const presentationWriteSchema = publishDeckBodySchema
+  .omit({ update_deck_id: true })
+  .extend({
+    type: z.literal('presentation'),
+    page_id: deckIdSchema.optional(),
+  })
+  .strict();
 
-// --- Tool descriptions -------------------------------------------------------
-// These are what the model sees when deciding whether to call the tools.
-// The polling pattern is baked in here so MCP clients without a separate
-// skill (Codex, OpenCode, Cursor, Cline, etc.) still get the guidance.
+const writeInputSchema = z.discriminatedUnion('type', [
+  interactiveWriteSchema,
+  documentWriteSchema,
+  presentationWriteSchema,
+]);
 
-const SHOW_UI_DESCRIPTION = [
-  'Ask the user a question that needs a structured answer back. Forms, pickers, confirmations, multi-step wizards, surveys, dashboards-as-input.',
-  'Returns { page_id, url, expires_at }. PRINT the URL so the user can open it. The agent never sees the user typing — only the final submitted result.',
-  'Each page is single-shot: one spec, one result. For a follow-up question, call show_ui again with a fresh spec — there is no surface-replace mechanism.',
-  'After this call, poll check_result on your own cadence to read the user response (start at 2-3s, back off exponentially up to ~30s; do other useful work between polls rather than blocking).',
-  'If you only want to SHOW something — a report, a chart, an infographic — use show_html instead. show_ui is for input.',
-].join('\n\n');
+const ephemeralPageIdSchema = z.string().regex(/^[a-f0-9]{32}$/, 'invalid page_id');
+const readInputSchema = z
+  .object({
+    page_id: z.union([ephemeralPageIdSchema, deckIdSchema]),
+    include: z.enum(['response', 'analytics']).optional(),
+  })
+  .strict();
 
-const SHOW_UI_INPUT_DESCRIPTION = [
-  'A2UI v0.9 spec — an array of A2UI messages.',
-  'Start with one createSurface, then updateComponents with a tree whose root component MUST have id "root".',
-  'The basic catalog (https://a2ui.org/specification/v0_9/basic_catalog.json) provides Column, Row, Card, Text, TextField, Button, CheckBox, ChoicePicker, DateTimeInput, Image, Divider, List, Tabs, Slider, Modal. Component names are case-sensitive — it is CheckBox, not Checkbox; unknown names render as nothing.',
-  'Buttons fire actions via { action: { event: { name, context } } }; bind input fields with { value: { path: "/key" } } and reference those paths in the button context so user input flows back.',
-  'Keep specs small — one screen, one purpose.',
-].join(' ');
+const WRITE_DESCRIPTION =
+  'Write one Pagent page. Interactive and document pages are temporary. Presentation pages are durable, revisioned, shareable, and analyzable. Return the page URL to the user.';
 
-const SHOW_HTML_DESCRIPTION = [
-  'Show the user a rich visualization: a styled report, dashboard, chart, infographic, comparison table, slide, or other view-only artifact.',
-  'Returns { page_id, url, expires_at }. PRINT the URL so the user can open it. The page is one-way — the user looks at it; nothing comes back.',
-  'Do NOT poll check_result for HTML pages; they never produce a result. If you need a follow-up decision, call show_ui after with a fresh spec.',
-  'Constraints (enforced — violations are stripped or rejected):',
-  'No JavaScript: no <script> tags, no on*= event handlers, no javascript: URLs. JavaScript does not run.',
-  'No external assets: inline all CSS as <style>, embed images as data:image/...;base64,... URIs. No Google Fonts, no CDN libraries, no remote <img src=https:>.',
-  'No forms, iframes, or meta refresh: <form> submissions (use show_ui for input), <iframe>, and <meta http-equiv=refresh> are stripped.',
-  '1 MB payload cap.',
-].join('\n\n');
+const READ_DESCRIPTION =
+  'Read a page response or durable presentation analytics. The page id selects the sensible default; use include only to be explicit. This call returns immediately and never waits.';
 
-const SHOW_HTML_INPUT_DESCRIPTION = [
-  'A single UTF-8 HTML string. May be a fragment or a full document; the renderer wraps it in a sandboxed scaffold either way.',
-  'Inline all CSS as <style>; embed all images as data: URIs. No external assets — they will not load.',
-  'Up to 1,000,000 bytes (1 MB).',
-].join(' ');
-
-const CHECK_RESULT_DESCRIPTION = [
-  'Fetch the current state of a page created by show_ui. Fire-and-return — does NOT block or wait.',
-  'Returns { state, result, format, page_id } where state is "open" | "submitted" | "received" and format is "a2ui" | "html".',
-  'When state is "open", the user has not responded yet — wait a few seconds and call again. When "submitted", result is the user input as an A2UI client-action: { name, surfaceId, sourceComponentId, context, timestamp }. When "received", you already read the result on a prior poll (treat as duplicate).',
-  'If format is "html", the page is view-only — stop polling; HTML pages never produce a result.',
-  'If the page expired (Page not found), do NOT retry the same page_id — ask the user in chat whether to start over, then call show_ui (or show_html) with a fresh spec.',
-].join('\n\n');
-
-const PUBLISH_DECK_DESCRIPTION = [
-  'Publish a durable slide deck to Pagent, or create a new immutable revision of an existing deck.',
-  'Use stable slide ids across revisions so slide-level analytics remain comparable.',
-  'Returns deck and revision ids plus dashboard and private preview URLs. Publishing never creates a public viewer link; create sharing access in the dashboard.',
-].join('\n\n');
-
-// --- Registration ------------------------------------------------------------
-
-export function registerPagentTools(server: McpServer, ops: PageOps): void {
-  server.registerTool(
-    'publish_deck',
-    {
-      title: 'Publish a durable deck',
-      description: PUBLISH_DECK_DESCRIPTION,
-      inputSchema: publishDeckBodySchema.shape,
+export interface PagentToolRegistrar {
+  registerTool<
+    OutputArgs extends ZodRawShapeCompat | AnySchema,
+    InputArgs extends undefined | ZodRawShapeCompat | AnySchema = undefined,
+  >(
+    name: string,
+    config: {
+      readonly title?: string;
+      readonly description?: string;
+      readonly inputSchema?: InputArgs;
+      readonly outputSchema?: OutputArgs;
+      readonly annotations?: ToolAnnotations;
+      readonly _meta?: Record<string, unknown>;
     },
+    callback: ToolCallback<InputArgs>,
+  ): unknown;
+}
+
+export function registerPagentTools(server: PagentToolRegistrar, ops: PageOps): void {
+  server.registerTool(
+    'write',
+    { title: 'Write a page', description: WRITE_DESCRIPTION, inputSchema: writeInputSchema },
     async (input, extra) => {
-      const published = await ops.publishDeck(input, publisherFromExtra(extra));
+      requireScope(extra, 'page:create');
+      if (input.type === 'interactive') {
+        const created = await ops.writeInteractive(input.spec, ownerIdFromExtra(extra));
+        return ephemeralWriteResponse('interactive', created);
+      }
+      if (input.type === 'document') {
+        const created = await ops.writeDocument(input.html, ownerIdFromExtra(extra));
+        return ephemeralWriteResponse('document', created);
+      }
+      const publisher = publisherFromExtra(extra);
+      const base = {
+        title: input.title,
+        description: input.description,
+        client_label: input.client_label,
+        slides: input.slides,
+      };
+      const publishInput: PublishDeckBody =
+        input.page_id === undefined ? base : { ...base, update_deck_id: input.page_id };
+      const written = await ops.writePresentation(publishInput, publisher);
       return {
-        content: [
-          {
-            type: 'text',
-            text: `Deck published as revision ${published.revision_number}.\n\nDashboard: ${published.dashboard_url}\nPrivate preview: ${published.preview_url}`,
-          },
-        ],
-        structuredContent: published,
+        content: [{ type: 'text' as const, text: `Presentation page ready: ${written.preview_url}` }],
+        structuredContent: { type: 'presentation', durable: true, ...written },
       };
     },
   );
 
   server.registerTool(
-    'show_ui',
-    {
-      title: 'Show UI to the user',
-      description: SHOW_UI_DESCRIPTION,
-      inputSchema: {
-        spec: z.array(z.record(z.unknown())).describe(SHOW_UI_INPUT_DESCRIPTION),
-      },
-    },
-    async ({ spec }, extra) => {
-      const created = await ops.showUi(spec, ownerIdFromExtra(extra));
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `UI ready. Share this URL with the user:\n${created.url}\n\npage_id: ${created.id}\nexpires_at: ${created.expires_at}`,
-          },
-        ],
-        structuredContent: {
-          page_id: created.id,
-          url: created.url,
-          expires_at: created.expires_at,
-        },
-      };
-    },
-  );
-
-  server.registerTool(
-    'show_html',
-    {
-      title: 'Show HTML visualization to the user',
-      description: SHOW_HTML_DESCRIPTION,
-      inputSchema: {
-        html: z.string().min(1).max(HTML_MAX_BYTES).describe(SHOW_HTML_INPUT_DESCRIPTION),
-      },
-    },
-    async ({ html }, extra) => {
-      const created = await ops.showHtml(html, ownerIdFromExtra(extra));
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `View ready. Share this URL with the user:\n${created.url}\n\npage_id: ${created.id}\nexpires_at: ${created.expires_at}\n\nView-only — do not poll check_result for this page.`,
-          },
-        ],
-        structuredContent: {
-          page_id: created.id,
-          url: created.url,
-          expires_at: created.expires_at,
-        },
-      };
-    },
-  );
-
-  server.registerTool(
-    'check_result',
-    {
-      title: 'Check whether the user has submitted yet',
-      description: CHECK_RESULT_DESCRIPTION,
-      inputSchema: {
-        page_id: z
-          .string()
-          .regex(/^[a-f0-9]{32}$/, 'invalid page_id')
-          .describe('The page_id returned by show_ui.'),
-      },
-    },
-    async ({ page_id }) => {
-      const outcome = await ops.checkResult(page_id);
+    'read',
+    { title: 'Read a page', description: READ_DESCRIPTION, inputSchema: readInputSchema },
+    async ({ page_id, include }, extra) => {
+      requireScope(extra, 'page:read');
+      const presentation = deckIdSchema.safeParse(page_id).success;
+      const selected = include ?? (presentation ? 'analytics' : 'response');
+      if (selected === 'analytics') {
+        if (!presentation) throw new TypeError('Analytics are available for presentation pages');
+        const readerId = ownerIdFromExtra(extra);
+        const analytics = await ops.readAnalytics(page_id, readerId);
+        return {
+          content: [{ type: 'text' as const, text: `Analytics read for page ${page_id}.` }],
+          structuredContent: { page_id, type: 'presentation', analytics },
+        };
+      }
+      if (presentation) throw new TypeError('Presentation pages expose analytics, not responses');
+      const outcome = await ops.readResponse(page_id);
       if (outcome.kind === 'not_found') {
-        throw new Error(
-          `Page ${page_id} not found (expired or deleted). Don't retry the same page_id — ask the user whether to start over, then call show_ui (or show_html) with a fresh spec.`,
-        );
+        throw new Error(`Page ${page_id} was not found or has expired. Write a new page.`);
       }
-      let text: string;
-      if (outcome.format === 'html') {
-        text = `Page ${page_id} is an HTML view (format: html). It does not produce a result — stop polling. If you need a follow-up decision, call show_ui with a fresh spec.`;
-      } else if (outcome.result == null) {
-        text = `User has not responded yet (state: ${outcome.state}). Call check_result again in a few seconds.`;
-      } else {
-        text = `User submitted: ${JSON.stringify(outcome.result)}`;
-      }
+      const type = outcome.format === 'html' ? 'document' : 'interactive';
       return {
-        content: [{ type: 'text', text }],
-        structuredContent: {
-          state: outcome.state,
-          result: outcome.result,
-          format: outcome.format,
-          page_id,
-        },
+        content: [{ type: 'text' as const, text: responseText(outcome) }],
+        structuredContent: { page_id, type, state: outcome.state, response: outcome.result },
       };
     },
   );
+}
+
+function ephemeralWriteResponse(type: 'interactive' | 'document', page: EphemeralPageResult) {
+  return {
+    content: [{ type: 'text' as const, text: `Page ready: ${page.url}` }],
+    structuredContent: {
+      page_id: page.id,
+      type,
+      durable: false,
+      url: page.url,
+      expires_at: page.expires_at,
+    },
+  };
+}
+
+function responseText(outcome: Exclude<ResponseReadOutcome, { readonly kind: 'not_found' }>): string {
+  if (outcome.format === 'html') return 'This document page is view-only and has no response.';
+  if (outcome.result === null) return `No response yet (state: ${outcome.state}).`;
+  return `Response: ${JSON.stringify(outcome.result)}`;
 }

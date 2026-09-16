@@ -7,6 +7,7 @@
  * schemas.test.ts; here we only validate the cryptographic primitives.
  */
 import { generateKeyPairSync } from 'node:crypto';
+import type { KeyObject } from 'node:crypto';
 import { describe, expect, it, beforeAll, afterEach, vi } from 'vitest';
 import {
   ALG,
@@ -18,7 +19,8 @@ import {
   getJwks,
   getIssuer,
 } from './jwt.ts';
-import { decodeJwt, decodeProtectedHeader } from 'jose';
+import { SignJWT, decodeJwt, decodeProtectedHeader } from 'jose';
+import { env } from '../schemas.ts';
 
 // --- Test setup --------------------------------------------------------------
 
@@ -30,16 +32,20 @@ const SAMPLE_CLAIMS = {
   scope: 'page:create page:read',
 };
 
-function generateTestKeyEnv(): { signingKey: string; publicKey: string } {
+let testPrivateKey: KeyObject | null = null;
+
+function generateTestKeyEnv(): { signingKey: string; publicKey: string; privateKey: KeyObject } {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   return {
     signingKey: privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64url'),
     publicKey: publicKey.export({ type: 'spki', format: 'der' }).toString('base64url'),
+    privateKey,
   };
 }
 
 beforeAll(async () => {
-  const { signingKey, publicKey } = generateTestKeyEnv();
+  const { signingKey, publicKey, privateKey } = generateTestKeyEnv();
+  testPrivateKey = privateKey;
   await initKeys(signingKey, publicKey);
 });
 
@@ -49,9 +55,42 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+async function signTokenWithTyp(typ: string | undefined): Promise<string> {
+  const privateKey = testPrivateKey;
+  if (!privateKey) throw new Error('test signing key not initialized');
+  const issuer = getIssuer();
+  const protectedHeader = typ === undefined ? { alg: ALG, kid: KID } : { alg: ALG, typ, kid: KID };
+  return await new SignJWT({
+    client_id: SAMPLE_CLAIMS.clientId,
+    scope: SAMPLE_CLAIMS.scope,
+    email: SAMPLE_CLAIMS.email,
+    handle: SAMPLE_CLAIMS.handle,
+  })
+    .setProtectedHeader(protectedHeader)
+    .setSubject(SAMPLE_CLAIMS.sub)
+    .setIssuer(issuer)
+    .setAudience(issuer)
+    .setIssuedAt()
+    .setExpirationTime('1h')
+    .setJti('typ-enforcement-test')
+    .sign(privateKey);
+}
+
 // --- Round-trip --------------------------------------------------------------
 
 describe('signAccessToken / verifyAccessToken', () => {
+  it('uses API_PUBLIC_URL as the issuer instead of the renderer origin', () => {
+    const originalPublicUrl = env.PUBLIC_URL;
+    const originalApiUrl = env.API_PUBLIC_URL;
+    env.PUBLIC_URL = 'https://pagent.link';
+    env.API_PUBLIC_URL = 'https://api.pagent.link';
+    try {
+      expect(getIssuer()).toBe('https://api.pagent.link');
+    } finally {
+      env.PUBLIC_URL = originalPublicUrl;
+      env.API_PUBLIC_URL = originalApiUrl;
+    }
+  });
   it('signs a token whose header is alg=EdDSA, typ=at+jwt, kid=pagent-2026-05', async () => {
     const token = await signAccessToken(SAMPLE_CLAIMS);
     const header = decodeProtectedHeader(token);
@@ -71,6 +110,23 @@ describe('signAccessToken / verifyAccessToken', () => {
     expect(payload.handle).toBe(SAMPLE_CLAIMS.handle);
     expect(payload.client_id).toBe(SAMPLE_CLAIMS.clientId);
     expect(payload.scope).toBe(SAMPLE_CLAIMS.scope);
+  });
+
+  it('accepts a same-issuer and audience token with typ=at+jwt', async () => {
+    const token = await signTokenWithTyp(TYP);
+    await expect(verifyAccessToken(token)).resolves.toMatchObject({
+      sub: SAMPLE_CLAIMS.sub,
+    });
+  });
+
+  it('rejects a same-issuer and audience token with missing typ', async () => {
+    const token = await signTokenWithTyp(undefined);
+    await expect(verifyAccessToken(token)).rejects.toThrow();
+  });
+
+  it('rejects a same-issuer and audience token with typ=JWT', async () => {
+    const token = await signTokenWithTyp('JWT');
+    await expect(verifyAccessToken(token)).rejects.toThrow();
   });
 
   it('sets exp to iat + ACCESS_TOKEN_TTL_SECONDS (default 3600)', async () => {
@@ -127,20 +183,13 @@ describe('signAccessToken / verifyAccessToken', () => {
   });
 
   it('rejects a token with the wrong issuer', async () => {
-    // Sign normally, then temporarily override env.PUBLIC_URL by stubbing
-    // getIssuer. Easier: sign with current iss, then verify after rotating
-    // env.PUBLIC_URL. Since getIssuer reads env on every call, mutating
-    // env.PUBLIC_URL changes what verifyAccessToken expects.
     const token = await signAccessToken(SAMPLE_CLAIMS);
-    // Grab the env module to flip PUBLIC_URL — it's a Zod-parsed object so
-    // we mutate the in-memory copy directly.
-    const { env } = await import('../schemas.ts');
-    const original = env.PUBLIC_URL;
-    (env as { PUBLIC_URL: string | undefined }).PUBLIC_URL = 'https://impostor.example.com';
+    const original = env.API_PUBLIC_URL;
+    env.API_PUBLIC_URL = 'https://impostor.example.com';
     try {
       await expect(verifyAccessToken(token)).rejects.toThrow();
     } finally {
-      (env as { PUBLIC_URL: string | undefined }).PUBLIC_URL = original;
+      env.API_PUBLIC_URL = original;
     }
   });
 

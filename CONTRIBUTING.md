@@ -103,13 +103,15 @@ Tests live next to their source as `*.test.ts`.
 npm test              # run once
 npm run test:watch    # re-run on change (while iterating)
 npm run test:coverage # coverage report
+npm run test:e2e      # Chromium + production-mode API against PostgreSQL
 ```
 
 - **Unit tests** target pure helpers — no DB, no network.
 - **Handler tests** use `app.fetch(new Request(...))` with the DB module
-  mocked (see `apps/api/app.test.ts`).
-- A real-Postgres integration test is intentionally deferred; don't add one
-  without discussing first.
+  mocked (see the colocated `apps/api/**/*.test.ts` suites).
+- **Production E2E tests** in `tests/e2e/` start the real API and web build,
+  exercise Chromium and the shipped MCP bundle, and use a PostgreSQL database
+  supplied through `DATABASE_URL`. CI provisions that database automatically.
 
 ---
 
@@ -134,8 +136,10 @@ manually before pushing:
 .husky/pre-push
 ```
 
-CI mirrors the same steps and additionally runs `build:web` and verifies the
-MCP bundle is up to date. Both gates must be green for a PR to merge.
+CI mirrors the same steps and additionally verifies the deploy layout, enforces
+coverage, runs the real-PostgreSQL Chromium suite, builds the web app, and
+verifies the MCP bundle is up to date. Both gates must be green for a PR to
+merge.
 
 ---
 

@@ -1,15 +1,26 @@
 # 01 — Environment variables & database schema
 
+> Status: implemented. This checklist is retained as an as-built contract and
+> has been reconciled with the current runtime.
+
 ## Description
 
 Extend the env schema with all auth-related variables and add the six new auth tables (`users`, `sessions`, `oauth_clients`, `auth_codes`, `refresh_tokens`, `magic_links`) plus the `owner_id` column on `pages` to the database bootstrap in `db.ts`.
 
-## Files to create/modify
+## As-built files
 
-- `apps/api/schemas.ts` — add `REQUIRE_AUTH`, `JWT_SIGNING_KEY`, `JWT_PUBLIC_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `MAGIC_LINK_SECRET`, `AUTH_STATE_SECRET`, `SESSION_MAX_AGE_DAYS`, `REFRESH_TOKEN_MAX_DAYS`, `ACCESS_TOKEN_TTL_SECONDS`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` to `envSchema`. Add `superRefine` requiring crypto/SMTP vars when `REQUIRE_AUTH=true`.
-- `apps/api/schemas.test.ts` — tests for the new env vars and `superRefine` logic.
-- `apps/api/db.ts` — add `CREATE TABLE IF NOT EXISTS` for `users`, `sessions`, `oauth_clients`, `auth_codes`, `refresh_tokens`, `magic_links` in the `init()` function. Add `ALTER TABLE pages ADD COLUMN IF NOT EXISTS owner_id`. Add indexes from spec section 2.
-- `apps/api/db.test.ts` — tests verifying tables are created and `owner_id` column exists on `pages`.
+- `apps/api/schemas.ts` — validates the auth, lifetime, SMTP, public-origin,
+  CORS, and trusted Railway ingress settings. Crypto/SMTP variables are
+  required when `REQUIRE_AUTH=true`; production origins and
+  `TRUSTED_PROXY_MODE=railway` are always required in production.
+- `apps/api/schemas.env-auth.test.ts` — tests the environment contract and safe
+  production boolean parsing.
+- `apps/api/db/connection.ts` — idempotently creates `users`, `sessions`,
+  `oauth_clients`, `auth_codes`, `refresh_tokens`, and `magic_links`, including
+  Google subject binding, per-grant refresh-family IDs, stored magic-link
+  authorize context, and the nullable `pages.owner_id` migration.
+- `apps/api/db*.test.ts` and real-PostgreSQL E2E tests — verify schema and
+  concurrency/security invariants.
 - `apps/api/.env.example` — document the new env vars.
 
 ## Acceptance criteria
@@ -19,7 +30,16 @@ Extend the env schema with all auth-related variables and add the six new auth t
 - All six tables are created idempotently on `db.init()` — running init twice does not error.
 - `pages` table has a nullable `owner_id` FK referencing `users(id)` with `ON DELETE SET NULL`.
 - `users` table has unique indexes on `lower(email)` and `lower(handle)`.
+- Google identities have a unique non-null `google_sub` binding.
+- Authorization codes and refresh tokens persist per-grant family IDs.
+- The additive family-ID migration installs defaults before backfill and
+  serializes the backfill/`NOT NULL` transition; legacy auth codes are consumed
+  and legacy refresh rows are revoked so clients reauthenticate safely.
+- Magic links persist their authorize context as JSONB.
 - `sessions`, `auth_codes`, `refresh_tokens`, `magic_links` have `expires_at` indexes.
+- The server's periodic retention sweep deletes expired sessions, auth codes,
+  magic links, and refresh tokens; authorization reads independently enforce
+  expiry.
 - Existing tests continue to pass (no regressions).
 
 ## Dependencies

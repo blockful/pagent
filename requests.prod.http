@@ -11,12 +11,13 @@
 
 @apiHost   = https://api.pagent.link
 @viewHost  = https://pagent.link
+@pagentToken = replace-with-an-oauth-access-token
 
 ###############################################################################
 # 1. Health check
 ###############################################################################
 
-### Confirm the API is up. Returns { ok, pages: <count> }.
+### Confirm the API and database are up. Returns { ok: true, db: "ok" }.
 GET {{apiHost}}/health
 
 ###############################################################################
@@ -29,6 +30,7 @@ GET {{apiHost}}/health
 # @name createPage
 POST {{apiHost}}/new
 Content-Type: application/json
+Authorization: Bearer {{pagentToken}}
 
 {
   "spec": [
@@ -74,7 +76,7 @@ Content-Type: application/json
 ###############################################################################
 
 ### What the renderer fetches on mount. Returns
-### { spec, state, result, expires_at }. State should be "open" until
+### { spec, format, state, result, expires_at }. State should be "open" until
 ### someone submits.
 GET {{apiHost}}/{{pageId}}
 
@@ -82,9 +84,10 @@ GET {{apiHost}}/{{pageId}}
 # 5. Agent's first read — state is "open"
 ###############################################################################
 
-### The agent polls this endpoint. Returns { state, result } immediately.
+### The agent polls this endpoint. Returns { state, result, format } immediately.
 ### While the user hasn't submitted, state is "open" and result is null.
 GET {{apiHost}}/{{pageId}}/result
+Authorization: Bearer {{pagentToken}}
 
 ###############################################################################
 # 6. Browser submit — POST the user's action
@@ -111,10 +114,12 @@ Content-Type: application/json
 ### First read after submit returns { state: "submitted", result: {...} }
 ### and transitions the page to "received". Run it once.
 GET {{apiHost}}/{{pageId}}/result
+Authorization: Bearer {{pagentToken}}
 
 ### Second read returns { state: "received", result: {...} }. The result
 ### is still readable; the state field is the only thing that changed.
 GET {{apiHost}}/{{pageId}}/result
+Authorization: Bearer {{pagentToken}}
 
 ###############################################################################
 # 8. Try to re-submit — should 409

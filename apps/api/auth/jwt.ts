@@ -12,6 +12,7 @@ import { SignJWT, jwtVerify, importPKCS8, importSPKI, exportJWK } from 'jose';
 import type { JWK, JWTPayload } from 'jose';
 import { randomUUID } from 'node:crypto';
 import { env } from '../schemas.ts';
+import { getApiPublicUrl } from './api-url.ts';
 
 // --- Constants ---------------------------------------------------------------
 
@@ -95,7 +96,7 @@ export async function initKeys(signingKeyB64u: string, publicKeyB64u: string): P
 // --- Issuer / audience derivation -------------------------------------------
 
 /**
- * Issuer URL — derived from PUBLIC_URL with the same dev fallback as app.ts.
+ * Issuer URL derived from the public API origin with a localhost dev fallback.
  *
  * For pagent's co-hosted AS+RS, `iss` and `aud` are identical. Computed on
  * every call (rather than cached) so tests that mutate env / app config
@@ -103,7 +104,7 @@ export async function initKeys(signingKeyB64u: string, publicKeyB64u: string): P
  * invalidate this module.
  */
 export function getIssuer(): string {
-  return env.PUBLIC_URL ?? `http://localhost:${env.PORT}`;
+  return getApiPublicUrl();
 }
 
 // --- Signing -----------------------------------------------------------------
@@ -152,16 +153,11 @@ export async function verifyAccessToken(token: string): Promise<JwtPayload> {
     throw new Error('JWT public key not initialized — call initKeys() at boot');
   }
   const issuer = getIssuer();
-  // jose's jwtVerify checks signature, `exp` (against current time with a
-  // small clock-skew tolerance), `nbf`, and the issuer/audience options.
-  // It does NOT validate the `typ` header for us — that's a callers'
-  // concern; we set it on sign but don't gate on it here (RFC 9068 §4
-  // requires RS-side typ enforcement, but pagent's verifier is only ever
-  // called on its own tokens, so the `iss` check is already enough).
   const { payload } = await jwtVerify(token, publicKey, {
     issuer,
     audience: issuer,
     algorithms: [ALG],
+    typ: TYP,
   });
   assertPagentClaims(payload);
   return payload;

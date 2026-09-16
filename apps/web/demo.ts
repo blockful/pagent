@@ -176,9 +176,16 @@ class PagentDemo extends SignalWatcher(LitElement) {
       word-break: break-word;
     }
     .dash {
+      --demo-dashboard-height: 380px;
+      container-type: inline-size;
       border-radius: 10px;
       overflow: hidden;
       border: 1px solid var(--a2ui-color-border, #e4e4e7);
+    }
+    @container (max-width: 400px) {
+      .dash > iframe {
+        --demo-dashboard-height: 480px;
+      }
     }
     .demo-foot {
       margin-top: 28px;
@@ -216,7 +223,7 @@ class PagentDemo extends SignalWatcher(LitElement) {
   // lockdown defaults createSandboxedIframe sets.
   private readonly dashboardFrame = (() => {
     const frame = createSandboxedIframe(DEMO_DASHBOARD_HTML);
-    frame.style.height = '300px';
+    frame.style.height = 'var(--demo-dashboard-height)';
     return frame;
   })();
 

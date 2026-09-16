@@ -1,297 +1,156 @@
-/**
- * Unit tests for shared MCP tool registration.
- *
- * Exercises registerPagentTools against a stub server so we can assert
- * the tools' shapes, descriptions, and handler behavior without booting
- * a transport. The HTTP MCP integration (apps/api/mcp/http.test.ts)
- * covers end-to-end client flows; this file pins the contract the model
- * sees and the per-tool handler logic.
- */
-import { describe, it, expect } from 'vitest';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { registerPagentTools, type PageOps } from './tools.ts';
+import { describe, expect, it } from 'vitest';
+import { registerPagentTools, type PageOps, type PagentToolRegistrar } from './tools.ts';
 
 type RegisteredTool = {
-  description: string;
-  inputSchema: unknown;
-  handler: (...args: unknown[]) => unknown;
+  readonly handler: (...args: unknown[]) => unknown;
 };
 
-function makeServer(): {
-  server: McpServer;
-  tools: Map<string, RegisteredTool>;
-} {
+function makeServer() {
   const tools = new Map<string, RegisteredTool>();
   const server = {
     registerTool(
       name: string,
-      def: { description: string; inputSchema: unknown },
-      handler: (...args: unknown[]) => unknown,
+      _definition: { readonly title?: string; readonly description?: string },
+      handler: (...args: never[]) => unknown,
     ) {
-      tools.set(name, { ...def, handler });
+      tools.set(name, {
+        handler: (...args: unknown[]): unknown => Reflect.apply(handler, undefined, args),
+      });
     },
-  } as unknown as McpServer;
+  } satisfies PagentToolRegistrar;
   return { server, tools };
 }
 
-// Default no-op PageOps. Tests that exercise a specific handler call
-// makeOps({ ... }) to override one or more methods.
 const defaultOps: PageOps = {
-  showUi: async () => ({ id: 'a'.repeat(32), url: 'http://x/a', expires_at: 0 }),
-  showHtml: async () => ({ id: 'b'.repeat(32), url: 'http://x/b', expires_at: 0 }),
-  checkResult: async () => ({ kind: 'state', state: 'open', result: null, format: 'a2ui' }),
-  publishDeck: async () => ({
-    deck_id: '00000000-0000-4000-8000-000000000001',
+  writeInteractive: async () => ({ id: 'a'.repeat(32), url: 'https://pagent.link/a', expires_at: 1 }),
+  writeDocument: async () => ({ id: 'b'.repeat(32), url: 'https://pagent.link/b', expires_at: 2 }),
+  writePresentation: async () => ({
+    page_id: '00000000-0000-4000-8000-000000000001',
     revision_id: '00000000-0000-4000-8000-000000000002',
     revision_number: 1,
-    dashboard_url: 'http://x/decks/00000000-0000-4000-8000-000000000001',
-    preview_url: 'http://x/decks/00000000-0000-4000-8000-000000000001#preview',
+    manage_url: 'https://pagent.link/pages/00000000-0000-4000-8000-000000000001',
+    preview_url: 'https://pagent.link/pages/00000000-0000-4000-8000-000000000001#preview',
   }),
+  readResponse: async () => ({ kind: 'state', state: 'open', result: null, format: 'a2ui' }),
+  readAnalytics: async () => ({ overview: { totalVisits: 3, uniqueViewers: 2 }, slides: [] }),
 };
 
-function makeOps(overrides: Partial<PageOps> = {}): PageOps {
-  return { ...defaultOps, ...overrides };
+function makeTools(overrides: Partial<PageOps> = {}) {
+  const { server, tools } = makeServer();
+  registerPagentTools(server, { ...defaultOps, ...overrides });
+  return tools;
 }
 
+function tool(tools: Map<string, RegisteredTool>, name: string): RegisteredTool {
+  const found = tools.get(name);
+  if (found === undefined) throw new Error(`expected ${name} to be registered`);
+  return found;
+}
+
+function structuredContent(result: unknown): unknown {
+  if (typeof result !== 'object' || result === null || !('structuredContent' in result)) {
+    throw new Error('expected structuredContent');
+  }
+  return result.structuredContent;
+}
+
+const auth = {
+  authInfo: {
+    scopes: ['page:create', 'page:read'],
+    extra: { sub: '00000000-0000-4000-8000-000000000010', email: 'owner@example.com' },
+  },
+};
+
 describe('registerPagentTools', () => {
-  it('registers publish_deck with the existing page tools', () => {
-    // Given
-    const { server, tools } = makeServer();
-
-    // When
-    registerPagentTools(server, makeOps());
-
-    // Then
-    expect(tools.has('show_ui')).toBe(true);
-    expect(tools.has('show_html')).toBe(true);
-    expect(tools.has('check_result')).toBe(true);
-    expect(tools.has('publish_deck')).toBe(true);
+  it('registers exactly read and write', () => {
+    expect([...makeTools().keys()].sort()).toEqual(['read', 'write']);
   });
 
-  it('publish_deck returns durable deck and revision URLs', async () => {
-    // Given
-    const { server, tools } = makeServer();
-    registerPagentTools(server, makeOps());
-
-    // When
-    const handler = tools.get('publish_deck')?.handler;
-    const output = await handler?.({
-      title: 'Northstar',
-      slides: [{ id: 'cover', html: '<h1>Northstar</h1>' }],
-    });
-
-    // Then
-    expect(output).toMatchObject({
-      structuredContent: {
-        deck_id: '00000000-0000-4000-8000-000000000001',
-        revision_number: 1,
+  it('writes interactive and document pages through one tool', async () => {
+    const seen: string[] = [];
+    const tools = makeTools({
+      writeInteractive: async (_spec, ownerId) => {
+        seen.push(`interactive:${ownerId}`);
+        return defaultOps.writeInteractive([], ownerId);
+      },
+      writeDocument: async (_html, ownerId) => {
+        seen.push(`document:${ownerId}`);
+        return defaultOps.writeDocument('', ownerId);
       },
     });
-  });
 
-  it('show_html description mentions view-only and no scripts', () => {
-    const { server, tools } = makeServer();
-    registerPagentTools(server, makeOps());
-    const desc = tools.get('show_html')!.description;
-    expect(desc).toMatch(/view-only/i);
-    expect(desc).toMatch(/script/i);
-    expect(desc).toMatch(/JavaScript/i);
-  });
-
-  it('show_ui description distinguishes itself from show_html', () => {
-    const { server, tools } = makeServer();
-    registerPagentTools(server, makeOps());
-    const desc = tools.get('show_ui')!.description;
-    expect(desc).toMatch(/show_html/);
-  });
-
-  it('check_result structuredContent includes format', async () => {
-    const { server, tools } = makeServer();
-    registerPagentTools(server, makeOps());
-    const handler = tools.get('check_result')!.handler;
-    const out = (await handler({ page_id: 'a'.repeat(32) })) as {
-      structuredContent: { state: string; result: unknown; page_id: string; format: string };
-    };
-    expect(out.structuredContent.format).toBe('a2ui');
-  });
-
-  it('show_html handler returns structuredContent matching showHtml + "do not poll" text', async () => {
-    const { server, tools } = makeServer();
-    const expectedId = 'c'.repeat(32);
-    const expectedUrl = 'http://test.local/' + expectedId;
-    const expectedExpires = 1700000000000;
-    registerPagentTools(
-      server,
-      makeOps({
-        showHtml: async (html) => {
-          // Sanity check: handler must forward the html argument.
-          expect(html).toBe('<p>x</p>');
-          return { id: expectedId, url: expectedUrl, expires_at: expectedExpires };
-        },
-      }),
+    const interactive = await tool(tools, 'write').handler(
+      { type: 'interactive', spec: [] },
+      auth,
     );
-    const handler = tools.get('show_html')!.handler;
-    const out = (await handler({ html: '<p>x</p>' })) as {
-      structuredContent: { page_id: string; url: string; expires_at: number };
-      content: Array<{ type: string; text: string }>;
-    };
-    expect(out.structuredContent.page_id).toBe(expectedId);
-    expect(out.structuredContent.url).toBe(expectedUrl);
-    expect(out.structuredContent.expires_at).toBe(expectedExpires);
-    // Per show_html handler text (tools.ts), the LLM-facing string tells the
-    // model the page is view-only and not to poll. Match on "do not poll".
-    expect(out.content[0]?.text).toMatch(/do not poll/i);
+    const document = await tool(tools, 'write').handler(
+      { type: 'document', html: '<h1>Report</h1>' },
+      auth,
+    );
+
+    expect(seen).toEqual([
+      'interactive:00000000-0000-4000-8000-000000000010',
+      'document:00000000-0000-4000-8000-000000000010',
+    ]);
+    expect(structuredContent(interactive)).toMatchObject({ type: 'interactive', durable: false });
+    expect(structuredContent(document)).toMatchObject({ type: 'document', durable: false });
   });
 
-  it('check_result handler on an HTML page surfaces "stop polling" guidance', async () => {
-    const { server, tools } = makeServer();
-    registerPagentTools(
-      server,
-      makeOps({
-        checkResult: async () => ({
-          kind: 'state',
-          state: 'open',
-          result: null,
-          format: 'html',
-        }),
-      }),
-    );
-    const handler = tools.get('check_result')!.handler;
-    const out = (await handler({ page_id: 'd'.repeat(32) })) as {
-      structuredContent: { state: string; result: unknown; format: string; page_id: string };
-      content: Array<{ type: string; text: string }>;
-    };
-    expect(out.structuredContent.format).toBe('html');
-    expect(out.structuredContent.state).toBe('open');
-    expect(out.structuredContent.result).toBe(null);
-    expect(out.content[0]?.text).toMatch(/stop polling/i);
-  });
-
-  // ---------------------------------------------------------------------------
-  // Auth context propagation
-  // ---------------------------------------------------------------------------
-  // The HTTP MCP transport stamps `req.auth.extra.sub` after Bearer verify
-  // and the SDK forwards that as `extra.authInfo.extra.sub` to tool handlers.
-  // These tests pin the contract that the handler lifts that out and passes
-  // it to ops.showUi / ops.showHtml as `ownerId`.
-
-  it('show_ui handler forwards extra.authInfo.extra.sub to ops.showUi as ownerId', async () => {
-    const { server, tools } = makeServer();
-    const captured: { spec?: unknown; ownerId?: string } = {};
-    registerPagentTools(
-      server,
-      makeOps({
-        showUi: async (spec, ownerId) => {
-          captured.spec = spec;
-          captured.ownerId = ownerId;
-          return { id: 'a'.repeat(32), url: 'http://x/a', expires_at: 0 };
-        },
-      }),
-    );
-    const handler = tools.get('show_ui')!.handler;
-    await handler(
-      { spec: [{ createSurface: { surfaceId: 'm' } }] },
-      {
-        authInfo: {
-          token: 'tok',
-          clientId: 'mcp-cli',
-          scopes: ['page:create'],
-          extra: { sub: 'user-uuid-abc', email: 'a@b.co' },
-        },
+  it('writes a durable presentation page and maps page_id to the existing revision model', async () => {
+    let updateDeckId: string | undefined;
+    const tools = makeTools({
+      writePresentation: async (input, publisher) => {
+        updateDeckId = input.update_deck_id;
+        expect(publisher).toEqual({
+          id: '00000000-0000-4000-8000-000000000010',
+          email: 'owner@example.com',
+        });
+        return defaultOps.writePresentation(input, publisher);
       },
-    );
-    expect(captured.ownerId).toBe('user-uuid-abc');
-  });
+    });
 
-  it('show_ui handler passes ownerId = undefined when no authInfo is present', async () => {
-    const { server, tools } = makeServer();
-    let captured: string | undefined = 'sentinel';
-    registerPagentTools(
-      server,
-      makeOps({
-        showUi: async (_spec, ownerId) => {
-          captured = ownerId;
-          return { id: 'a'.repeat(32), url: 'http://x/a', expires_at: 0 };
-        },
-      }),
-    );
-    const handler = tools.get('show_ui')!.handler;
-    // Stdio adapter / anon HTTP MCP: extra has no authInfo.
-    await handler({ spec: [{ createSurface: { surfaceId: 'm' } }] }, {});
-    expect(captured).toBeUndefined();
-  });
-
-  it('show_html handler forwards extra.authInfo.extra.sub to ops.showHtml as ownerId', async () => {
-    const { server, tools } = makeServer();
-    let captured: string | undefined;
-    registerPagentTools(
-      server,
-      makeOps({
-        showHtml: async (_html, ownerId) => {
-          captured = ownerId;
-          return { id: 'b'.repeat(32), url: 'http://x/b', expires_at: 0 };
-        },
-      }),
-    );
-    const handler = tools.get('show_html')!.handler;
-    await handler(
-      { html: '<p>x</p>' },
+    const result = await tool(tools, 'write').handler(
       {
-        authInfo: {
-          token: 'tok',
-          clientId: 'mcp-cli',
-          scopes: ['page:create'],
-          extra: { sub: 'user-uuid-def' },
-        },
+        type: 'presentation',
+        page_id: '00000000-0000-4000-8000-000000000001',
+        title: 'Northstar',
+        slides: [{ id: 'cover', html: '<h1>Northstar</h1>' }],
       },
+      auth,
     );
-    expect(captured).toBe('user-uuid-def');
+
+    expect(updateDeckId).toBe('00000000-0000-4000-8000-000000000001');
+    expect(structuredContent(result)).toMatchObject({ type: 'presentation', durable: true });
   });
 
-  it('show_html handler passes ownerId = undefined when no authInfo is present', async () => {
-    const { server, tools } = makeServer();
-    let captured: string | undefined = 'sentinel';
-    registerPagentTools(
-      server,
-      makeOps({
-        showHtml: async (_html, ownerId) => {
-          captured = ownerId;
-          return { id: 'b'.repeat(32), url: 'http://x/b', expires_at: 0 };
-        },
-      }),
+  it('reads an ephemeral response and a presentation analytics summary', async () => {
+    const tools = makeTools();
+    const response = await tool(tools, 'read').handler({ page_id: 'a'.repeat(32) }, auth);
+    const analytics = await tool(tools, 'read').handler(
+      { page_id: '00000000-0000-4000-8000-000000000001' },
+      auth,
     );
-    const handler = tools.get('show_html')!.handler;
-    await handler({ html: '<p>x</p>' }, {});
-    expect(captured).toBeUndefined();
+
+    expect(structuredContent(response)).toEqual({
+      page_id: 'a'.repeat(32),
+      type: 'interactive',
+      state: 'open',
+      response: null,
+    });
+    expect(structuredContent(analytics)).toMatchObject({
+      page_id: '00000000-0000-4000-8000-000000000001',
+      type: 'presentation',
+      analytics: { overview: { totalVisits: 3, uniqueViewers: 2 } },
+    });
   });
 
-  it('handler tolerates non-string extra.authInfo.extra.sub (defensive)', async () => {
-    // If an upstream auth pipeline ever set `sub` to a number / object, the
-    // helper must not pass through garbage. ownerId should be undefined and
-    // the store will write owner_id = NULL.
-    const { server, tools } = makeServer();
-    let captured: string | undefined = 'sentinel';
-    registerPagentTools(
-      server,
-      makeOps({
-        showUi: async (_spec, ownerId) => {
-          captured = ownerId;
-          return { id: 'a'.repeat(32), url: 'http://x/a', expires_at: 0 };
-        },
-      }),
-    );
-    const handler = tools.get('show_ui')!.handler;
-    await handler(
-      { spec: [{ createSurface: { surfaceId: 'm' } }] },
-      {
-        authInfo: {
-          token: 'tok',
-          clientId: 'mcp-cli',
-          scopes: [],
-          extra: { sub: 42 as unknown as string },
-        },
-      },
-    );
-    expect(captured).toBeUndefined();
+  it.each([
+    ['write', { type: 'interactive', spec: [] }, 'page:create'],
+    ['read', { page_id: 'a'.repeat(32) }, 'page:read'],
+  ] as const)('enforces %s OAuth scope', async (name, input, expectedScope) => {
+    const tools = makeTools();
+    await expect(
+      tool(tools, name).handler(input, { authInfo: { scopes: [], extra: {} } }),
+    ).rejects.toThrow(expectedScope);
   });
 });

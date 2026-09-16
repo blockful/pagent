@@ -84,9 +84,7 @@ export async function createSession(
  * do this *after* resolving the user so a DB blip on the extend doesn't
  * fail the request (the row stays valid until the original `expires_at`).
  *
- * `authMethod` is set to 'cookie' here. The middleware overwrites it
- * downstream so both code paths converge on the same shape, but populating
- * it here keeps this function's return type honest.
+ * `authMethod` is set to 'cookie' here and consumed directly by the middleware.
  */
 export async function lookupSession(token: string): Promise<AuthUser | null> {
   if (!token) return null;

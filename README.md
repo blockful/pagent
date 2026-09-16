@@ -43,10 +43,10 @@ In plain English: the agent reads its skill, decides a real form is the right wa
 npm-workspaces monorepo. Three apps + the plugin scaffolding.
 
 ```
+railway.json                          # Railway API service config (repo-root deploy)
 apps/
 ├── api/                             # REST service (Hono). Deployed on Railway.
 │   ├── server.ts
-│   ├── railway.json
 │   └── .env.example
 ├── web/                             # Vite-served renderer. Deployed on Vercel.
 │   ├── index.html, main.ts
@@ -77,21 +77,30 @@ The repo doubles as a Claude Code plugin and a self-hosted marketplace: `.claude
 
 Each app validates its environment at boot/build with Zod and fails loudly on missing or malformed values — no silent defaults that bite in production. `.env.example` files in each app are the source of truth.
 
-| App                                               | Variable                   | Required?           | Validation / default                                                                                |
-| ------------------------------------------------- | -------------------------- | ------------------- | --------------------------------------------------------------------------------------------------- |
-| **api** ([`.env.example`](apps/api/.env.example)) | `DATABASE_URL`             | **always**          | Non-empty string. Boot fails with a `ZodError` otherwise.                                           |
-|                                                   | `PUBLIC_URL`               | **production**      | Valid URL. Used in `show_ui` responses.                                                             |
-|                                                   | `ALLOWED_ORIGINS`          | **production**      | Comma-separated origin list. CORS allow-list.                                                       |
-|                                                   | `PORT`                     | optional            | Coerced to number. Default `8787`. Railway sets this.                                               |
-|                                                   | `PAGE_TTL_MS`              | optional            | Coerced to number. Default `1800000` (30 min).                                                      |
-|                                                   | `RATE_LIMIT_MAX`           | optional            | Positive integer. Default `30`.                                                                     |
-|                                                   | `RATE_LIMIT_WINDOW_MS`     | optional            | Positive integer. Default `60000`.                                                                  |
-|                                                   | `NODE_ENV`                 | optional            | One of `development` \| `production` \| `test`. Gates the production-only refinements above.        |
-|                                                   | `LOG_LEVEL`                | optional            | Pino level. Default `info`.                                                                         |
-|                                                   | `OTEL_EXPORTER_OTLP_*`     | optional            | OpenTelemetry exporter config. Leave `OTEL_EXPORTER_OTLP_ENDPOINT` unset to disable tracing.        |
-| **web** ([`.env.example`](apps/web/.env.example)) | `VITE_API_URL`             | **`vite build`**    | Valid URL. Inlined at build time and embedded in CSP. `vite dev` allows it unset (uses Vite proxy). |
-|                                                   | `API_PORT` / `CLIENT_PORT` | optional (dev only) | Valid port (1–65535). Defaults `8787` / `8788`.                                                     |
-| **mcp** ([`.env.example`](apps/mcp/.env.example)) | `PAGENT_URL`               | optional            | Valid URL when set. Default `https://api.pagent.link`.                                              |
+| App                                               | Variable                                                                       | Required?             | Validation / default                                                                                   |
+| ------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------ |
+| **api** ([`.env.example`](apps/api/.env.example)) | `DATABASE_URL`                                                                 | **always**            | Non-empty string. Boot fails with a `ZodError` otherwise.                                              |
+|                                                   | `PUBLIC_URL`                                                                   | **production**        | HTTPS renderer origin. Used in `show_ui` responses.                                                    |
+|                                                   | `API_PUBLIC_URL`                                                               | **production**        | HTTPS API origin. Used for OAuth issuer, callbacks, magic links, and discovery metadata.               |
+|                                                   | `ALLOWED_ORIGINS`                                                              | **production**        | Comma-separated origin list. CORS allow-list.                                                          |
+|                                                   | `PORT`                                                                         | optional              | Coerced to number. Default `8787`. Railway sets this.                                                  |
+|                                                   | `PAGE_TTL_MS`                                                                  | optional              | Coerced to number. Default `1800000` (30 min).                                                         |
+|                                                   | `RATE_LIMIT_MAX`                                                               | optional              | Positive integer. Default `30`.                                                                        |
+|                                                   | `RATE_LIMIT_WINDOW_MS`                                                         | optional              | Positive integer. Default `60000`.                                                                     |
+|                                                   | `TRUSTED_PROXY_MODE`                                                           | **production**        | Must be `railway`; trusts Railway's `X-Real-IP` for rate limiting and ignores `X-Forwarded-For`.       |
+|                                                   | `REQUIRE_AUTH`                                                                 | optional              | Boolean. Default `false`; set `true` to protect page creation/results and enable the full OAuth flow.  |
+|                                                   | `JWT_SIGNING_KEY` / `JWT_PUBLIC_KEY`                                           | when auth is required | Base64url DER Ed25519 private/public key pair used to sign and verify access tokens.                   |
+|                                                   | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`                                    | when auth is required | Google OAuth credentials. `GOOGLE_REDIRECT_URI` defaults to `{API_PUBLIC_URL}/oauth/callback/google`.  |
+|                                                   | `AUTH_STATE_SECRET`                                                            | when configured       | OAuth state HMAC secret; at least 32 UTF-8 bytes. Required when auth is enabled.                       |
+|                                                   | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS`                                        | when auth is required | SMTP credentials for magic links. `SMTP_PORT` defaults to `587`; `SMTP_FROM` to `noreply@pagent.link`. |
+|                                                   | `SESSION_MAX_AGE_DAYS` / `REFRESH_TOKEN_MAX_DAYS` / `ACCESS_TOKEN_TTL_SECONDS` | optional              | Defaults `30` / `90` / `3600`.                                                                         |
+|                                                   | `NODE_ENV`                                                                     | optional              | One of `development` \| `production` \| `test`. Gates the production-only refinements above.           |
+|                                                   | `LOG_LEVEL`                                                                    | optional              | Pino level. Default `info`.                                                                            |
+|                                                   | `OTEL_EXPORTER_OTLP_*`                                                         | optional              | OpenTelemetry exporter config. Leave `OTEL_EXPORTER_OTLP_ENDPOINT` unset to disable tracing.           |
+| **web** ([`.env.example`](apps/web/.env.example)) | `VITE_API_URL`                                                                 | **`vite build`**      | Valid URL. Inlined at build time and embedded in CSP. `vite dev` allows it unset (uses Vite proxy).    |
+|                                                   | `API_PORT` / `CLIENT_PORT`                                                     | optional (dev only)   | Valid port (1–65535). Defaults `8787` / `8788`.                                                        |
+| **mcp** ([`.env.example`](apps/mcp/.env.example)) | `PAGENT_URL`                                                                   | optional              | Valid URL when set. Default `https://api.pagent.link`.                                                 |
+|                                                   | `PAGENT_TOKEN`                                                                 | when auth is required | OAuth bearer token used by the stdio MCP transport for protected API calls.                            |
 
 When validation fails, the process logs the offending field and exits with a non-zero code — CI catches misconfigured deploys (`build:web` runs in CI with a placeholder `VITE_API_URL`) before they ship.
 
@@ -209,20 +218,32 @@ To bypass in an emergency: `git push --no-verify` (don't make this a habit).
 
 ## Deploy
 
-### `apps/api/` → Railway
+### API → Railway
 
-`apps/api/railway.json` contains the build + start config. To deploy:
+The repository-root `railway.json` contains the build + start config. The API
+must deploy from the repository root because it uses npm workspaces and serves
+`docs/openapi.yaml` at runtime. To deploy:
 
 1. Create a new Railway service from this repo.
-2. Set **Root Directory** to `apps/api` so Railway picks up the railway.json.
+2. Leave **Root Directory** unset so Railway includes the root workspace,
+   lockfile, `apps/api`, and `docs/openapi.yaml` and picks up `railway.json`.
 3. Set environment variables (see `apps/api/.env.example`):
    - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://pagent.link`). Used in `show_ui` responses. **Required in production.** Boot fails loudly if missing.
+   - `API_PUBLIC_URL` — the Railway public origin of `apps/api` (e.g. `https://api.pagent.link`). Used for OAuth issuer/discovery, default Google callbacks, magic links, and MCP auth metadata. **Required in production.** Must be HTTPS.
    - `ALLOWED_ORIGINS` — comma-separated origins allowed to call the API (set to your Vercel URL). **Required in production.** API boot fails loudly if missing.
    - `PORT` — Railway sets this automatically; the server reads it.
    - `PAGE_TTL_MS` — optional; default 30 minutes.
    - `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` — optional. Per-IP rate limit on `POST /new`. Defaults: 30 / 60000 (30 req/min). Tune up for load tests.
+   - `TRUSTED_PROXY_MODE` — set to `railway` after confirming staging traffic reaches the API only through Railway ingress. This trusts Railway's `X-Real-IP` and ignores `X-Forwarded-For`. **Required in production.**
+   - `REQUIRE_AUTH` — set to `true` to enforce authentication and scopes on protected page and MCP operations. Leave `false` only for the documented rollout grace period.
+   - `JWT_SIGNING_KEY` / `JWT_PUBLIC_KEY` — base64url-encoded DER Ed25519 key pair. Required when `REQUIRE_AUTH=true`.
+   - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — Google OAuth credentials. `GOOGLE_REDIRECT_URI` is optional and defaults to `${API_PUBLIC_URL}/oauth/callback/google`.
+   - `AUTH_STATE_SECRET` — secret used to authenticate OAuth state. Required when auth is enabled; any configured value must be at least 32 UTF-8 bytes.
+   - `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` — SMTP credentials for magic-link login. Required when auth is enabled. `SMTP_PORT` and `SMTP_FROM` have defaults.
+   - `SESSION_MAX_AGE_DAYS` / `REFRESH_TOKEN_MAX_DAYS` / `ACCESS_TOKEN_TTL_SECONDS` — optional auth lifetime controls. Defaults: 30 / 90 / 3600.
    - `OTEL_EXPORTER_OTLP_ENDPOINT` — optional. Grafana Cloud OTLP HTTP base URL (e.g. `https://otlp-gateway-prod-us-central-0.grafana.net/otlp`). Leave unset to disable observability entirely. See `apps/api/.env.example` for the rest of the OTel envs.
-4. Deploy. Railway runs `npm install` (which walks up to the workspace root) and starts the API with `npm -w @pagent/api run start`.
+4. Deploy. Railway runs `npm ci` at the repository root and starts the API with
+   `npm -w @pagent/api run start`.
 
 The `/health` endpoint is configured as the healthcheck path. Returns 200 only when the DB is reachable; 503 otherwise.
 
@@ -249,7 +270,7 @@ permissions-policy are set as HTTP headers via `apps/web/vercel.json`.
 
 ### Order matters
 
-Deploy Railway first to get the API URL. Then deploy Vercel with `VITE_API_URL` set to it. Then go back to Railway and set `PUBLIC_URL` + `ALLOWED_ORIGINS` to the Vercel URL.
+Provision the Railway and Vercel public domains first. Set Railway's `API_PUBLIC_URL` to its own API origin and `PUBLIC_URL` + `ALLOWED_ORIGINS` to the Vercel renderer origin. Set Vercel's `VITE_API_URL` to the Railway origin, then deploy both services.
 
 ## Operations
 
@@ -277,7 +298,7 @@ automatically and restarts the service on 503.
 **Failure response** (`503`) — Postgres is unreachable:
 
 ```json
-{ "ok": false, "db": "error" }
+{ "ok": false, "db": "error", "message": "Database connection failed" }
 ```
 
 There is no `pages` count in the response; the field was removed in an earlier
@@ -319,13 +340,13 @@ in Grafana from the trace and log streams.
 
 ### Common failure modes
 
-| Symptom                                             | Likely cause                                             | Where to look                                    | First response                                                                                                                           |
-| --------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /health` → 503                                 | Postgres unreachable                                     | Supabase status page; Railway DB env vars        | Check Supabase dashboard. If the DB is up but the env var was rotated, restore `DATABASE_URL` in Railway and redeploy.                   |
-| Spike of 429s on `POST /new`                        | Per-IP rate limit hit (default 30 req / 60 s)            | Railway logs — group by client IP                | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                    |
-| 413 on `POST /new`                                  | Request body > 256 KB                                    | Log field `error: payload_too_large`             | If a real use case, raise `MAX_BODY_BYTES` in `apps/api/app.ts` (code change + redeploy). Otherwise it's spam; ignore.                   |
-| CORS errors in the browser console at `pagent.link` | `ALLOWED_ORIGINS` does not include the renderer's origin | Browser DevTools → Network → failing preflight   | Add the missing origin to `ALLOWED_ORIGINS` in Railway env and restart the service.                                                      |
-| Boot failure with `ZodError` in Railway logs        | A required env var is missing                            | Railway logs (the process exits before it binds) | Read the Zod validation error — it names the missing field. Usually `PUBLIC_URL` or `ALLOWED_ORIGINS`. Set it in Railway, then redeploy. |
+| Symptom                                             | Likely cause                                             | Where to look                                     | First response                                                                                                                                   |
+| --------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /health` → 503                                 | Postgres unreachable                                     | Supabase status page; Railway DB env vars         | Check Supabase dashboard. If the DB is up but the env var was rotated, restore `DATABASE_URL` in Railway and redeploy.                           |
+| Spike of 429s on `POST /new`                        | Per-IP rate limit hit (default 30 req / 60 s)            | Railway logs — group by client IP                 | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                            |
+| 413 on `POST /new`                                  | A2UI spec > 256 KB or total JSON/HTML body > 1 MB        | Response fields `format` and `max_bytes`; API log | Reduce the payload. If the limit must change, adjust `A2UI_MAX_SPEC_BYTES` in `app/config.ts` or `HTML_MAX_BYTES` in `limits.ts`, then redeploy. |
+| CORS errors in the browser console at `pagent.link` | `ALLOWED_ORIGINS` does not include the renderer's origin | Browser DevTools → Network → failing preflight    | Add the missing origin to `ALLOWED_ORIGINS` in Railway env and restart the service.                                                              |
+| Boot failure with `ZodError` in Railway logs        | A required env var is missing                            | Railway logs (the process exits before it binds)  | Read the Zod validation error — it names the missing field. Usually `PUBLIC_URL` or `ALLOWED_ORIGINS`. Set it in Railway, then redeploy.         |
 
 ### Rollback
 
@@ -360,10 +381,12 @@ behaviour without touching code. `apps/api/.env.example` is the source of truth.
 | ----------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `PORT`                        | `8787`                    | Port the server listens on. Railway overrides this automatically.                                         |
 | `PUBLIC_URL`                  | _(required in prod)_      | Base URL of the renderer, returned in `show_ui` responses. Redeploy required after change.                |
+| `API_PUBLIC_URL`              | _(required in prod)_      | API origin used for OAuth issuer, callbacks, magic links, and MCP discovery. Restart required.            |
 | `PAGE_TTL_MS`                 | `1800000` (30 min)        | How long a page lives before expiring. Raising it keeps pages alive longer but grows the DB.              |
 | `ALLOWED_ORIGINS`             | _(required in prod)_      | Comma-separated origins the CORS middleware allows. Add an origin here and restart — no redeploy.         |
 | `RATE_LIMIT_MAX`              | `30`                      | Maximum requests per window per client IP on `POST /new`. Raise for load tests; restart picks it up.      |
 | `RATE_LIMIT_WINDOW_MS`        | `60000` (60 s)            | The rolling window for the rate limit above.                                                              |
+| `TRUSTED_PROXY_MODE`          | _(required in prod)_      | Set to `railway` to use Railway's `X-Real-IP` for abuse limits; `X-Forwarded-For` is ignored.             |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(unset = OTel disabled)_ | Grafana Cloud OTLP HTTP base URL. Set to enable traces; unset to disable. Restart required.               |
 | `LOG_LEVEL`                   | `info`                    | Pino log level: `fatal \| error \| warn \| info \| debug \| trace`. Lower = more noise. Restart required. |
 
@@ -380,10 +403,10 @@ Gaps to keep expectations calibrated:
 ## API
 
 ```
-POST   /new                  body: { spec }     -> { id, url, expires_at }
-GET    /:id                                     -> { spec, state, result, expires_at }
+POST   /new                  body: { format?, spec } -> { id, url, expires_at }
+GET    /:id                                     -> { spec, format, state, result, expires_at }
 POST   /:id/result           body: <action>     -> { ok }              (browser submits)
-GET    /:id/result                              -> { state, result }   (agent reads, marks "received" on first read)
+GET    /:id/result                              -> { state, result, format } (agent reads, marks "received" on first read)
 ```
 
 The API publishes its OpenAPI 3.1 spec at the conventional locations:
@@ -394,7 +417,7 @@ The API publishes its OpenAPI 3.1 spec at the conventional locations:
 
 The hand-authored source lives at `docs/openapi.yaml` and is loaded once at boot.
 
-The `spec` body is opaque to the service. V0 assumes A2UI v0.9 — there is no `format` tag on the wire.
+The `spec` body is opaque to the service. The optional `format` field selects `a2ui` (the default, using A2UI v0.9 messages) or sanitized, view-only `html`.
 
 A page is single-shot and walks a 3-state machine: `open -> submitted -> received`. `POST /:id/result` requires `state === "open"` (otherwise 409). The first `GET /:id/result` after submit returns `state: "submitted"` and flips the page to `received`; subsequent reads return `state: "received"`. The renderer can detect that transition via `GET /:id` to upgrade its "waiting for the agent" banner.
 
@@ -414,14 +437,14 @@ Or with curl, end-to-end:
 # 1. Create a page with a spec.
 curl -s -X POST http://localhost:8787/new \
   -H 'content-type: application/json' \
-  -d '{"spec":[{"createSurface":{"surfaceId":"main","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json"}},{"updateComponents":{"surfaceId":"main","components":[{"id":"root","component":"Column","children":["title","field","submit"]},{"id":"title","component":"Text","text":"Color?"},{"id":"field","component":"TextField","label":"Color","value":{"path":"/color"}},{"id":"submit-label","component":"Text","text":"Send"},{"id":"submit","component":"Button","child":"submit-label","variant":"primary","action":{"event":{"name":"submitted","context":{"color":{"path":"/color"}}}}}]}}]}'
+  -d '{"format":"a2ui","spec":[{"createSurface":{"surfaceId":"main","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json"}},{"updateComponents":{"surfaceId":"main","components":[{"id":"root","component":"Column","children":["title","field","submit"]},{"id":"title","component":"Text","text":"Color?"},{"id":"field","component":"TextField","label":"Color","value":{"path":"/color"}},{"id":"submit-label","component":"Text","text":"Send"},{"id":"submit","component":"Button","child":"submit-label","variant":"primary","action":{"event":{"name":"submitted","context":{"color":{"path":"/color"}}}}}]}}]}'
 # -> { "id": "<pageId>", "url": "http://localhost:8788/<pageId>", "expires_at": ... }
 
 # 2. Open the URL in a browser and click Send. Then poll:
 curl -s http://localhost:8787/<pageId>/result
-# -> { "state": "open",      "result": null }       (before submit)
-# -> { "state": "submitted", "result": { ... } }    (first read after submit; flips to received)
-# -> { "state": "received",  "result": { ... } }    (subsequent reads)
+# -> { "state": "open",      "result": null,    "format": "a2ui" } (before submit)
+# -> { "state": "submitted", "result": { ... }, "format": "a2ui" } (first read; flips to received)
+# -> { "state": "received",  "result": { ... }, "format": "a2ui" } (subsequent reads)
 ```
 
 ## Releases
