@@ -21121,7 +21121,7 @@ var SHOW_UI_DESCRIPTION = [
 var SHOW_UI_INPUT_DESCRIPTION = [
   "A2UI v0.9 spec \u2014 an array of A2UI messages.",
   'Start with one createSurface, then updateComponents with a tree whose root component MUST have id "root".',
-  "The basic catalog (https://a2ui.org/specification/v0_9/basic_catalog.json) provides Column, Row, Card, Text, TextField, Button, Checkbox, Image, Divider, List, Tabs, Slider.",
+  "The basic catalog (https://a2ui.org/specification/v0_9/basic_catalog.json) provides Column, Row, Card, Text, TextField, Button, CheckBox, ChoicePicker, DateTimeInput, Image, Divider, List, Tabs, Slider, Modal. Component names are case-sensitive \u2014 it is CheckBox, not Checkbox; unknown names render as nothing.",
   'Buttons fire actions via { action: { event: { name, context } } }; bind input fields with { value: { path: "/key" } } and reference those paths in the button context so user input flows back.',
   "Keep specs small \u2014 one screen, one purpose."
 ].join(" ");

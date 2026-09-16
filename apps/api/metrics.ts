@@ -18,6 +18,9 @@ export const metrics = {
   pagesCreated: meter.createCounter('pagent.pages.created', {
     description: 'Pages created via POST /new',
   }),
+  pagesViewed: meter.createCounter('pagent.pages.viewed', {
+    description: 'Pages fetched by the renderer via GET /:id — the "render" signal',
+  }),
   pagesSubmitted: meter.createCounter('pagent.pages.submitted', {
     description: 'Pages successfully submitted by a user',
   }),

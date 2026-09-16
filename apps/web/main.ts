@@ -433,10 +433,31 @@ class AgentUIApp extends SignalWatcher(LitElement) {
 
 customElements.define('agent-ui-app', AgentUIApp);
 
+// The static index.html ships homepage canonical/og:url values on every SPA
+// route (single document, Vercel catch-all rewrite). Point them at the route
+// actually being served for crawlers that execute JS (e.g. Googlebot) — and
+// at the real origin for self-hosted deployments. Non-JS unfurlers still see
+// the homepage fallback; fixing that requires SSR, which we don't have.
+function setCanonicalUrl(): void {
+  const url = location.origin + location.pathname.replace(/\/$/, '');
+  document.querySelector('link[rel="canonical"]')?.setAttribute('href', url || location.origin);
+  document
+    .querySelector('meta[property="og:url"]')
+    ?.setAttribute('content', url || location.origin);
+}
+setCanonicalUrl();
+
 const root = document.getElementById('app')!;
 if (location.pathname === '/_components') {
   root.classList.add('is-home');
   root.appendChild(document.createElement('components-showcase'));
+} else if (location.pathname === '/demo' || location.pathname === '/demo/') {
+  root.classList.add('is-home');
+  // Lazy chunk: keeps the demo page's spec + dashboard HTML out of the main
+  // bundle that every agent-generated /:id render loads.
+  void import('./demo').then(() => {
+    root.appendChild(document.createElement('pagent-demo'));
+  });
 } else if (!pageId) {
   root.classList.add('is-home');
   root.appendChild(document.createElement('home-page'));

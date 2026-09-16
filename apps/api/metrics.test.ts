@@ -22,10 +22,11 @@ describe('statusClassFor', () => {
 });
 
 describe('metrics module', () => {
-  it('exposes all six instruments with the expected APIs', () => {
+  it('exposes all seven instruments with the expected APIs', () => {
     expect(typeof metrics.httpRequests.add).toBe('function');
     expect(typeof metrics.httpRequestDuration.record).toBe('function');
     expect(typeof metrics.pagesCreated.add).toBe('function');
+    expect(typeof metrics.pagesViewed.add).toBe('function');
     expect(typeof metrics.pagesSubmitted.add).toBe('function');
     expect(typeof metrics.pagesAbandoned.add).toBe('function');
     expect(typeof metrics.pageSubmitLatency.record).toBe('function');

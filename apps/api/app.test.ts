@@ -23,8 +23,29 @@ vi.mock('./db.ts', () => ({
   deleteSessionByTokenHash: vi.fn(() => Promise.resolve()),
 }));
 
+// Mock the metrics module with a distinct vi.fn per instrument. The real
+// module hands out OTel no-op instruments, which in test mode are all the
+// SAME singleton object — spying on one counter would observe every counter
+// (httpRequests, pagesSubmitted, …) at once.
+vi.mock('./metrics.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./metrics.ts')>();
+  return {
+    ...actual,
+    metrics: {
+      httpRequests: { add: vi.fn() },
+      httpRequestDuration: { record: vi.fn() },
+      pagesCreated: { add: vi.fn() },
+      pagesViewed: { add: vi.fn() },
+      pagesSubmitted: { add: vi.fn() },
+      pagesAbandoned: { add: vi.fn() },
+      pageSubmitLatency: { record: vi.fn() },
+    },
+  };
+});
+
 import * as db from './db.ts';
 import { app, MAX_BODY_BYTES } from './app.ts';
+import { metrics } from './metrics.ts';
 
 // A valid 32-char hex id that has never been inserted.
 const UNKNOWN_ID = 'deadbeefdeadbeefdeadbeefdeadbeef';
@@ -73,6 +94,47 @@ beforeEach(() => {
   (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(null);
   (db.submitPage as ReturnType<typeof vi.fn>).mockResolvedValue({ kind: 'not_found' });
   (db.fetchAndAdvanceResult as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+});
+
+// ---------------------------------------------------------------------------
+// GET /:id — adoption funnel "render" signal
+// ---------------------------------------------------------------------------
+
+describe('GET /:id render metric', () => {
+  it('counts a render once for an open a2ui page, tagged with format', async () => {
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(
+      fakePage({ format: 'a2ui', state: 'open' }),
+    );
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
+    expect(res.status).toBe(200);
+    expect(metrics.pagesViewed.add).toHaveBeenCalledTimes(1);
+    expect(metrics.pagesViewed.add).toHaveBeenCalledWith(1, { format: 'a2ui' });
+  });
+
+  it('counts html page views (view-only pages stay open)', async () => {
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(
+      fakePage({ format: 'html', spec: '<p>hi</p>', state: 'open' }),
+    );
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
+    expect(res.status).toBe(200);
+    expect(metrics.pagesViewed.add).toHaveBeenCalledWith(1, { format: 'html' });
+  });
+
+  it('does not count post-submit polling reads as renders', async () => {
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(
+      fakePage({ state: 'submitted', result: { name: 'submitted' } }),
+    );
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
+    expect(res.status).toBe(200);
+    expect(metrics.pagesViewed.add).not.toHaveBeenCalled();
+  });
+
+  it('does not count a missing/expired page as a render', async () => {
+    (db.getActivePage as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const res = await app.fetch(req('GET', `/${UNKNOWN_ID}`));
+    expect(res.status).toBe(404);
+    expect(metrics.pagesViewed.add).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

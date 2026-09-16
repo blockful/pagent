@@ -90,6 +90,18 @@ export default defineConfig(({ command }) => {
     build: {
       outDir: resolve(import.meta.dirname, 'dist'),
       emptyOutDir: true,
+      rollupOptions: {
+        output: {
+          // The lazy /demo chunk and the main bundle both import the vendored
+          // A2UI packages. Without this, Rollup splits the package's internal
+          // modules across the two chunks and warns about a circular chunk
+          // dependency with broken execution order — keep A2UI in one shared
+          // chunk instead.
+          manualChunks(id: string) {
+            if (id.includes('/vendor/a2ui-')) return 'a2ui';
+          },
+        },
+      },
     },
     appType: 'spa',
   };

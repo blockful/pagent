@@ -35,21 +35,28 @@
     },
     {
       "id": 2,
-      "type": "barchart",
+      "type": "bargauge",
       "title": "Submitted vs abandoned (24h)",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
-      "options": { "stacking": { "mode": "normal" } },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true
+      },
       "targets": [
         {
           "expr": "sum(increase(pagent_pages_submitted_total[24h]))",
           "legendFormat": "submitted",
-          "refId": "A"
+          "refId": "A",
+          "instant": true
         },
         {
           "expr": "sum(increase(pagent_pages_abandoned_total[24h]))",
           "legendFormat": "abandoned",
-          "refId": "B"
+          "refId": "B",
+          "instant": true
         }
       ]
     },
@@ -61,7 +68,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
       "targets": [
         {
-          "expr": "rate(pagent_pages_submitted_total[5m])",
+          "expr": "sum(rate(pagent_pages_submitted_total[5m]))",
           "legendFormat": "submissions/s",
           "refId": "A"
         }

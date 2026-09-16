@@ -5,9 +5,9 @@
     {
       "name": "pagent",
       "source": "./",
-      "description": "Generative UI for terminal-bound AI agents — render interactive browser UIs (forms, pickers, dashboards, confirmations) via the A2UI protocol. Ships a stdio MCP and skill, with hosted rendering at pagent.link or self-hosted via PAGENT_URL.",
+      "description": "Let your AI agent show you real browser UI — forms it reads your answer back from, plus dashboards and reports you just view. Instead of faking a form in chat, your agent prints a short link; you open it, fill it out, and it keeps going. Works in any MCP client. Free to try, no signup.",
       "category": "productivity",
-      "tags": ["generative-ui", "agentic-ui", "a2ui", "mcp"]
+      "tags": ["generative-ui", "agentic-ui", "a2ui", "mcp", "cursor"]
     }
   ]
 }

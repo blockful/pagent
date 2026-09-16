@@ -1,0 +1,146 @@
+{
+  "uid": "pagent-adoption",
+  "title": "Pagent — Adoption",
+  "tags": ["pagent", "adoption", "product"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-7d", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Renders (1h / 24h / 7d)",
+      "description": "First views of open pages (pagent_pages_viewed_total) — the north-star 'active render' signal. Post-submit polling reads are excluded at the source.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 18, "x": 0, "y": 0 },
+      "options": { "textMode": "value_and_name", "colorMode": "value" },
+      "targets": [
+        {
+          "expr": "sum(increase(pagent_pages_viewed_total[1h]))",
+          "legendFormat": "1h",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(pagent_pages_viewed_total[24h]))",
+          "legendFormat": "24h",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(pagent_pages_viewed_total[7d]))",
+          "legendFormat": "7d",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "bargauge",
+      "title": "Funnel: created → viewed → submitted — show_ui (24h)",
+      "description": "Top-of-funnel (created) → render (viewed) → activation (submitted), scoped to format=a2ui since only show_ui pages can submit. Instant queries — one bar per stage.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(pagent_pages_created_total{format=\"a2ui\"}[24h]))",
+          "legendFormat": "created",
+          "refId": "A",
+          "instant": true
+        },
+        {
+          "expr": "sum(increase(pagent_pages_viewed_total{format=\"a2ui\"}[24h]))",
+          "legendFormat": "viewed",
+          "refId": "B",
+          "instant": true
+        },
+        {
+          "expr": "sum(increase(pagent_pages_submitted_total{format=\"a2ui\"}[24h]))",
+          "legendFormat": "submitted",
+          "refId": "C",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Render rate by format (per 5m)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        {
+          "expr": "sum by (format) (rate(pagent_pages_viewed_total[5m]))",
+          "legendFormat": "{{format}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Render → submit activation (24h)",
+      "description": "Of show_ui pages that rendered, the share that got a user submission. Scoped to format=a2ui (html pages cannot submit). Pre-deploy unlabeled submitted samples are excluded, so the first 24h after rollout under-reads slightly. Pre-v2 proxy — no per-user identity yet.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 14 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 60 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "background" },
+      "targets": [
+        {
+          "expr": "100 * sum(increase(pagent_pages_submitted_total{format=\"a2ui\"}[24h])) / clamp_min(sum(increase(pagent_pages_viewed_total{format=\"a2ui\"}[24h])), 1)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "bargauge",
+      "title": "Renders by format (24h)",
+      "description": "show_ui (a2ui) vs show_html demand.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 14 },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "sum by (format) (increase(pagent_pages_viewed_total[24h]))",
+          "legendFormat": "{{format}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "text",
+      "title": "About this dashboard",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "options": {
+        "mode": "markdown",
+        "content": "**North-star: active renders.** `pagent_pages_viewed_total` counts a page fetch only while the page is still `open` — the renderer's post-submit polling of the same endpoint is excluded at the source (app.ts). show_html pages are view-only and stay open, so every view of them counts as a render.\n\n**Funnel + activation are a2ui-scoped** — only show_ui pages can submit, so mixing formats would structurally deflate activation as show_html usage grows.\n\n**Pre-v2 limitation:** true *weekly active renderers* and *repeat rate* need per-user identity. Those land in **stage 2**, after v2 auth adds `owner_id` — then add per-owner active-renderer and week-2 repeat panels here.\n\nDo **not** treat raw counts as adoption in isolation — watch the render→submit activation and the funnel shape."
+      }
+    }
+  ]
+}

@@ -719,7 +719,7 @@ component type:
 
 ```
 The basic catalog provides Column, Row, Card, Text, TextField, Button,
-Checkbox, Image, Divider, List, Tabs, Slider. Additionally, Pagent
+CheckBox, Image, Divider, List, Tabs, Slider. Additionally, Pagent
 supports a FileInput component for file uploads:
   { id: "upload", component: "FileInput", accept: ".pdf,.png", maxSizeMB: 5, required: true, label: "Upload file" }
 ```

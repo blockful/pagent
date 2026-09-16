@@ -18,6 +18,9 @@ class ComponentsShowcase extends SignalWatcher(LitElement) {
 
   connectedCallback() {
     super.connectedCallback();
+    // Idempotent across detach/re-attach: replaying createSurface for an
+    // existing surfaceId throws A2uiStateError inside the lifecycle callback.
+    if (this.processor.model.surfacesMap.size > 0) return;
     this.processor.processMessages(buildShowcaseSpec());
   }
 
