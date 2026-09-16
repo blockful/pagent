@@ -64,20 +64,36 @@ export async function rotateRefreshToken(
   successor: RefreshTokenSuccessor,
 ): Promise<RefreshTokenRow | null> {
   const c = client();
-  const rows = await c<RefreshTokenRow[]>`
-    with revoked as (
-      update refresh_tokens
-      set revoked_at = now()
-      where id = ${oldTokenId} and revoked_at is null
-      returning user_id, client_id
-    )
-    insert into refresh_tokens (user_id, client_id, token_hash, scope, expires_at)
-    select revoked.user_id, revoked.client_id, ${successor.tokenHash},
-           ${successor.scope}, ${successor.expiresAt}
-    from revoked
-    returning id, user_id, client_id, token_hash, scope,
-             created_at, expires_at, revoked_at
-  `;
+  const rows = await c.begin(async (tx): Promise<RefreshTokenRow[]> => {
+    const families = await tx<Pick<RefreshTokenRow, 'user_id' | 'client_id'>[]>`
+      select user_id, client_id
+      from refresh_tokens
+      where id = ${oldTokenId}
+    `;
+    const family = families[0];
+    if (!family) return [];
+
+    await tx`
+      select pg_advisory_xact_lock(
+        hashtextextended(${family.user_id} || chr(31) || ${family.client_id}, 0)
+      )
+    `;
+    const inserted = await tx<RefreshTokenRow[]>`
+      with revoked as (
+        update refresh_tokens
+        set revoked_at = now()
+        where id = ${oldTokenId} and revoked_at is null
+        returning user_id, client_id
+      )
+      insert into refresh_tokens (user_id, client_id, token_hash, scope, expires_at)
+      select revoked.user_id, revoked.client_id, ${successor.tokenHash},
+             ${successor.scope}, ${successor.expiresAt}
+      from revoked
+      returning id, user_id, client_id, token_hash, scope,
+               created_at, expires_at, revoked_at
+    `;
+    return [...inserted];
+  });
   return rows[0] ?? null;
 }
 
@@ -123,11 +139,21 @@ export async function revokeAllRefreshTokensForFamily(
   clientId: string,
 ): Promise<void> {
   const c = client();
-  await c`
-    update refresh_tokens
-    set revoked_at = now()
-    where user_id = ${userId}
-      and client_id = ${clientId}
-      and revoked_at is null
-  `;
+  await c.begin(async (tx) => {
+    // The lock must be acquired in a statement before the UPDATE. Under READ
+    // COMMITTED, that gives the UPDATE a fresh snapshot after any in-flight
+    // rotation holding the same family lock has committed its successor.
+    await tx`
+      select pg_advisory_xact_lock(
+        hashtextextended(${userId} || chr(31) || ${clientId}, 0)
+      )
+    `;
+    await tx`
+      update refresh_tokens
+      set revoked_at = now()
+      where user_id = ${userId}
+        and client_id = ${clientId}
+        and revoked_at is null
+    `;
+  });
 }

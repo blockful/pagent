@@ -81,7 +81,8 @@ export async function submitPage(id: string, action: unknown): Promise<SubmitOut
     where id = ${id} and state = 'open' and expires_at > now()
     returning created_at
   `;
-  if (rows.length > 0) return { kind: 'ok', createdAt: rows[0]!.created_at };
+  const updated = rows[0];
+  if (updated !== undefined) return { kind: 'ok', createdAt: updated.created_at };
   // Disambiguate: does the page exist and is it still valid (conflict) or not (not_found)?
   // Filter on expires_at > now() so an expired-but-not-yet-swept row is
   // correctly classified as 'not_found' rather than 'conflict'.
@@ -106,8 +107,9 @@ export async function fetchAndAdvanceResult(
   const rows = await c<{ state: PageState; result: unknown; format: PageFormat }[]>`
     select state, result, format from pages where id = ${id} and expires_at > now()
   `;
-  if (rows.length === 0) return null;
-  const { state, result, format } = rows[0];
+  const row = rows[0];
+  if (row === undefined) return null;
+  const { state, result, format } = row;
   const stateAtRead = state;
   if (state === 'submitted') {
     await c`
