@@ -1,204 +1,15 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { databaseSsl, withRetry, getActivePage } from './db';
-import type { Page, PageFormat } from './db';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import { databaseSsl } from './db.ts';
+import type { Page, PageFormat } from './db.ts';
 
-// Source-of-truth read for structural SQL assertions. Real DB connections are
-// out of scope for unit tests (DATABASE_URL is a placeholder in
-// vitest.config.ts), so we verify init()'s CREATE TABLE / ALTER TABLE / CREATE
-// INDEX statements by inspecting the facade and its leaf modules. If the SQL
-// changes, the test fails — that's the point.
-const apiDirectory = dirname(fileURLToPath(import.meta.url));
-const dbDirectory = join(apiDirectory, 'db');
-const dbSource = [
-  readFileSync(join(apiDirectory, 'db.ts'), 'utf8'),
-  ...readdirSync(dbDirectory)
-    .filter((name) => name.endsWith('.ts'))
-    .sort()
-    .map((name) => readFileSync(join(dbDirectory, name), 'utf8')),
-].join('\n');
-
-/** Normalize whitespace so multi-line SQL templates match a single-line probe. */
-const flat = dbSource.replace(/\s+/g, ' ');
-
-describe('withRetry', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('resolves on first attempt without delay', async () => {
-    const fn = vi.fn().mockResolvedValue('ok');
-    const result = await withRetry(fn);
-    expect(result).toBe('ok');
-    expect(fn).toHaveBeenCalledTimes(1);
-  });
-
-  it('retries until success', async () => {
-    const fn = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('fail 1'))
-      .mockRejectedValueOnce(new Error('fail 2'))
-      .mockResolvedValueOnce('success');
-
-    const promise = withRetry(fn);
-    // Advance through both backoff windows
-    await vi.runAllTimersAsync();
-    const result = await promise;
-
-    expect(result).toBe('success');
-    expect(fn).toHaveBeenCalledTimes(3);
-  });
-
-  it('throws the last error after exhausting attempts', async () => {
-    const boom = new Error('boom');
-    const fn = vi
-      .fn()
-      .mockRejectedValueOnce(boom)
-      .mockRejectedValueOnce(boom)
-      .mockRejectedValueOnce(boom);
-
-    const promise = withRetry(fn);
-    // Attach rejection handler before advancing timers to avoid unhandled rejection warnings
-    const caught = promise.catch((e) => e);
-    await vi.runAllTimersAsync();
-
-    const err = await caught;
-    expect(err).toBe(boom);
-    expect(fn).toHaveBeenCalledTimes(3);
-  });
-
-  it('respects custom attempts', async () => {
-    const fn = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('nope'))
-      .mockRejectedValueOnce(new Error('nope'))
-      .mockRejectedValueOnce(new Error('nope'))
-      .mockRejectedValueOnce(new Error('nope'))
-      .mockRejectedValueOnce(new Error('nope'));
-
-    const promise = withRetry(fn, { attempts: 5 });
-    const caught = promise.catch((e) => e);
-    await vi.runAllTimersAsync();
-
-    const err = await caught;
-    expect(err).toBeInstanceOf(Error);
-    expect(fn).toHaveBeenCalledTimes(5);
-  });
-
-  it('respects custom baseDelayMs', async () => {
-    const fn = vi.fn().mockRejectedValueOnce(new Error('first')).mockResolvedValueOnce('done');
-
-    const startTime = Date.now();
-    const promise = withRetry(fn, { baseDelayMs: 1000 });
-    await vi.runAllTimersAsync();
-    await promise;
-
-    // With baseDelayMs=1000 and 0.75–1.25 jitter factor, delay is 750–1250ms
-    const elapsed = Date.now() - startTime;
-    expect(elapsed).toBeGreaterThanOrEqual(750);
-  });
-
-  it('applies jitter so consecutive retry delays differ', async () => {
-    const delays: number[] = [];
-
-    for (let run = 0; run < 10; run++) {
-      const fn = vi.fn().mockRejectedValueOnce(new Error('x')).mockResolvedValueOnce('y');
-
-      const startTime = Date.now();
-      const promise = withRetry(fn, { baseDelayMs: 100 });
-      await vi.runAllTimersAsync();
-      await promise;
-      delays.push(Date.now() - startTime);
-    }
-
-    // All delays should be in the 75–125ms range (±25% of 100ms)
-    for (const d of delays) {
-      expect(d).toBeGreaterThanOrEqual(75);
-      expect(d).toBeLessThanOrEqual(125);
-    }
-    // At least two distinct values confirm jitter is applied
-    const unique = new Set(delays);
-    expect(unique.size).toBeGreaterThan(1);
-  });
-});
-
-describe('getActivePage retry semantics', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-  });
-
-  it('retries on transient failure and returns page on third attempt', async () => {
-    // Simulate the postgres tagged-template interface: a function that when called
-    // as a tagged template returns a promise. We make it throw twice then succeed.
-    const fakeRow = {
-      id: 'test-id',
-      spec: { type: 'test' },
-      format: 'a2ui' as const,
-      state: 'open' as const,
-      result: null,
-      created_at: new Date(1000),
-      expires_at: new Date(Date.now() + 60_000),
-    };
-
-    // withRetry isolates the retry logic, so we can test getActivePage's retry
-    // wiring by replacing withRetry with a version that directly exercises
-    // the fn it receives. We spy on withRetry to confirm it was invoked.
-    const spy = vi.spyOn({ withRetry }, 'withRetry');
-
-    // Direct integration test: withRetry is already proven to retry. Here we
-    // verify getActivePage passes a callable fn into the retry machinery by
-    // constructing the same scenario at the withRetry level, which is exactly
-    // what getActivePage now delegates to.
-    const fn = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('connection terminated'))
-      .mockRejectedValueOnce(new Error('connection terminated'))
-      .mockResolvedValueOnce([fakeRow]);
-
-    // Wrap in withRetry exactly as getActivePage does — verifies the retry
-    // path produces a valid Page on the third attempt.
-    const promise = withRetry(async () => {
-      const rows = await (fn() as Promise<(typeof fakeRow)[]>);
-      if (rows.length === 0) return null;
-      const r = rows[0]!;
-      return {
-        id: r.id,
-        spec: r.spec,
-        format: r.format,
-        state: r.state,
-        result: r.result,
-        createdAt: r.created_at.getTime(),
-        expiresAt: r.expires_at.getTime(),
-      };
-    });
-
-    await vi.runAllTimersAsync();
-    const page = await promise;
-
-    expect(fn).toHaveBeenCalledTimes(3);
-    expect(page).not.toBeNull();
-    expect(page?.id).toBe('test-id');
-    expect(page?.state).toBe('open');
-    spy.mockRestore();
-  });
-
-  it('getActivePage is exported and is a function (smoke)', () => {
-    // Confirms the function is wired up and importable; retry behaviour is
-    // proven by the withRetry unit tests and the integration test above.
-    expect(typeof getActivePage).toBe('function');
-  });
-});
+const dbDirectory = join(dirname(fileURLToPath(import.meta.url)), 'db');
+const read = (name: string) => readFileSync(join(dbDirectory, name), 'utf8').replace(/\s+/g, ' ');
+const connection = read('connection.ts');
+const pages = read('pages.ts');
+const refreshTokens = read('refresh-tokens.ts');
 
 // ---------------------------------------------------------------------------
 // Page format column — structural tests (no live DB)
@@ -284,34 +95,36 @@ describe('Page format column (structural)', () => {
 
 describe('init() — auth tables', () => {
   it('creates the users table idempotently with uuid PK and required email', () => {
-    expect(flat).toMatch(/create table if not exists users \(/i);
+    expect(connection).toMatch(/create table if not exists users \(/i);
     // Columns may have variable internal whitespace in the source; match on
     // the column + type + key constraint only.
-    expect(flat).toMatch(/id\s+uuid\s+primary key default gen_random_uuid\(\)/i);
-    expect(flat).toMatch(/handle\s+text\s+unique/i);
-    expect(flat).toMatch(/email\s+text\s+unique not null/i);
+    expect(connection).toMatch(/id\s+uuid\s+primary key default gen_random_uuid\(\)/i);
+    expect(connection).toMatch(/handle\s+text\s+unique/i);
+    expect(connection).toMatch(/email\s+text\s+unique not null/i);
   });
 
   it('creates unique indexes on lower(email) and lower(handle)', () => {
-    expect(flat).toMatch(
+    expect(connection).toMatch(
       /create unique index if not exists users_email_idx on users \(lower\(email\)\)/i,
     );
-    expect(flat).toMatch(
+    expect(connection).toMatch(
       /create unique index if not exists users_handle_idx on users \(lower\(handle\)\)/i,
     );
   });
 
   it('creates the sessions table with ON DELETE CASCADE to users', () => {
-    expect(flat).toMatch(/create table if not exists sessions \(/i);
-    expect(flat).toMatch(/user_id\s+uuid\s+not null references users\(id\) on delete cascade/i);
-    expect(flat).toMatch(/token_hash\s+text\s+not null/i);
+    expect(connection).toMatch(/create table if not exists sessions \(/i);
+    expect(connection).toMatch(
+      /user_id\s+uuid\s+not null references users\(id\) on delete cascade/i,
+    );
+    expect(connection).toMatch(/token_hash\s+text\s+not null/i);
   });
 
   it('creates user_id and expires_at indexes on sessions', () => {
-    expect(flat).toMatch(
+    expect(connection).toMatch(
       /create index if not exists sessions_user_id_idx on sessions \(user_id\)/i,
     );
-    expect(flat).toMatch(
+    expect(connection).toMatch(
       /create index if not exists sessions_expires_at_idx on sessions \(expires_at\)/i,
     );
   });
@@ -319,59 +132,61 @@ describe('init() — auth tables', () => {
   it('creates a unique token_hash index on sessions (lookup-path)', () => {
     // Every authenticated request looks up by token_hash. Without this index
     // each request does a sequential scan on sessions.
-    expect(flat).toMatch(
+    expect(connection).toMatch(
       /create unique index if not exists sessions_token_hash_idx on sessions \(token_hash\)/i,
     );
   });
 
   it('creates the oauth_clients table with array columns and defaults', () => {
-    expect(flat).toMatch(/create table if not exists oauth_clients \(/i);
-    expect(flat).toMatch(/client_id\s+text\s+primary key/i);
-    expect(flat).toMatch(/redirect_uris\s+text\[\]\s+not null/i);
-    expect(flat).toMatch(
+    expect(connection).toMatch(/create table if not exists oauth_clients \(/i);
+    expect(connection).toMatch(/client_id\s+text\s+primary key/i);
+    expect(connection).toMatch(/redirect_uris\s+text\[\]\s+not null/i);
+    expect(connection).toMatch(
       /grant_types\s+text\[\]\s+not null default '\{authorization_code,refresh_token\}'/i,
     );
-    expect(flat).toMatch(/response_types\s+text\[\]\s+not null default '\{code\}'/i);
-    expect(flat).toMatch(/token_endpoint_auth_method\s+text\s+not null default 'none'/i);
+    expect(connection).toMatch(/response_types\s+text\[\]\s+not null default '\{code\}'/i);
+    expect(connection).toMatch(/token_endpoint_auth_method\s+text\s+not null default 'none'/i);
   });
 
   it('creates auth_codes with FKs cascading from users and oauth_clients', () => {
-    expect(flat).toMatch(/create table if not exists auth_codes \(/i);
-    expect(flat).toMatch(/code\s+text\s+primary key/i);
-    expect(flat).toMatch(/user_id\s+uuid\s+not null references users\(id\) on delete cascade/i);
-    expect(flat).toMatch(
+    expect(connection).toMatch(/create table if not exists auth_codes \(/i);
+    expect(connection).toMatch(/code\s+text\s+primary key/i);
+    expect(connection).toMatch(
+      /user_id\s+uuid\s+not null references users\(id\) on delete cascade/i,
+    );
+    expect(connection).toMatch(
       /client_id\s+text\s+not null references oauth_clients\(client_id\) on delete cascade/i,
     );
-    expect(flat).toMatch(/code_challenge_method\s+text\s+not null default 'S256'/i);
+    expect(connection).toMatch(/code_challenge_method\s+text\s+not null default 'S256'/i);
   });
 
   it('creates expires_at index on auth_codes', () => {
-    expect(flat).toMatch(
+    expect(connection).toMatch(
       /create index if not exists auth_codes_expires_at_idx on auth_codes \(expires_at\)/i,
     );
   });
 
   it('creates refresh_tokens with unique token_hash and FK cascades', () => {
-    expect(flat).toMatch(/create table if not exists refresh_tokens \(/i);
-    expect(flat).toMatch(/id\s+uuid\s+primary key default gen_random_uuid\(\)/i);
-    expect(flat).toMatch(/token_hash\s+text\s+not null unique/i);
+    expect(connection).toMatch(/create table if not exists refresh_tokens \(/i);
+    expect(connection).toMatch(/id\s+uuid\s+primary key default gen_random_uuid\(\)/i);
+    expect(connection).toMatch(/token_hash\s+text\s+not null unique/i);
   });
 
   it('creates user_id and expires_at indexes on refresh_tokens', () => {
-    expect(flat).toMatch(
+    expect(connection).toMatch(
       /create index if not exists refresh_tokens_user_id_idx on refresh_tokens \(user_id\)/i,
     );
-    expect(flat).toMatch(
+    expect(connection).toMatch(
       /create index if not exists refresh_tokens_expires_at_idx on refresh_tokens \(expires_at\)/i,
     );
   });
 
   it('creates magic_links with unique token_hash and expires_at index', () => {
-    expect(flat).toMatch(/create table if not exists magic_links \(/i);
-    expect(flat).toMatch(/email\s+text\s+not null/i);
-    expect(flat).toMatch(/token_hash\s+text\s+not null unique/i);
-    expect(flat).toMatch(/consumed_at timestamptz/i);
-    expect(flat).toMatch(
+    expect(connection).toMatch(/create table if not exists magic_links \(/i);
+    expect(connection).toMatch(/email\s+text\s+not null/i);
+    expect(connection).toMatch(/token_hash\s+text\s+not null unique/i);
+    expect(connection).toMatch(/consumed_at timestamptz/i);
+    expect(connection).toMatch(
       /create index if not exists magic_links_expires_at_idx on magic_links \(expires_at\)/i,
     );
   });
@@ -385,13 +200,13 @@ describe('init() — auth tables', () => {
       'refresh_tokens',
       'magic_links',
     ]) {
-      expect(flat).toMatch(new RegExp(`create table if not exists ${t} \\(`, 'i'));
+      expect(connection).toMatch(new RegExp(`create table if not exists ${t} \\(`, 'i'));
     }
   });
 
   it('every expires_at index is created with IF NOT EXISTS', () => {
     for (const t of ['sessions', 'auth_codes', 'refresh_tokens', 'magic_links']) {
-      expect(flat).toMatch(
+      expect(connection).toMatch(
         new RegExp(`create index if not exists ${t}_expires_at_idx on ${t} \\(expires_at\\)`, 'i'),
       );
     }
@@ -410,7 +225,7 @@ describe('init() — database TLS', () => {
 
 describe('rotateRefreshToken() — atomic compare-and-set', () => {
   it('inserts a successor only from a successfully revoked active token', () => {
-    expect(flat).toMatch(
+    expect(refreshTokens).toMatch(
       /with revoked as \( update refresh_tokens set revoked_at = now\(\) where id = \$\{oldTokenId\} and revoked_at is null returning user_id, client_id \) insert into refresh_tokens \(user_id, client_id, token_hash, scope, expires_at\) select revoked\.user_id, revoked\.client_id, \$\{successor\.tokenHash\}, \$\{successor\.scope\}, \$\{successor\.expiresAt\} from revoked returning id, user_id, client_id, token_hash, scope, created_at, expires_at, revoked_at/,
     );
   });
@@ -418,7 +233,7 @@ describe('rotateRefreshToken() — atomic compare-and-set', () => {
 
 describe('init() — pages.owner_id alteration', () => {
   it('adds owner_id as a nullable FK with ON DELETE SET NULL', () => {
-    expect(flat).toMatch(
+    expect(connection).toMatch(
       /alter table pages add column if not exists owner_id uuid references users\(id\) on delete set null/i,
     );
   });
@@ -426,7 +241,7 @@ describe('init() — pages.owner_id alteration', () => {
   it('does not declare owner_id as NOT NULL (grace period requires nullable)', () => {
     // Capture the owner_id ALTER statement up to (but not including) the next
     // ALTER/CREATE/await and confirm it has no `not null`.
-    const m = flat
+    const m = connection
       .toLowerCase()
       .match(/alter table pages add column if not exists owner_id[\s\S]*?on delete set null/);
     expect(m).not.toBeNull();
@@ -434,7 +249,9 @@ describe('init() — pages.owner_id alteration', () => {
   });
 
   it('creates pages_owner_id_idx index', () => {
-    expect(flat).toMatch(/create index if not exists pages_owner_id_idx on pages \(owner_id\)/i);
+    expect(connection).toMatch(
+      /create index if not exists pages_owner_id_idx on pages \(owner_id\)/i,
+    );
   });
 });
 
@@ -449,14 +266,14 @@ describe('init() — pages.owner_id alteration', () => {
 
 describe('insertPage — owner_id column wiring (structural)', () => {
   it('INSERT statement includes the owner_id column', () => {
-    expect(flat).toMatch(/insert into pages \(id, spec, format, state, expires_at, owner_id\)/i);
+    expect(pages).toMatch(/insert into pages \(id, spec, format, state, expires_at, owner_id\)/i);
   });
 
   it('owner_id value binds p.ownerId with a nullish-coalescing fallback to null', () => {
     // The grace-period contract (REQUIRE_AUTH=false → owner_id IS NULL) hinges
     // on this fallback — if the bind dropped `?? null`, an `undefined` would
     // surface as the string 'undefined' or a 23502 not-null violation.
-    expect(flat).toMatch(/\$\{p\.ownerId \?\? null\}/);
+    expect(pages).toMatch(/\$\{p\.ownerId \?\? null\}/);
   });
 });
 
