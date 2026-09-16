@@ -2,8 +2,16 @@ import { defineConfig, devices } from '@playwright/test';
 import { z } from 'zod';
 
 const databaseUrl = z.string().url().parse(process.env.DATABASE_URL);
-const apiUrl = 'http://127.0.0.1:8787';
-const webUrl = 'http://127.0.0.1:8788';
+const apiUrl = z
+  .string()
+  .url()
+  .parse(process.env.E2E_API_URL ?? 'http://127.0.0.1:8787');
+const webUrl = z
+  .string()
+  .url()
+  .parse(process.env.E2E_WEB_URL ?? 'http://127.0.0.1:8788');
+const apiPort = new URL(apiUrl).port || '80';
+const webPort = new URL(webUrl).port || '80';
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -31,7 +39,7 @@ export default defineConfig({
       timeout: 60_000,
       env: {
         DATABASE_URL: databaseUrl,
-        PORT: '8787',
+        PORT: apiPort,
         PUBLIC_URL: webUrl,
         ALLOWED_ORIGINS: webUrl,
         NODE_ENV: 'test',
@@ -40,8 +48,7 @@ export default defineConfig({
       },
     },
     {
-      command:
-        'npm run build:web && npm -w @pagent/web run preview -- --host 127.0.0.1 --port 8788 --strictPort',
+      command: `npm run build:web && npm -w @pagent/web run preview -- --host 127.0.0.1 --port ${webPort} --strictPort`,
       url: webUrl,
       reuseExistingServer: false,
       timeout: 60_000,

@@ -35,7 +35,8 @@ const AUD = 'pagent:oauth:callback';
 /**
  * The encoded authorize-request context. All fields are optional because the
  * browser_session path (no MCP client, just a session cookie) doesn't carry
- * any of the PKCE bits — only `browserSession: true` survives the round-trip.
+ * PKCE bits; it carries the session marker plus its validated return target
+ * and browser-transaction binding.
  */
 export interface StateClaims {
   clientId?: string;
@@ -44,6 +45,7 @@ export interface StateClaims {
   scope?: string;
   state?: string;
   browserSession?: boolean;
+  returnTo?: string;
   browserTransactionHash?: string;
   consentGranted?: boolean;
 }
@@ -74,6 +76,7 @@ export async function signStateJwt(claims: StateClaims): Promise<string> {
   if (claims.scope !== undefined) payload.scope = claims.scope;
   if (claims.state !== undefined) payload.state = claims.state;
   if (claims.browserSession !== undefined) payload.browser_session = claims.browserSession;
+  if (claims.returnTo !== undefined) payload.return_to = claims.returnTo;
   if (claims.browserTransactionHash !== undefined) {
     payload.browser_transaction_hash = claims.browserTransactionHash;
   }
@@ -109,6 +112,7 @@ export async function verifyStateJwt(token: string): Promise<StateClaims> {
   if (typeof payload.scope === 'string') out.scope = payload.scope;
   if (typeof payload.state === 'string') out.state = payload.state;
   if (typeof payload.browser_session === 'boolean') out.browserSession = payload.browser_session;
+  if (typeof payload.return_to === 'string') out.returnTo = payload.return_to;
   if (typeof payload.browser_transaction_hash === 'string') {
     out.browserTransactionHash = payload.browser_transaction_hash;
   }

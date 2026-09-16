@@ -1,4 +1,11 @@
-export { databaseSsl, init, ping, shutdown, withRetry } from './db/connection.ts';
+export {
+  client as database,
+  databaseSsl,
+  init,
+  ping,
+  shutdown,
+  withRetry,
+} from './db/connection.ts';
 export type { RetryOptions } from './db/connection.ts';
 
 export { deleteExpiredAuthArtifacts } from './db/auth-cleanup.ts';

@@ -20,6 +20,7 @@ vi.mock('../db.ts', () => ({
 
 import * as db from '../db.ts';
 import { app } from '../app.ts';
+import { PUBLIC_URL } from '../app/config.ts';
 import { env } from '../schemas.ts';
 import {
   authorizeUrl,
@@ -236,6 +237,36 @@ describe('GET /oauth/authorize', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('Continue with Google');
+  });
+
+  it('binds a trusted browser return target into the signed state', async () => {
+    const returnTo = 'http://localhost:8788/share/opaque-token';
+
+    const res = await app.fetch(
+      new Request(
+        `${BASE}/oauth/authorize?${new URLSearchParams({ browser_session: '1', return_to: returnTo })}`,
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    const claims = await verifyStateJwt(signedStateFromHtml(await res.text()));
+    expect(claims.returnTo).toBe(returnTo);
+    expect(claims.browserTransactionHash).toBeTruthy();
+  });
+
+  it('replaces an untrusted browser return target with the renderer origin', async () => {
+    const res = await app.fetch(
+      new Request(
+        `${BASE}/oauth/authorize?${new URLSearchParams({
+          browser_session: '1',
+          return_to: 'https://attacker.example/steal',
+        })}`,
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    const claims = await verifyStateJwt(signedStateFromHtml(await res.text()));
+    expect(claims.returnTo).toBe(PUBLIC_URL);
   });
 
   it('uses the documented default scope when scope is omitted', async () => {

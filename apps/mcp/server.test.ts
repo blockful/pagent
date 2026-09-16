@@ -1,5 +1,33 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import {
+  getDefaultEnvironment,
+  StdioClientTransport,
+} from '@modelcontextprotocol/sdk/client/stdio.js';
 import { describe, expect, it } from 'vitest';
 import { formatRetryHint } from './lib.ts';
+
+describe('stdio MCP contract', () => {
+  it('exposes exactly the read and write tools', async () => {
+    const client = new Client({ name: 'pagent-stdio-test', version: '0.0.1' });
+    try {
+      await client.connect(
+        new StdioClientTransport({
+          command: process.execPath,
+          args: ['apps/mcp/server.bundle.js'],
+          cwd: process.cwd(),
+          env: getDefaultEnvironment(),
+          stderr: 'pipe',
+        }),
+      );
+
+      const tools = await client.listTools();
+
+      expect(tools.tools.map(({ name }) => name).sort()).toEqual(['read', 'write']);
+    } finally {
+      await client.close();
+    }
+  });
+});
 
 describe('formatRetryHint', () => {
   it('returns empty string for an empty body', () => {

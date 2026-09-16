@@ -8,11 +8,11 @@ Runbook for cutting a versioned release. Read top-to-bottom the first time; use 
 
 Pagent uses **semver** (`MAJOR.MINOR.PATCH`):
 
-| Bump  | When                                                                                          |
-| ----- | --------------------------------------------------------------------------------------------- |
-| MAJOR | A breaking API change — e.g. removing or renaming an endpoint.                                |
-| MINOR | Backward-compatible additions: new MCP tools, new optional API fields, new optional env-vars. |
-| PATCH | Bugfixes, dependency updates, doc-only changes.                                               |
+| Bump  | When                                                                                                    |
+| ----- | ------------------------------------------------------------------------------------------------------- |
+| MAJOR | A breaking API change — e.g. removing or renaming an endpoint.                                          |
+| MINOR | Backward-compatible additions within `write`/`read`, new optional API fields, or new optional env-vars. |
+| PATCH | Bugfixes, dependency updates, doc-only changes.                                                         |
 
 **Marketplace tracking caveat.** The Claude Code plugin marketplace currently resolves `pagent@pagent` to `main` HEAD, not to a tag. Tags create immutable historical pointers useful for `git checkout`, hotfix branching, and GitHub Release notes, but they do not automatically become the install target. Users who want to pin to a specific release can clone the repo and point Claude Code at a local checkout (`claude --plugin-dir /path/to/pagent`); most users will continue tracking `main`. This is a known limitation to revisit once the marketplace supports version-pinned installs.
 
@@ -34,6 +34,17 @@ npm run build:mcp
 ```
 
 Or run the Husky hook directly: `.husky/pre-push` (covers the first four steps).
+
+For releases that change page behavior, also verify the production-equivalent
+stories rather than relying on a successful build alone:
+
+- Both MCP transports list exactly `write` and `read`.
+- Grace mode permits only temporary anonymous pages; durable writes and
+  analytics reads reject unauthenticated callers.
+- An authenticated presentation can be revised, shared, viewed, and read for
+  analytics.
+- `/admin` enforces workspace-admin access and does not reveal private page
+  content or viewer-level analytics without an explicit grant.
 
 ### 2. CI gate
 
@@ -109,7 +120,13 @@ gh release create vX.Y.Z \
   --notes "Summarise what changed. Reference PRs and issues."
 ```
 
-Use the release notes body to document user-facing changes (new tools, env-vars, API additions, breaking changes). Keep a "Breaking changes" section at the top if `MAJOR` bumped.
+Use the release notes body to document user-facing changes (new page types,
+env-vars, API additions, breaking changes). Keep a "Breaking changes" section
+at the top if `MAJOR` bumped.
+
+Pagent's MCP surface is fixed at exactly `write` and `read`. A new page type or
+read capability extends one of those schemas; it does not add another public
+tool. Renaming or removing either tool is a breaking change.
 
 ---
 

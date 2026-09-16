@@ -181,7 +181,52 @@ describe('Bearer auth gating', () => {
     await res.body?.cancel();
   });
 
-  it('show_ui via authed MCP forwards JWT sub as owner_id to db.insertPage', async () => {
+  it('rejects an invalid optional Bearer instead of silently downgrading identity', async () => {
+    const spy = vi.spyOn(jwt, 'verifyAccessToken').mockRejectedValue(new Error('expired'));
+    try {
+      const res = await fetch(mcpUrl, {
+        method: 'POST',
+        headers: {
+          Accept: MCP_ACCEPT,
+          'Content-Type': 'application/json',
+          authorization: 'Bearer expired.jwt.token',
+        },
+        body: INITIALIZE_BODY,
+      });
+      expect(res.status).toBe(401);
+      expect(res.headers.get('WWW-Authenticate')).toContain('error="invalid_token"');
+      expect((await parseJson(res, errorResponseSchema)).error).toBe('invalid_token');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('verifies an optional Bearer token during the auth grace period', async () => {
+    const claims = accessTokenClaims('page:create', 'grace-period-user');
+    const spy = vi.spyOn(jwt, 'verifyAccessToken').mockResolvedValue(claims);
+    const client = new Client({ name: 'test', version: '0.0.1' });
+    try {
+      await client.connect(
+        new StreamableHTTPClientTransport(mcpUrl, {
+          requestInit: { headers: { authorization: 'Bearer valid.jwt' } },
+        }),
+      );
+      await client.callTool({
+        name: 'write',
+        arguments: {
+          type: 'interactive',
+          spec: [{ createSurface: { surfaceId: 'm' } }],
+        },
+      });
+      const [page] = (db.insertPage as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(page.ownerId).toBe('grace-period-user');
+    } finally {
+      await client.close();
+      spy.mockRestore();
+    }
+  });
+
+  it('write via authed MCP forwards JWT sub as owner_id to db.insertPage', async () => {
     await withRequireAuth(async () => {
       const claims = accessTokenClaims('page:create', 'auth-flow-user-uuid');
       const spy = vi.spyOn(jwt, 'verifyAccessToken').mockResolvedValue(claims);
@@ -194,8 +239,11 @@ describe('Bearer auth gating', () => {
           }),
         );
         await client.callTool({
-          name: 'show_ui',
-          arguments: { spec: [{ createSurface: { surfaceId: 'm' } }] },
+          name: 'write',
+          arguments: {
+            type: 'interactive',
+            spec: [{ createSurface: { surfaceId: 'm' } }],
+          },
         });
         expect(db.insertPage).toHaveBeenCalledTimes(1);
         const [page] = (db.insertPage as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -208,7 +256,7 @@ describe('Bearer auth gating', () => {
     });
   });
 
-  it('show_ui returns an MCP tool error when the token lacks page:create', async () => {
+  it('write returns an MCP tool error when the token lacks page:create', async () => {
     await withRequireAuth(async () => {
       const claims = accessTokenClaims('page:read', 'read-only-user');
       const spy = vi.spyOn(jwt, 'verifyAccessToken').mockResolvedValue(claims);
@@ -221,8 +269,11 @@ describe('Bearer auth gating', () => {
           }),
         );
         const result = await client.callTool({
-          name: 'show_ui',
-          arguments: { spec: [{ createSurface: { surfaceId: 'm' } }] },
+          name: 'write',
+          arguments: {
+            type: 'interactive',
+            spec: [{ createSurface: { surfaceId: 'm' } }],
+          },
         });
         expect(result.isError).toBe(true);
         expect(JSON.stringify(result.content)).toContain('page:create');
@@ -251,12 +302,15 @@ describe('Bearer auth gating', () => {
     },
   );
 
-  it('show_ui via unauthenticated MCP (REQUIRE_AUTH=false) leaves ownerId null', async () => {
+  it('write via unauthenticated MCP (REQUIRE_AUTH=false) leaves ownerId null', async () => {
     const client = await newSdkClient();
     try {
       await client.callTool({
-        name: 'show_ui',
-        arguments: { spec: [{ createSurface: { surfaceId: 'm' } }] },
+        name: 'write',
+        arguments: {
+          type: 'interactive',
+          spec: [{ createSurface: { surfaceId: 'm' } }],
+        },
       });
       expect(db.insertPage).toHaveBeenCalledTimes(1);
       const [page] = (db.insertPage as ReturnType<typeof vi.fn>).mock.calls[0];

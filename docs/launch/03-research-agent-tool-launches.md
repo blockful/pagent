@@ -1,5 +1,9 @@
 # Research — How agent/MCP/dev tools actually got adopted (2025–2026)
 
+> **Historical research snapshot (superseded for product positioning on
+> 2026-09-16).** The external research remains useful, but its Pagent-specific
+> implications predate the Page model and exact `write`/`read` MCP contract.
+
 > 2026-06-04. Deep-research pass: 21 sources fetched, 103 claims extracted, 25 adversarially verified (14 confirmed, 11 refuted), then synthesized. **Round 2 (Reddit/Discord seeding + pre-launch runway) is in progress and will be appended below.**
 >
 > Method note: claims were verified by a 3-vote adversarial process (a claim needed to survive refutation attempts). "Refuted" claims below failed verification and should **not** be relied on, even though several are widely repeated as launch advice.

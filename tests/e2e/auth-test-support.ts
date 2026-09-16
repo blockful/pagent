@@ -16,15 +16,18 @@ export const RENDERER_URL = 'https://renderer.example.test';
 export const mcpCreatedPageSchema = z.object({
   structuredContent: z.object({
     page_id: z.string().regex(/^[a-f0-9]{32}$/),
+    type: z.literal('interactive'),
+    durable: z.literal(false),
     url: z.string().url(),
+    expires_at: z.number(),
   }),
 });
 export const mcpResultSchema = z.object({
   structuredContent: z.object({
-    state: z.literal('open'),
-    result: z.null(),
-    format: z.literal('a2ui'),
     page_id: z.string(),
+    type: z.literal('interactive'),
+    state: z.literal('open'),
+    response: z.null(),
   }),
 });
 

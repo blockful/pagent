@@ -68,6 +68,9 @@ export default defineConfig(({ command }) => {
       port: env.CLIENT_PORT,
       strictPort: true,
       proxy: {
+        '/v1': { target: API_TARGET, changeOrigin: true },
+        '/auth': { target: API_TARGET, changeOrigin: true },
+        '/oauth': { target: API_TARGET, changeOrigin: true },
         '/new': { target: API_TARGET, changeOrigin: true },
         '/health': { target: API_TARGET, changeOrigin: true },
         '/openapi.json': { target: API_TARGET, changeOrigin: true },

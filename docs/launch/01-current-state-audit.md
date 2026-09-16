@@ -1,5 +1,10 @@
 # Pagent — Current-State Audit
 
+> **Historical planning snapshot (superseded 2026-09-16).** This audit records
+> the product that existed when it was written. Former tool names and claims
+> below are not the current contract; Pagent now exposes exactly `write` and
+> `read`, with Page as the product primitive.
+
 > 2026-06-04. Snapshot of launch-readiness across product, copy, usage, and security.
 
 ## One-line read

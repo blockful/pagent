@@ -6,9 +6,9 @@ metrics, traces, and logs.
 ## What's collected
 
 - **Traces** — every HTTP request and every postgres query, auto-instrumented.
-- **Metrics** — RED (rate / errors / duration) per route, plus four pagent
-  counters/histograms (pages created / submitted / abandoned / submit
-  latency).
+- **Metrics** — RED (rate / errors / duration) per route, plus four Pagent
+  counters/histograms for temporary pages (created / submitted / abandoned /
+  submit latency).
 - **Logs** — structured pino logs, exported via OTLP, queryable in Loki with
   `trace_id` correlation back to Tempo.
 
@@ -22,6 +22,11 @@ pagent-api  ──OTLP/HTTP──▶  pagent-observability (Railway service)
 One Railway service runs the bundled `grafana/otel-lgtm` image. The API
 exports OTLP/HTTP over Railway's **private** network. Grafana itself is
 exposed publicly with admin auth.
+
+Grafana's `admin` account is infrastructure-only. The authenticated Pagent
+workspace surface at `/admin` is where workspace administrators review page
+metadata and governance controls. It does not grant private presentation
+content or viewer-level analytics without an explicit product permission.
 
 ## Deploying the observability service to Railway
 
@@ -150,6 +155,10 @@ Redeploy. The API boot log should show:
 
 ### Product
 
+- These panels describe temporary interactive/document page activity. Durable
+  presentation engagement is product data shown in the authenticated Pagent
+  page analytics UI and returned by MCP `read`; it is not inferred from these
+  operational counters.
 - **Pages created** (1h / 24h / 7d) — top-of-funnel.
 - **Submitted vs abandoned (24h)** — stacked. The abandonment view.
 - **Submission rate** — submissions per second over time.

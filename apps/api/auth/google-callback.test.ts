@@ -22,7 +22,6 @@ vi.mock('../db.ts', () => ({
 
 import * as db from '../db.ts';
 import { app } from '../app.ts';
-import { PUBLIC_URL } from '../app/config.ts';
 import { signStateJwt } from './state-jwt.ts';
 import {
   BASE,
@@ -40,10 +39,11 @@ function browserTransactionHash(token: string): string {
   return createHash('sha256').update(token).digest('base64url');
 }
 
-async function browserState(): Promise<string> {
+async function browserState(returnTo?: string): Promise<string> {
   return signStateJwt({
     browserSession: true,
     browserTransactionHash: browserTransactionHash(BROWSER_TRANSACTION_TOKEN),
+    returnTo,
   });
 }
 
@@ -404,7 +404,8 @@ describe('GET /oauth/callback/google', () => {
       },
     });
     vi.mocked(db.insertSession).mockResolvedValue();
-    const state = await browserState();
+    const returnTo = 'http://localhost:8788/share/opaque-token';
+    const state = await browserState(returnTo);
     const res = await app.fetch(
       new Request(
         `${BASE}/oauth/callback/google?code=google-code&state=${encodeURIComponent(state)}`,
@@ -412,7 +413,7 @@ describe('GET /oauth/callback/google', () => {
       ),
     );
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe(PUBLIC_URL);
+    expect(res.headers.get('location')).toBe(returnTo);
     expect(db.upsertGoogleUser).toHaveBeenCalledTimes(1);
     expect(db.insertSession).toHaveBeenCalledTimes(1);
     const setCookie = res.headers.get('set-cookie');

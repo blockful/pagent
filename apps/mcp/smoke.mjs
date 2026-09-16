@@ -1,5 +1,5 @@
-// Smoke test: boot the MCP server, run show_ui then poll check_result, print results.
-// Run from repo root:  node mcp/smoke.mjs
+// Smoke test: boot the MCP server, write an interactive page, then poll read for its response.
+// Run from repo root: node apps/mcp/smoke.mjs
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -89,18 +89,24 @@ try {
   });
   notify('notifications/initialized');
 
-  console.log('--- calling show_ui');
-  const show = await call('tools/call', {
-    name: 'show_ui',
-    arguments: { spec: SAMPLE },
+  const listed = await call('tools/list', {});
+  const toolNames = listed.tools.map(({ name }) => name).sort();
+  if (JSON.stringify(toolNames) !== JSON.stringify(['read', 'write'])) {
+    throw new Error(`Unexpected MCP tools: ${toolNames.join(', ')}`);
+  }
+
+  console.log('--- calling write');
+  const written = await call('tools/call', {
+    name: 'write',
+    arguments: { type: 'interactive', spec: SAMPLE },
   });
-  console.log(JSON.stringify(show, null, 2));
-  const pageId = show.structuredContent.page_id;
+  console.log(JSON.stringify(written, null, 2));
+  const pageId = written.structuredContent.page_id;
 
   console.log(
-    `\nOpen this URL in a browser and click the button:\n  ${show.structuredContent.url}`,
+    `\nOpen this URL in a browser and click the button:\n  ${written.structuredContent.url}`,
   );
-  console.log('\n--- polling check_result (up to 8 attempts, 2→4→8→16→30→30→30→30s backoff)');
+  console.log('\n--- polling read (up to 8 attempts, 2→4→8→16→30→30→30→30s backoff)');
 
   // Mirrors nextPollDelay in apps/web/poll-backoff.ts and the cadence
   // recommended in skills/pagent/SKILL.md.
@@ -112,8 +118,8 @@ try {
   let delayMs = 2_000;
   for (let attempt = 1; attempt <= 8; attempt++) {
     const result = await call('tools/call', {
-      name: 'check_result',
-      arguments: { page_id: pageId },
+      name: 'read',
+      arguments: { page_id: pageId, include: 'response' },
     });
     const state = result.structuredContent?.state;
     console.log(`attempt ${attempt}: state=${state}`);

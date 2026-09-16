@@ -1,5 +1,10 @@
 # Pagent — Launch Playbook
 
+> **Historical planning snapshot (superseded 2026-09-16).** This playbook
+> predates Pagent's canonical Page model and exact `write`/`read` MCP contract.
+> Former tool names below are preserved as historical facts, not current
+> instructions. Use the repository README and v0.1.0 PRD for launch truth.
+
 > Working set of launch docs. Created 2026-06-04. Owner: @alextnetto.
 
 This folder holds everything needed to take Pagent from "built and deployed" to "launched and adopted." It is the output of a current-state audit + a deep-research pass on how agent/MCP/dev tools actually got adopted in 2025–2026.

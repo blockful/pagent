@@ -21415,6 +21415,75 @@ var StdioServerTransport = class {
 // apps/mcp/server.ts
 import { pathToFileURL } from "node:url";
 
+// apps/api/decks/domain.ts
+var stableSlideIdSchema = external_exports.string().min(1).max(120).regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/);
+var deckIdSchema = external_exports.string().uuid().brand("DeckId");
+var shareLinkIdSchema = external_exports.string().uuid().brand("ShareLinkId");
+var identityConfidenceSchema = external_exports.enum(["anonymous", "unverified", "authenticated"]);
+var analyticsVisibilitySchema = external_exports.enum(["private", "selected", "team", "workspace"]);
+var publishDeckBodySchema = external_exports.object({
+  title: external_exports.string().trim().min(1).max(160),
+  description: external_exports.string().trim().max(2e3).optional(),
+  client_label: external_exports.string().trim().max(160).optional(),
+  update_deck_id: deckIdSchema.optional(),
+  slides: external_exports.array(
+    external_exports.object({
+      id: stableSlideIdSchema,
+      title: external_exports.string().trim().max(200).optional(),
+      html: external_exports.string().min(1).max(1e6)
+    }).strict()
+  ).min(1).max(500).refine((slides) => new Set(slides.map((slide) => slide.id)).size === slides.length, {
+    message: "slide ids must be unique within a revision"
+  })
+}).strict();
+var shareLinkBaseSchema = external_exports.object({
+  name: external_exports.string().trim().min(1).max(160),
+  expires_at: external_exports.string().datetime().optional()
+});
+var publicShareLinkSchema = shareLinkBaseSchema.extend({
+  access_mode: external_exports.literal("anyone"),
+  allowed_emails: external_exports.array(external_exports.string().email()).max(500).optional().default([]),
+  allowed_domains: external_exports.array(external_exports.string().min(1).max(255)).max(100).optional().default([])
+}).strict();
+var restrictedShareLinkSchema = shareLinkBaseSchema.extend({
+  access_mode: external_exports.enum(["allowed_email", "authenticated"]),
+  allowed_emails: external_exports.array(external_exports.string().email()).max(500).optional().default([]),
+  allowed_domains: external_exports.array(external_exports.string().min(1).max(255)).max(100).optional().default([])
+}).strict().refine((value) => value.allowed_emails.length + value.allowed_domains.length > 0, {
+  message: "specific-audience links require at least one email or domain"
+});
+var createShareLinkBodySchema = external_exports.union([
+  publicShareLinkSchema,
+  restrictedShareLinkSchema
+]);
+var deckListQuerySchema = external_exports.object({
+  q: external_exports.string().trim().max(200).optional(),
+  scope: external_exports.enum(["mine", "shared", "team"]).optional().default("mine"),
+  status: external_exports.enum(["active", "archived", "expired", "revoked"]).optional(),
+  owner: external_exports.string().uuid().optional(),
+  sender: external_exports.string().uuid().optional()
+});
+var analyticsFilterInputSchema = external_exports.object({
+  link_id: external_exports.string().uuid().optional(),
+  viewer: external_exports.string().trim().max(320).optional(),
+  sender: external_exports.string().uuid().optional(),
+  revision: external_exports.coerce.number().int().positive().optional(),
+  from: external_exports.string().datetime().optional(),
+  to: external_exports.string().datetime().optional()
+}).strict();
+function mapAnalyticsFilters(value) {
+  return {
+    linkId: value.link_id,
+    viewer: value.viewer,
+    sender: value.sender,
+    revision: value.revision,
+    from: value.from,
+    to: value.to
+  };
+}
+var analyticsQuerySchema = analyticsFilterInputSchema.transform(mapAnalyticsFilters);
+var analyticsUrlQuerySchema = analyticsFilterInputSchema.omit({ viewer: true }).transform(mapAnalyticsFilters);
+
 // apps/api/limits.ts
 var HTML_MAX_BYTES = 1e6;
 
@@ -21431,148 +21500,116 @@ function ownerIdFromExtra(extra) {
   const sub = extra?.authInfo?.extra?.sub;
   return typeof sub === "string" ? sub : void 0;
 }
-function requireScope(extra, requiredScope) {
-  if (extra?.authInfo && !extra.authInfo.scopes.includes(requiredScope)) {
-    throw new InsufficientScopeError(requiredScope);
+function publisherFromExtra(extra) {
+  const id = ownerIdFromExtra(extra);
+  const email2 = extra?.authInfo?.extra?.email;
+  return id !== void 0 && typeof email2 === "string" ? { id, email: email2 } : void 0;
+}
+function requireScope(extra, scope) {
+  if (extra?.authInfo !== void 0 && !extra.authInfo.scopes.includes(scope)) {
+    throw new InsufficientScopeError(scope);
   }
 }
-var SHOW_UI_DESCRIPTION = [
-  "Ask the user a question that needs a structured answer back. Forms, pickers, confirmations, multi-step wizards, surveys, dashboards-as-input.",
-  "Returns { page_id, url, expires_at }. PRINT the URL so the user can open it. The agent never sees the user typing \u2014 only the final submitted result.",
-  "Each page is single-shot: one spec, one result. For a follow-up question, call show_ui again with a fresh spec \u2014 there is no surface-replace mechanism.",
-  "After this call, poll check_result on your own cadence to read the user response (start at 2-3s, back off exponentially up to ~30s; do other useful work between polls rather than blocking).",
-  "If you only want to SHOW something \u2014 a report, a chart, an infographic \u2014 use show_html instead. show_ui is for input."
-].join("\n\n");
-var SHOW_UI_INPUT_DESCRIPTION = [
-  "A2UI v0.9 spec \u2014 an array of A2UI messages.",
-  'Start with one createSurface, then updateComponents with a tree whose root component MUST have id "root".',
-  "The basic catalog (https://a2ui.org/specification/v0_9/basic_catalog.json) provides Column, Row, Card, Text, TextField, Button, CheckBox, ChoicePicker, DateTimeInput, Image, Divider, List, Tabs, Slider, Modal. Component names are case-sensitive \u2014 it is CheckBox, not Checkbox; unknown names render as nothing.",
-  'Buttons fire actions via { action: { event: { name, context } } }; bind input fields with { value: { path: "/key" } } and reference those paths in the button context so user input flows back.',
-  "Keep specs small \u2014 one screen, one purpose."
-].join(" ");
-var SHOW_HTML_DESCRIPTION = [
-  "Show the user a rich visualization: a styled report, dashboard, chart, infographic, comparison table, slide, or other view-only artifact.",
-  "Returns { page_id, url, expires_at }. PRINT the URL so the user can open it. The page is one-way \u2014 the user looks at it; nothing comes back.",
-  "Do NOT poll check_result for HTML pages; they never produce a result. If you need a follow-up decision, call show_ui after with a fresh spec.",
-  "Constraints (enforced \u2014 violations are stripped or rejected):",
-  "No JavaScript: no <script> tags, no on*= event handlers, no javascript: URLs. JavaScript does not run.",
-  "No external assets: inline all CSS as <style>, embed images as data:image/...;base64,... URIs. No Google Fonts, no CDN libraries, no remote <img src=https:>.",
-  "No forms, iframes, or meta refresh: <form> submissions (use show_ui for input), <iframe>, and <meta http-equiv=refresh> are stripped.",
-  "1 MB payload cap."
-].join("\n\n");
-var SHOW_HTML_INPUT_DESCRIPTION = [
-  "A single UTF-8 HTML string. May be a fragment or a full document; the renderer wraps it in a sandboxed scaffold either way.",
-  "Inline all CSS as <style>; embed all images as data: URIs. No external assets \u2014 they will not load.",
-  "Up to 1,000,000 bytes (1 MB)."
-].join(" ");
-var CHECK_RESULT_DESCRIPTION = [
-  "Fetch the current state of a page created by show_ui. Fire-and-return \u2014 does NOT block or wait.",
-  'Returns { state, result, format, page_id } where state is "open" | "submitted" | "received" and format is "a2ui" | "html".',
-  'When state is "open", the user has not responded yet \u2014 wait a few seconds and call again. When "submitted", result is the user input as an A2UI client-action: { name, surfaceId, sourceComponentId, context, timestamp }. When "received", you already read the result on a prior poll (treat as duplicate).',
-  'If format is "html", the page is view-only \u2014 stop polling; HTML pages never produce a result.',
-  "If the page expired (Page not found), do NOT retry the same page_id \u2014 ask the user in chat whether to start over, then call show_ui (or show_html) with a fresh spec."
-].join("\n\n");
+var interactiveWriteSchema = external_exports.object({
+  type: external_exports.literal("interactive"),
+  spec: external_exports.array(external_exports.record(external_exports.unknown()))
+}).strict();
+var documentWriteSchema = external_exports.object({
+  type: external_exports.literal("document"),
+  html: external_exports.string().min(1).max(HTML_MAX_BYTES)
+}).strict();
+var presentationWriteSchema = publishDeckBodySchema.omit({ update_deck_id: true }).extend({
+  type: external_exports.literal("presentation"),
+  page_id: deckIdSchema.optional()
+}).strict();
+var writeInputSchema = external_exports.discriminatedUnion("type", [
+  interactiveWriteSchema,
+  documentWriteSchema,
+  presentationWriteSchema
+]);
+var ephemeralPageIdSchema = external_exports.string().regex(/^[a-f0-9]{32}$/, "invalid page_id");
+var readInputSchema = external_exports.object({
+  page_id: external_exports.union([ephemeralPageIdSchema, deckIdSchema]),
+  include: external_exports.enum(["response", "analytics"]).optional()
+}).strict();
+var WRITE_DESCRIPTION = "Write one Pagent page. Interactive and document pages are temporary. Presentation pages are durable, revisioned, shareable, and analyzable. Return the page URL to the user.";
+var READ_DESCRIPTION = "Read a page response or durable presentation analytics. The page id selects the sensible default; use include only to be explicit. This call returns immediately and never waits.";
 function registerPagentTools(server2, ops) {
   server2.registerTool(
-    "show_ui",
-    {
-      title: "Show UI to the user",
-      description: SHOW_UI_DESCRIPTION,
-      inputSchema: {
-        spec: external_exports.array(external_exports.record(external_exports.unknown())).describe(SHOW_UI_INPUT_DESCRIPTION)
-      }
-    },
-    async ({ spec }, extra) => {
+    "write",
+    { title: "Write a page", description: WRITE_DESCRIPTION, inputSchema: writeInputSchema },
+    async (input, extra) => {
       requireScope(extra, "page:create");
-      const created = await ops.showUi(spec, ownerIdFromExtra(extra));
+      if (input.type === "interactive") {
+        const created = await ops.writeInteractive(input.spec, ownerIdFromExtra(extra));
+        return ephemeralWriteResponse("interactive", created);
+      }
+      if (input.type === "document") {
+        const created = await ops.writeDocument(input.html, ownerIdFromExtra(extra));
+        return ephemeralWriteResponse("document", created);
+      }
+      const publisher = publisherFromExtra(extra);
+      const base = {
+        title: input.title,
+        description: input.description,
+        client_label: input.client_label,
+        slides: input.slides
+      };
+      const publishInput = input.page_id === void 0 ? base : { ...base, update_deck_id: input.page_id };
+      const written = await ops.writePresentation(publishInput, publisher);
       return {
         content: [
-          {
-            type: "text",
-            text: `UI ready. Share this URL with the user:
-${created.url}
-
-page_id: ${created.id}
-expires_at: ${created.expires_at}`
-          }
+          { type: "text", text: `Presentation page ready: ${written.preview_url}` }
         ],
-        structuredContent: {
-          page_id: created.id,
-          url: created.url,
-          expires_at: created.expires_at
-        }
+        structuredContent: { type: "presentation", durable: true, ...written }
       };
     }
   );
   server2.registerTool(
-    "show_html",
-    {
-      title: "Show HTML visualization to the user",
-      description: SHOW_HTML_DESCRIPTION,
-      inputSchema: {
-        html: external_exports.string().min(1).max(HTML_MAX_BYTES).describe(SHOW_HTML_INPUT_DESCRIPTION)
-      }
-    },
-    async ({ html }, extra) => {
-      requireScope(extra, "page:create");
-      const created = await ops.showHtml(html, ownerIdFromExtra(extra));
-      return {
-        content: [
-          {
-            type: "text",
-            text: `View ready. Share this URL with the user:
-${created.url}
-
-page_id: ${created.id}
-expires_at: ${created.expires_at}
-
-View-only \u2014 do not poll check_result for this page.`
-          }
-        ],
-        structuredContent: {
-          page_id: created.id,
-          url: created.url,
-          expires_at: created.expires_at
-        }
-      };
-    }
-  );
-  server2.registerTool(
-    "check_result",
-    {
-      title: "Check whether the user has submitted yet",
-      description: CHECK_RESULT_DESCRIPTION,
-      inputSchema: {
-        page_id: external_exports.string().regex(/^[a-f0-9]{32}$/, "invalid page_id").describe("The page_id returned by show_ui.")
-      }
-    },
-    async ({ page_id }, extra) => {
+    "read",
+    { title: "Read a page", description: READ_DESCRIPTION, inputSchema: readInputSchema },
+    async ({ page_id, include }, extra) => {
       requireScope(extra, "page:read");
-      const outcome = await ops.checkResult(page_id);
+      const presentation = deckIdSchema.safeParse(page_id).success;
+      const selected = include ?? (presentation ? "analytics" : "response");
+      if (selected === "analytics") {
+        if (!presentation) throw new TypeError("Analytics are available for presentation pages");
+        const readerId = ownerIdFromExtra(extra);
+        const analytics = await ops.readAnalytics(page_id, readerId);
+        return {
+          content: [{ type: "text", text: `Analytics read for page ${page_id}.` }],
+          structuredContent: { page_id, type: "presentation", analytics }
+        };
+      }
+      if (presentation) throw new TypeError("Presentation pages expose analytics, not responses");
+      const outcome = await ops.readResponse(page_id);
       if (outcome.kind === "not_found") {
-        throw new Error(
-          `Page ${page_id} not found (expired or deleted). Don't retry the same page_id \u2014 ask the user whether to start over, then call show_ui (or show_html) with a fresh spec.`
-        );
+        throw new Error(`Page ${page_id} was not found or has expired. Write a new page.`);
       }
-      let text;
-      if (outcome.format === "html") {
-        text = `Page ${page_id} is an HTML view (format: html). It does not produce a result \u2014 stop polling. If you need a follow-up decision, call show_ui with a fresh spec.`;
-      } else if (outcome.result == null) {
-        text = `User has not responded yet (state: ${outcome.state}). Call check_result again in a few seconds.`;
-      } else {
-        text = `User submitted: ${JSON.stringify(outcome.result)}`;
-      }
+      const type = outcome.format === "html" ? "document" : "interactive";
       return {
-        content: [{ type: "text", text }],
-        structuredContent: {
-          state: outcome.state,
-          result: outcome.result,
-          format: outcome.format,
-          page_id
-        }
+        content: [{ type: "text", text: responseText(outcome) }],
+        structuredContent: { page_id, type, state: outcome.state, response: outcome.result }
       };
     }
   );
+}
+function ephemeralWriteResponse(type, page) {
+  return {
+    content: [{ type: "text", text: `Page ready: ${page.url}` }],
+    structuredContent: {
+      page_id: page.id,
+      type,
+      durable: false,
+      url: page.url,
+      expires_at: page.expires_at
+    }
+  };
+}
+function responseText(outcome) {
+  if (outcome.format === "html") return "This document page is view-only and has no response.";
+  if (outcome.result === null) return `No response yet (state: ${outcome.state}).`;
+  return `Response: ${JSON.stringify(outcome.result)}`;
 }
 
 // apps/mcp/lib.ts
@@ -21618,42 +21655,92 @@ var PAGENT_TOKEN = env.PAGENT_TOKEN;
 function authHeaders() {
   return PAGENT_TOKEN ? { Authorization: `Bearer ${PAGENT_TOKEN}` } : {};
 }
+var apiErrorBodySchema = external_exports.object({
+  message: external_exports.string().optional(),
+  retry_after_seconds: external_exports.number().optional(),
+  max_bytes: external_exports.number().optional()
+});
+var presentationResultSchema = external_exports.object({
+  deckId: external_exports.string().uuid(),
+  revisionId: external_exports.string().uuid(),
+  revisionNumber: external_exports.number().int().positive()
+});
+var ephemeralResultSchema = external_exports.object({
+  id: external_exports.string(),
+  url: external_exports.string().url(),
+  expires_at: external_exports.number()
+});
+var responseResultSchema = external_exports.object({
+  state: external_exports.enum(["open", "submitted", "received"]),
+  result: external_exports.unknown(),
+  format: external_exports.enum(["a2ui", "html"])
+});
+var analyticsResultSchema = external_exports.record(external_exports.unknown());
 async function readError(res, fallbackVerb) {
-  const body = await res.json().catch(() => ({}));
+  const body = apiErrorBodySchema.catch({}).parse(await res.json().catch(() => ({})));
   const hint = formatRetryHint(body);
   const message = body.message ?? `HTTP ${res.status}`;
   return new Error(`${fallbackVerb} failed (${res.status}): ${message}${hint ? `. ${hint}` : ""}`);
 }
 var restOps = {
-  async showUi(spec, _ownerId) {
+  async writePresentation(input) {
+    if (PAGENT_TOKEN === void 0) throw new Error("Authentication required for durable pages");
+    const res = await fetch(`${SERVICE_URL}/v1/decks`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify(input)
+    });
+    if (!res.ok) throw await readError(res, "write");
+    const published = presentationResultSchema.parse(await res.json());
+    const rendererBase = SERVICE_URL.replace(/^https:\/\/api\./, "https://").replace(
+      /^http:\/\/api\./,
+      "http://"
+    );
+    return {
+      page_id: published.deckId,
+      revision_id: published.revisionId,
+      revision_number: published.revisionNumber,
+      manage_url: `${rendererBase}/pages/${published.deckId}`,
+      preview_url: `${rendererBase}/pages/${published.deckId}#preview`
+    };
+  },
+  async writeInteractive(spec, _ownerId) {
     const res = await fetch(`${SERVICE_URL}/new`, {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify({ spec })
     });
-    if (!res.ok) throw await readError(res, "show_ui");
-    return await res.json();
+    if (!res.ok) throw await readError(res, "write");
+    return ephemeralResultSchema.parse(await res.json());
   },
-  async showHtml(html, _ownerId) {
+  async writeDocument(html, _ownerId) {
     const res = await fetch(`${SERVICE_URL}/new`, {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify({ format: "html", spec: html })
     });
-    if (!res.ok) throw await readError(res, "show_html");
-    return await res.json();
+    if (!res.ok) throw await readError(res, "write");
+    return ephemeralResultSchema.parse(await res.json());
   },
-  async checkResult(page_id) {
-    const res = await fetch(`${SERVICE_URL}/${page_id}/result`, {
+  async readResponse(pageId) {
+    const res = await fetch(`${SERVICE_URL}/${pageId}/result`, {
       headers: { accept: "application/json", ...authHeaders() }
     });
     if (res.status === 404) return { kind: "not_found" };
-    if (!res.ok) throw await readError(res, "check_result");
-    const body = await res.json();
+    if (!res.ok) throw await readError(res, "read");
+    const body = responseResultSchema.parse(await res.json());
     return { kind: "state", state: body.state, result: body.result, format: body.format };
+  },
+  async readAnalytics(pageId) {
+    if (PAGENT_TOKEN === void 0) throw new Error("Authentication required for analytics");
+    const res = await fetch(`${SERVICE_URL}/v1/decks/${pageId}/analytics`, {
+      headers: { accept: "application/json", ...authHeaders() }
+    });
+    if (!res.ok) throw await readError(res, "read");
+    return analyticsResultSchema.parse(await res.json());
   }
 };
-var server = new McpServer({ name: "pagent", version: "0.0.1" });
+var server = new McpServer({ name: "pagent", version: "0.1.0" });
 registerPagentTools(server, restOps);
 if (pathToFileURL(process.argv[1]).href === import.meta.url) {
   await server.connect(new StdioServerTransport());

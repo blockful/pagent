@@ -1,9 +1,9 @@
 {
   "name": "pagent",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Hosted UI rendering for terminal-bound AI agents — monorepo root",
+  "description": "Two-tool page publishing and analytics for AI agents — monorepo root",
   "license": "MIT",
   "workspaces": [
     "apps/api",
@@ -31,6 +31,7 @@
     "prepare": "husky"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
     "@types/node": "^24.0.0",

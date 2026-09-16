@@ -8,5 +8,6 @@
 
 // 1 MB is the HTML payload cap (per spec). The bodyLimit middleware enforces
 // this on the wire body; the format=html branch of newPageBodySchema and the
-// show_html MCP tool both enforce it again post-parse for clear error shapes.
+// document Page branch of the `write` MCP tool both enforce it again post-parse
+// for clear error shapes.
 export const HTML_MAX_BYTES = 1_000_000;

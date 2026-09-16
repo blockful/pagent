@@ -1,6 +1,5 @@
 import type { Context, Hono } from 'hono';
 import { rateLimiter } from 'hono-rate-limiter';
-import { PUBLIC_URL } from '../app/config.ts';
 import { clientKey } from '../client-key.ts';
 import { getClient, isAllowedOAuthRedirectUri } from './clients-store.ts';
 import { renderConsentPage } from './consent-page.ts';
@@ -9,7 +8,7 @@ import { renderLoginPage } from './login-page.ts';
 import type { AuthVariables } from './middleware.ts';
 import { normalizeRequestedScope } from './oauth-scopes.ts';
 import { createAuthCode, upsertGoogleUser } from './provider.ts';
-import { getClientIp, renderError, setSessionCookie } from './route-shared.ts';
+import { browserReturnTarget, getClientIp, renderError, setSessionCookie } from './route-shared.ts';
 import {
   clearBrowserTransaction,
   startBrowserTransaction,
@@ -55,7 +54,12 @@ export function registerLoginRoutes(authRoutes: AuthRouter): void {
     const query = c.req.query();
     if (query.browser_session === '1') {
       const browserTransactionHash = startBrowserTransaction(c);
-      const signedState = await signStateJwt({ browserSession: true, browserTransactionHash });
+      const returnTo = browserReturnTarget(query.return_to);
+      const signedState = await signStateJwt({
+        browserSession: true,
+        browserTransactionHash,
+        returnTo,
+      });
       return renderNoStoreHtml(c, renderLoginPage({ signedState }));
     }
 
@@ -163,7 +167,7 @@ export function registerLoginRoutes(authRoutes: AuthRouter): void {
         c.req.header('user-agent') ?? undefined,
       );
       setSessionCookie(c, sessionToken);
-      return c.redirect(PUBLIC_URL, 302);
+      return c.redirect(browserReturnTarget(claims.returnTo), 302);
     }
 
     if (!claims.clientId || !claims.redirectUri || !claims.codeChallenge) {

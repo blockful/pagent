@@ -1,5 +1,4 @@
 import type { Context, Hono } from 'hono';
-import { PUBLIC_URL } from '../app/config.ts';
 import { clientKey } from '../client-key.ts';
 import { RateLimiter } from '../mcp/rate-limit.ts';
 import { env } from '../schemas.ts';
@@ -13,7 +12,7 @@ import {
 } from './magic-link.ts';
 import type { AuthVariables } from './middleware.ts';
 import { createAuthCode, upsertUser } from './provider.ts';
-import { getClientIp, renderError, setSessionCookie } from './route-shared.ts';
+import { browserReturnTarget, getClientIp, renderError, setSessionCookie } from './route-shared.ts';
 import { clearBrowserTransaction, verifyBrowserTransaction } from './route-transaction.ts';
 import { createSession } from './session.ts';
 import { verifyStateJwt } from './state-jwt.ts';
@@ -137,6 +136,7 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
           scope: claims.scope,
           state: claims.state,
           browserSession: claims.browserSession,
+          returnTo: claims.returnTo,
           browserTransactionHash: claims.browserTransactionHash,
           consentGranted: claims.consentGranted,
         };
@@ -215,7 +215,7 @@ export function registerMagicRoutes(authRoutes: AuthRouter): void {
         c.req.header('user-agent') ?? undefined,
       );
       setSessionCookie(c, sessionToken);
-      return c.redirect(PUBLIC_URL, 302);
+      return c.redirect(browserReturnTarget(ctx.returnTo), 302);
     }
     if (!ctx.redirectUri) {
       return renderError(

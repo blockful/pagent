@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { expect, request, test, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { z } from 'zod';
 import * as db from '../../apps/api/db.ts';
+import { SESSION_COOKIE_NAME } from '../../apps/api/auth/middleware.ts';
+import { createSession } from '../../apps/api/auth/session.ts';
 import { AUTH_TRANSACTION_COOKIE_NAME } from '../../apps/api/auth/route-transaction.ts';
 import {
   API_PUBLIC_URL,
@@ -37,6 +39,39 @@ const resultSchema = z.object({
   result: z.null(),
   format: z.literal('a2ui'),
 });
+const mcpPresentationSchema = z.object({
+  structuredContent: z.object({
+    page_id: z.string().uuid(),
+    revision_id: z.string().uuid(),
+    revision_number: z.number().int().positive(),
+    type: z.literal('presentation'),
+    durable: z.literal(true),
+    manage_url: z.string().url(),
+    preview_url: z.string().url(),
+  }),
+});
+const mcpAnalyticsSchema = z.object({
+  structuredContent: z.object({
+    page_id: z.string().uuid(),
+    type: z.literal('presentation'),
+    analytics: z.object({
+      owner: z.object({ id: z.string().uuid(), email: z.string().email() }),
+      overview: z.object({
+        totalVisits: z.number().int().nonnegative(),
+        uniqueViewers: z.number().int().nonnegative(),
+      }),
+      visitors: z.array(z.unknown()),
+      slides: z.array(z.object({ stableSlideId: z.string() })),
+      visits: z.array(z.unknown()),
+    }),
+  }),
+});
+const e2eApiUrl = process.env.E2E_API_URL ?? 'http://127.0.0.1:8787';
+const mcpPresentationTitle = `MCP browser acceptance ${randomUUID()}`;
+const mcpPresentationSlideIds = Array.from(
+  { length: 10 },
+  (_, index) => `mcp-browser-slide-${index + 1}`,
+);
 test.describe.configure({ mode: 'serial' });
 
 let api: APIRequestContext | undefined;
@@ -46,6 +81,7 @@ let privateKeyPem: string | undefined;
 let user: db.UserRow | undefined;
 let createdPageId: string | undefined;
 let mcpCreatedPageId: string | undefined;
+let mcpPresentationPageId: string | undefined;
 
 async function token(scope: string): Promise<string> {
   if (privateKeyPem === undefined || user === undefined || user.handle === null) {
@@ -288,12 +324,15 @@ test('returns a result with a page:read bearer', async () => {
   });
 });
 
-test('stdio MCP surfaces REST 403 when a read-only token calls show_ui', async () => {
+test('stdio MCP surfaces REST 403 when a read-only token calls write', async () => {
   const client = await connectStdioClient(localApiUrl(), await token('page:read'));
   try {
-    const result = await client.callTool({ name: 'show_ui', arguments: { spec: [] } });
+    const result = await client.callTool({
+      name: 'write',
+      arguments: { type: 'interactive', spec: [] },
+    });
     expect(result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain('show_ui failed (403)');
+    expect(JSON.stringify(result.content)).toContain('write failed (403)');
   } finally {
     await client.close();
   }
@@ -303,7 +342,10 @@ test('stdio MCP creates a renderer URL with a page:create token', async () => {
   const client = await connectStdioClient(localApiUrl(), await token('page:create'));
   try {
     const result = mcpCreatedPageSchema.parse(
-      await client.callTool({ name: 'show_ui', arguments: { spec: [] } }),
+      await client.callTool({
+        name: 'write',
+        arguments: { type: 'interactive', spec: [] },
+      }),
     );
     mcpCreatedPageId = result.structuredContent.page_id;
     expect(result.structuredContent.url).toBe(`${RENDERER_URL}/${mcpCreatedPageId}`);
@@ -312,15 +354,15 @@ test('stdio MCP creates a renderer URL with a page:create token', async () => {
   }
 });
 
-test('stdio MCP surfaces REST 403 when a create-only token calls check_result', async () => {
+test('stdio MCP surfaces REST 403 when a create-only token calls read', async () => {
   const client = await connectStdioClient(localApiUrl(), await token('page:create'));
   try {
     const result = await client.callTool({
-      name: 'check_result',
-      arguments: { page_id: mcpPageId() },
+      name: 'read',
+      arguments: { page_id: mcpPageId(), include: 'response' },
     });
     expect(result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain('check_result failed (403)');
+    expect(JSON.stringify(result.content)).toContain('read failed (403)');
   } finally {
     await client.close();
   }
@@ -330,13 +372,98 @@ test('stdio MCP reads a result with a page:read token', async () => {
   const client = await connectStdioClient(localApiUrl(), await token('page:read'));
   try {
     const result = mcpResultSchema.parse(
-      await client.callTool({ name: 'check_result', arguments: { page_id: mcpPageId() } }),
+      await client.callTool({
+        name: 'read',
+        arguments: { page_id: mcpPageId(), include: 'response' },
+      }),
     );
     expect(result.structuredContent).toEqual({
-      state: 'open',
-      result: null,
-      format: 'a2ui',
       page_id: mcpPageId(),
+      type: 'interactive',
+      state: 'open',
+      response: null,
+    });
+  } finally {
+    await client.close();
+  }
+});
+
+test('stdio MCP writes a ten-slide presentation that an authenticated owner can preview without visits', async ({
+  page,
+}) => {
+  const client = await connectStdioClient(localApiUrl(), await token('page:create page:read'));
+  try {
+    const written = mcpPresentationSchema.parse(
+      await client.callTool({
+        name: 'write',
+        arguments: {
+          type: 'presentation',
+          title: mcpPresentationTitle,
+          slides: mcpPresentationSlideIds.map((id, index) => ({
+            id,
+            title: `MCP browser slide ${index + 1}`,
+            html: `<h1>MCP browser slide ${index + 1}</h1>`,
+          })),
+        },
+      }),
+    );
+    mcpPresentationPageId = written.structuredContent.page_id;
+    expect(written.structuredContent).toMatchObject({
+      revision_number: 1,
+      type: 'presentation',
+      durable: true,
+    });
+
+    if (user === undefined) throw new TypeError('Production auth E2E user is not initialized');
+    await page
+      .context()
+      .addCookies([
+        { name: SESSION_COOKIE_NAME, value: await createSession(user.id), url: e2eApiUrl },
+      ]);
+    await page.goto('/pages');
+    await expect(page.getByRole('heading', { name: 'Pages' })).toBeVisible();
+    await page.getByRole('link', { name: mcpPresentationTitle, exact: true }).click();
+    await expect(page.getByText('Slide 1 of 10')).toBeVisible();
+
+    const analytics = mcpAnalyticsSchema.parse(
+      await client.callTool({
+        name: 'read',
+        arguments: { page_id: presentationPageId(), include: 'analytics' },
+      }),
+    );
+    expect(analytics.structuredContent.analytics.owner).toMatchObject({
+      id: user.id,
+      email: user.email,
+    });
+    expect(analytics.structuredContent.analytics.overview).toEqual({
+      totalVisits: 0,
+      uniqueViewers: 0,
+    });
+    expect(analytics.structuredContent.analytics.visitors).toEqual([]);
+    expect(analytics.structuredContent.analytics.visits).toEqual([]);
+  } finally {
+    await client.close();
+  }
+});
+
+test('stdio MCP reads analytics for a durable presentation page', async () => {
+  const client = await connectStdioClient(localApiUrl(), await token('page:read'));
+  try {
+    const read = mcpAnalyticsSchema.parse(
+      await client.callTool({
+        name: 'read',
+        arguments: { page_id: presentationPageId(), include: 'analytics' },
+      }),
+    );
+    expect(read.structuredContent).toMatchObject({
+      page_id: presentationPageId(),
+      type: 'presentation',
+      analytics: {
+        overview: { totalVisits: 0, uniqueViewers: 0 },
+        slides: mcpPresentationSlideIds.map((stableSlideId) => ({ stableSlideId })),
+        visitors: [],
+        visits: [],
+      },
     });
   } finally {
     await client.close();
@@ -356,6 +483,13 @@ function pageId(): string {
 function mcpPageId(): string {
   if (mcpCreatedPageId === undefined) throw new TypeError('MCP page creation scenario did not run');
   return mcpCreatedPageId;
+}
+
+function presentationPageId(): string {
+  if (mcpPresentationPageId === undefined) {
+    throw new TypeError('MCP presentation creation scenario did not run');
+  }
+  return mcpPresentationPageId;
 }
 
 function localApiUrl(): string {

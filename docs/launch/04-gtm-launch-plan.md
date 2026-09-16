@@ -1,5 +1,9 @@
 # Pagent — GTM / Launch Campaign
 
+> **Historical planning snapshot (superseded 2026-09-16).** This campaign plan
+> predates durable presentation pages and the exact `write`/`read` MCP
+> contract. Treat old names and metrics as context, not current launch copy.
+
 > 2026-06-04. Built on the [research](./03-research-agent-tool-launches.md) (adversarially verified) and the launch decisions: full-v2-then-launch, ecosystem-wide audience, adoption north-star. The Reddit/Discord playbook and the Runway section reflect **research round 2 (complete)**.
 
 ## 0. What the research changed about the plan

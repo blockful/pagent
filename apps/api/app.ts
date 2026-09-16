@@ -17,6 +17,7 @@ import type { RequestIdVariables } from './request-id.ts';
 import { getLog, getRequestId, requestId } from './request-id.ts';
 import { ALLOWED_ORIGINS, MAX_BODY_BYTES } from './app/config.ts';
 import { createNewPageLimiter, registerPageRoutes } from './app/page-routes.ts';
+import { deckRoutes } from './decks/routes.ts';
 
 export {
   ALLOWED_ORIGINS,
@@ -61,7 +62,7 @@ app.use(
     // nosniff, Referrer-Policy no-referrer, etc.)
   }),
 );
-app.use('*', cors({ origin: ALLOWED_ORIGINS ?? '*' }));
+app.use('*', cors({ origin: ALLOWED_ORIGINS ?? '*', credentials: ALLOWED_ORIGINS !== undefined }));
 
 app.use(
   '*',
@@ -190,4 +191,5 @@ app.use('*', resolveAuth());
 // where MCP clients expect them. No auth required.
 
 app.route('/', authRoutes);
+app.route('/v1', deckRoutes);
 registerPageRoutes(app, newPageLimiter);

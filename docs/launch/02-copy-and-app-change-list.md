@@ -1,5 +1,10 @@
 # Pagent — Copy & App Change List
 
+> **Historical planning snapshot (superseded 2026-09-16).** Do not execute this
+> copy list against the current product. It predates the Page model and exact
+> `write`/`read` MCP contract; old tool names remain only to preserve the
+> original analysis.
+
 > 2026-06-04. Prioritized changes to make Pagent launch-ready. Grounded in the [audit](./01-current-state-audit.md) and the launch decisions (ecosystem-wide audience, adoption north-star, full-v2-then-launch).
 
 **The throughline of every change:** (1) speak to the _whole MCP ecosystem_, not Claude-Code-only; (2) surface _both_ `show_ui` (forms) and `show_html` (dashboards) — half the product is currently hidden; (3) kill insider jargon; (4) make every shared link and every install dead-simple, because the goal is **adoption**.

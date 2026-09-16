@@ -31,6 +31,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pagent_e2e?sslmode=disable
+      PAGENT_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
@@ -50,6 +51,25 @@ jobs:
 
       - name: Audit dependencies
         run: npm audit --audit-level=high
+
+      - name: Prepare deck integration databases
+        env:
+          PGPASSWORD: postgres
+        run: |
+          for database in \
+            pagent_deck_routes_owner_d3a0_test \
+            pagent_deck_schema_d3a0_test \
+            pagent_deck_routes_permissions_d3a0_test \
+            pagent_deck_engagement_d3a0_test \
+            pagent_deck_permissions_d3a0_test \
+            pagent_deck_sharing_d3a0_test \
+            pagent_deck_routes_sharing_d3a0_test \
+            pagent_deck_repository_d3a0_test \
+            pagent_launch_acceptance_d3a0_test \
+            pagent_workspace_admin_d3a0_test
+          do
+            createdb --host=127.0.0.1 --port=5432 --username=postgres "$database"
+          done
 
       - name: Typecheck
         run: npm run typecheck

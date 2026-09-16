@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pagent API
-  version: 0.0.1
+  version: 0.1.0
   description: |
     Hosted UI rendering for terminal-bound AI agents. The agent emits an
     A2UI surface to this service, prints a short URL, and reads the user's
@@ -716,6 +716,695 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error500'
 
+  /v1/workspace:
+    get:
+      operationId: getWorkspaceAdmin
+      tags: [Workspace]
+      summary: Get the current owner or admin workspace governance view
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        '200':
+          description: Workspace policy, page metadata, membership, teams, and recent audit activity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkspaceAdminView' }
+        '401': { description: Authentication required. }
+        '403': { description: Active owner or admin membership required. }
+
+  /v1/workspace/members:
+    post:
+      operationId: addWorkspaceMember
+      tags: [Workspace]
+      summary: Add or reactivate an existing Pagent user
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkspaceMemberRequest' }
+      responses:
+        '201':
+          description: Active workspace membership.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkspaceMember' }
+        '400': { description: Invalid email or role. }
+        '401': { description: Authentication required. }
+        '403': { description: Active owner or admin membership required. }
+        '404': { description: No existing Pagent user has that email. }
+
+  /v1/workspace/members/{memberId}:
+    delete:
+      operationId: suspendWorkspaceMember
+      tags: [Workspace]
+      summary: Suspend a non-owner workspace member and revoke page grants
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      parameters:
+        - { name: memberId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Member suspended. }
+        '401': { description: Authentication required. }
+        '403':
+          { description: Cannot remove an owner, yourself, or a member outside this workspace. }
+        '404': { description: Invalid member identifier. }
+
+  /v1/workspace/policy:
+    put:
+      operationId: updateWorkspacePolicy
+      tags: [Workspace]
+      summary: Update analytics consent and retention policy
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkspacePolicyRequest' }
+      responses:
+        '204': { description: Policy updated. }
+        '400': { description: Invalid policy. }
+        '401': { description: Authentication required. }
+        '403': { description: Active owner or admin membership required. }
+
+  /v1/decks:
+    get:
+      operationId: listDecks
+      tags: [Decks]
+      summary: List searchable decks visible to the authenticated member
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
+        - {
+            name: scope,
+            in: query,
+            schema: { type: string, enum: [mine, shared, team], default: mine },
+          }
+        - {
+            name: status,
+            in: query,
+            schema: { type: string, enum: [active, archived, expired, revoked] },
+          }
+        - { name: owner, in: query, schema: { type: string, format: uuid } }
+        - { name: sender, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Deck summaries including owner, sender, link, and analytics rollups. }
+        '401': { description: Authentication required. }
+    post:
+      operationId: publishDeck
+      tags: [Decks]
+      summary: Publish a durable deck or immutable revision
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PublishDeckRequest' }
+      responses:
+        '200': { description: Existing deck updated with a new revision. }
+        '201': { description: Deck and first revision created. }
+        '400': { description: Invalid or fully sanitized content. }
+        '401': { description: Authentication required. }
+
+  /v1/decks/{deckId}:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    get:
+      operationId: getDeck
+      tags: [Decks]
+      summary: Get deck metadata, revision history, and recent activity
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        '200': { description: Deck detail. }
+        '403': { description: Content access denied. }
+    patch:
+      operationId: renameDeck
+      tags: [Decks]
+      summary: Rename a deck
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [title],
+                    properties: { title: { type: string, maxLength: 160 } },
+                  },
+              },
+          }
+      responses:
+        '204': { description: Deck renamed. }
+        '403': { description: Owner access required. }
+    delete:
+      operationId: deleteDeck
+      tags: [Decks]
+      summary: Delete a deck and immediately revoke links and sessions
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        '204': { description: Deck deleted and viewer access revoked. }
+        '403': { description: Owner access required. }
+
+  /v1/decks/{deckId}/preview:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    get:
+      operationId: previewDeck
+      tags: [Decks]
+      summary: Get the latest sanitized revision without recording analytics
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        '200': { description: Latest revision and ordered slides. }
+        '403': { description: Content access denied. }
+
+  /v1/decks/{deckId}/archive:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    post:
+      operationId: archiveDeck
+      tags: [Decks]
+      summary: Archive a deck
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        { '204': { description: Deck archived. }, '403': { description: Owner access required. } }
+
+  /v1/decks/{deckId}/restore:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    post:
+      operationId: restoreDeck
+      tags: [Decks]
+      summary: Restore an archived deck
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        { '204': { description: Deck restored. }, '403': { description: Owner access required. } }
+
+  /v1/decks/{deckId}/analytics:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    get:
+      operationId: getDeckAnalytics
+      tags: [Analytics]
+      summary: Get authorized deck engagement analytics
+      description: Viewer email filters are deliberately unavailable in URL query parameters; use the JSON query endpoint so raw emails do not enter analytics URLs or access logs.
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      parameters:
+        - { name: link_id, in: query, schema: { type: string, format: uuid } }
+        - { name: sender, in: query, schema: { type: string, format: uuid } }
+        - { name: revision, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        {
+          '200': { description: Overview, visitor, slide, and visit-detail analytics. },
+          '403': { description: Analytics access denied. },
+        }
+
+  /v1/decks/{deckId}/analytics/query:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    post:
+      operationId: queryDeckAnalytics
+      tags: [Analytics]
+      summary: Filter analytics, including by viewer, without exposing filters in URLs
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AnalyticsFilters' } } }
+      responses:
+        {
+          '200': { description: Filtered analytics. },
+          '403': { description: Analytics access denied. },
+        }
+
+  /v1/decks/{deckId}/analytics.csv:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    get:
+      operationId: exportDeckAnalytics
+      tags: [Analytics]
+      summary: Export analytics without a viewer filter
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        {
+          '200': { description: Audited CSV export. },
+          '403': { description: Analytics access denied. },
+        }
+    post:
+      operationId: exportFilteredDeckAnalytics
+      tags: [Analytics]
+      summary: Export filtered analytics without exposing viewer emails in URLs
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AnalyticsFilters' } } }
+      responses:
+        {
+          '200': { description: Audited CSV export. },
+          '403': { description: Analytics access denied. },
+        }
+
+  /v1/decks/{deckId}/share-links:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    get:
+      operationId: listShareLinks
+      tags: [Sharing]
+      summary: List links the owner or link creator may manage
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        {
+          '200': { description: Share link summaries; raw tokens are never returned. },
+          '403': { description: Access denied. },
+        }
+    post:
+      operationId: createShareLink
+      tags: [Sharing]
+      summary: Create an Anyone, Allowed email, or Authenticated viewer link
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ShareLinkRequest' } } }
+      responses:
+        {
+          '201': { description: Link created; the raw token is returned exactly once. },
+          '403': { description: Owner access required. },
+        }
+
+  /v1/decks/{deckId}/share-links/{linkId}:
+    parameters:
+      [{ $ref: '#/components/parameters/DeckId' }, { $ref: '#/components/parameters/ShareLinkId' }]
+    put:
+      operationId: updateShareLink
+      tags: [Sharing]
+      summary: Update link access and revoke its existing viewer sessions
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ShareLinkRequest' } } }
+      responses: { '204': { description: Link updated. }, '403': { description: Access denied. } }
+
+  /v1/decks/{deckId}/share-links/{linkId}/revoke:
+    parameters:
+      [{ $ref: '#/components/parameters/DeckId' }, { $ref: '#/components/parameters/ShareLinkId' }]
+    post:
+      operationId: revokeShareLink
+      tags: [Sharing]
+      summary: Revoke a link and all already-open sessions
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        {
+          '204': { description: Link and sessions revoked. },
+          '403': { description: Access denied. },
+        }
+
+  /v1/decks/{deckId}/share-links/{linkId}/preview:
+    parameters:
+      [{ $ref: '#/components/parameters/DeckId' }, { $ref: '#/components/parameters/ShareLinkId' }]
+    post:
+      operationId: previewShareLink
+      tags: [Sharing]
+      summary: Create an analytics-excluded owner preview session
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        {
+          '200': { description: Short-lived preview session. },
+          '403': { description: Access denied. },
+        }
+
+  /v1/decks/{deckId}/share-links/{linkId}/requests:
+    parameters:
+      [{ $ref: '#/components/parameters/DeckId' }, { $ref: '#/components/parameters/ShareLinkId' }]
+    get:
+      operationId: listAccessRequests
+      tags: [Sharing]
+      summary: List link-specific access requests
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        { '200': { description: Access requests. }, '403': { description: Access denied. } }
+
+  /v1/decks/{deckId}/share-links/{linkId}/requests/{requestId}:
+    parameters:
+      - { $ref: '#/components/parameters/DeckId' }
+      - { $ref: '#/components/parameters/ShareLinkId' }
+      - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: decideAccessRequest
+      tags: [Sharing]
+      summary: Approve or deny a request without changing the link access mode
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [decision],
+                    properties: { decision: { type: string, enum: [approved, denied] } },
+                  },
+              },
+          }
+      responses:
+        { '204': { description: Decision recorded. }, '403': { description: Access denied. } }
+
+  /v1/decks/{deckId}/access:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    get:
+      operationId: getDeckAccessSettings
+      tags: [Permissions]
+      summary: Get content collaborators, workspace members, teams, analytics scope, consent, and retention
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        { '200': { description: Access settings. }, '403': { description: Owner access required. } }
+
+  /v1/decks/{deckId}/access/members:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    post:
+      operationId: addWorkspaceMember
+      tags: [Permissions]
+      summary: Add or reactivate a member by email
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [email, role],
+                    properties:
+                      {
+                        email: { type: string, format: email },
+                        role: { type: string, enum: [admin, member] },
+                      },
+                  },
+              },
+          }
+      responses:
+        { '201': { description: Member added. }, '403': { description: Owner access required. } }
+
+  /v1/decks/{deckId}/access/members/{memberId}:
+    parameters:
+      - { $ref: '#/components/parameters/DeckId' }
+      - { name: memberId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: removeWorkspaceMember
+      tags: [Permissions]
+      summary: Suspend a member and immediately remove content and analytics access
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        {
+          '204': { description: Member access removed. },
+          '403': { description: Owner access required. },
+        }
+
+  /v1/decks/{deckId}/access/teams:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    post:
+      operationId: createWorkspaceTeam
+      tags: [Permissions]
+      summary: Create a workspace team with active members
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, memberIds]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 160 }
+                memberIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { type: string, format: uuid }
+      responses:
+        '201': { description: Team created. }
+        '403': { description: Owner access required. }
+
+  /v1/decks/{deckId}/access/collaborators:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    put:
+      operationId: setDeckCollaborators
+      tags: [Permissions]
+      summary: Set the active members who may view deck content
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [memberIds],
+                    properties:
+                      { memberIds: { type: array, items: { type: string, format: uuid } } },
+                  },
+              },
+          }
+      responses:
+        {
+          '204': { description: Content collaborators replaced. },
+          '403': { description: Owner access required. },
+        }
+
+  /v1/decks/{deckId}/access/analytics/preview:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    post:
+      operationId: previewAnalyticsAudience
+      tags: [Permissions]
+      summary: Preview the exact active members a visibility change would authorize
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              { schema: { $ref: '#/components/schemas/AnalyticsVisibilityRequest' } },
+          }
+      responses:
+        {
+          '200': { description: Exact effective audience. },
+          '403': { description: Owner access required. },
+        }
+
+  /v1/decks/{deckId}/access/analytics:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    put:
+      operationId: setAnalyticsVisibility
+      tags: [Permissions]
+      summary: Set private, selected, team, or workspace analytics visibility
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              { schema: { $ref: '#/components/schemas/AnalyticsVisibilityRequest' } },
+          }
+      responses:
+        {
+          '200': { description: Saved scope and exact effective audience. },
+          '403': { description: Owner access required. },
+        }
+
+  /v1/decks/{deckId}/access/policy:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    put:
+      operationId: setAnalyticsPolicy
+      tags: [Permissions]
+      summary: Configure viewer consent and analytics retention
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [consentRequired, retentionDays],
+                    properties:
+                      {
+                        consentRequired: { type: boolean },
+                        retentionDays: { type: integer, minimum: 30, maximum: 2555 },
+                      },
+                  },
+              },
+          }
+      responses:
+        {
+          '204': { description: Policy saved and audited. },
+          '403': { description: Owner access required. },
+        }
+
+  /v1/decks/{deckId}/analytics/viewer:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    delete:
+      operationId: deleteViewerAnalytics
+      tags: [Permissions]
+      summary: Delete retained analytics for a normalized viewer email
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [email],
+                    properties: { email: { type: string, format: email } },
+                  },
+              },
+          }
+      responses:
+        {
+          '200':
+            { description: Number of visits removed; the audit event stores only an email hash. },
+          '403': { description: Owner access required. },
+        }
+
+  /v1/decks/{deckId}/audit:
+    parameters: [{ $ref: '#/components/parameters/DeckId' }]
+    get:
+      operationId: getDeckAuditLog
+      tags: [Permissions]
+      summary: Get permission, sharing, access, deletion, and export audit events
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      responses:
+        {
+          '200': { description: Most recent 200 deck audit events. },
+          '403': { description: Owner access required. },
+        }
+
+  /v1/share:
+    get:
+      operationId: getShareMetadata
+      tags: [Viewer]
+      summary: Resolve non-sensitive metadata and availability for a share token
+      parameters: [{ $ref: '#/components/parameters/ShareToken' }]
+      responses:
+        {
+          '200': { description: Deck title, sender, access mode, and state; never deck content. },
+          '404': { description: Generic unavailable response. },
+        }
+
+  /v1/share/access:
+    post:
+      operationId: requestViewerSession
+      tags: [Viewer]
+      summary: Open a viewer session under the link access mode
+      parameters: [{ $ref: '#/components/parameters/ShareToken' }]
+      requestBody:
+        content:
+          {
+            application/json:
+              { schema: { type: object, properties: { email: { type: string, format: email } } } },
+          }
+      responses:
+        {
+          '200': { description: Granted session or generic access gate state. },
+          '404': { description: Generic unavailable response. },
+          '429': { description: Per-client-IP viewer write limit exceeded. },
+        }
+
+  /v1/share/request:
+    post:
+      operationId: createAccessRequest
+      tags: [Viewer]
+      summary: Ask the sender for link-specific access
+      parameters: [{ $ref: '#/components/parameters/ShareToken' }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [email],
+                    properties: { email: { type: string, format: email } },
+                  },
+              },
+          }
+      responses:
+        {
+          '202': { description: Generic request accepted response. },
+          '404': { description: Generic unavailable response. },
+          '429': { description: Per-client-IP viewer write limit exceeded. },
+        }
+
+  /v1/share/request/{requestId}:
+    parameters:
+      - { $ref: '#/components/parameters/ShareToken' }
+      - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getAccessRequestStatus
+      tags: [Viewer]
+      summary: Check a link-specific request state
+      responses:
+        {
+          '200': { description: Pending, approved, or denied. },
+          '404': { description: Generic unavailable response. },
+        }
+
+  /v1/viewer/deck:
+    get:
+      operationId: getViewerDeck
+      tags: [Viewer]
+      summary: Fetch sanitized deck content for a live viewer session
+      parameters: [{ $ref: '#/components/parameters/ViewerSession' }]
+      responses:
+        {
+          '200': { description: Ordered slides and identity confidence. },
+          '410': { description: Session expired, revoked, or deck deleted. },
+        }
+
+  /v1/viewer/visits:
+    post:
+      operationId: startViewerVisit
+      tags: [Engagement]
+      summary: Start a human visit only after visibility and interaction qualification
+      parameters: [{ $ref: '#/components/parameters/ViewerSession' }]
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/StartVisitRequest' } } }
+      responses:
+        {
+          '200':
+            {
+              description: Visit started,
+              excluded as preview or automation,
+              or disabled by consent.,
+            },
+          '429': { description: Per-client-IP viewer write limit exceeded. },
+        }
+
+  /v1/viewer/visits/{visitId}/events:
+    parameters:
+      - { $ref: '#/components/parameters/ViewerSession' }
+      - { name: visitId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: ingestEngagementEvents
+      tags: [Engagement]
+      summary: Idempotently ingest ordered or out-of-order engagement events
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EngagementBatch' } } }
+      responses:
+        {
+          '202': { description: Events accepted idempotently. },
+          '410': { description: Session is unavailable or does not own the visit. },
+          '429': { description: Per-client-IP engagement delivery limit exceeded. },
+        }
+
   /{id}:
     parameters:
       - $ref: '#/components/parameters/PageId'
@@ -954,6 +1643,28 @@ components:
       description: 32-character lowercase hex page identifier.
       schema:
         $ref: '#/components/schemas/PageId'
+    DeckId:
+      name: deckId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ShareLinkId:
+      name: linkId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ShareToken:
+      name: X-Share-Token
+      in: header
+      required: true
+      description: Opaque token returned only when the share link is created.
+      schema: { type: string, minLength: 20 }
+    ViewerSession:
+      name: X-Viewer-Session
+      in: header
+      required: true
+      description: Opaque viewer or owner-preview session token with a maximum seven-day lifetime.
+      schema: { type: string, minLength: 20 }
 
   headers:
     XRequestId:
@@ -971,6 +1682,214 @@ components:
         minimum: 1
 
   schemas:
+    WorkspaceMember:
+      type: object
+      additionalProperties: false
+      required: [id, email, handle, role, status]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        handle: { type: [string, 'null'] }
+        role: { type: string, enum: [owner, admin, member] }
+        status: { type: string, enum: [active, suspended, left] }
+
+    WorkspaceAdminView:
+      type: object
+      additionalProperties: false
+      required: [workspace, pages, members, teams, recentAuditEvents]
+      properties:
+        workspace:
+          type: object
+          additionalProperties: false
+          required:
+            [
+              id,
+              name,
+              role,
+              verifiedDomains,
+              analyticsConsentRequired,
+              analyticsRetentionDays,
+              pageCount,
+            ]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            role: { type: string, enum: [owner, admin] }
+            verifiedDomains: { type: array, items: { type: string } }
+            analyticsConsentRequired: { type: boolean }
+            analyticsRetentionDays: { type: integer, minimum: 30, maximum: 2555 }
+            pageCount: { type: integer, minimum: 0 }
+        pages:
+          type: array
+          maxItems: 100
+          description: Recent durable page metadata. Slide content and viewer analytics are never included.
+          items:
+            $ref: '#/components/schemas/WorkspacePageMetadata'
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/WorkspaceMember' }
+        teams:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name, memberIds]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              memberIds: { type: array, items: { type: string, format: uuid } }
+        recentAuditEvents:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, action, actorEmail, details, createdAt]
+            properties:
+              id: { type: string, format: uuid }
+              action: { type: string }
+              actorEmail: { type: [string, 'null'], format: email }
+              details: {}
+              createdAt: { type: string, format: date-time }
+
+    WorkspacePageMetadata:
+      type: object
+      additionalProperties: false
+      required: [id, title, status, ownerEmail, latestSenderEmail, linkCount, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        status: { type: string, enum: [active, archived] }
+        ownerEmail: { type: string, format: email }
+        latestSenderEmail: { type: [string, 'null'], format: email }
+        linkCount: { type: integer, minimum: 0 }
+        updatedAt: { type: string, format: date-time }
+
+    WorkspaceMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [email, role]
+      properties:
+        email: { type: string, format: email }
+        role: { type: string, enum: [admin, member] }
+
+    WorkspacePolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [consentRequired, retentionDays]
+      properties:
+        consentRequired: { type: boolean }
+        retentionDays: { type: integer, minimum: 30, maximum: 2555 }
+
+    PublishDeckRequest:
+      type: object
+      additionalProperties: false
+      required: [title, slides]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 160 }
+        description: { type: string, maxLength: 2000 }
+        client_label: { type: string, maxLength: 160 }
+        update_deck_id: { type: string, format: uuid }
+        slides:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, html]
+            properties:
+              id: { type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$' }
+              title: { type: string, maxLength: 200 }
+              html: { type: string, minLength: 1, maxLength: 1000000 }
+
+    ShareLinkRequest:
+      type: object
+      additionalProperties: false
+      required: [name, access_mode]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 160 }
+        access_mode: { type: string, enum: [anyone, allowed_email, authenticated] }
+        allowed_emails: { type: array, maxItems: 500, items: { type: string, format: email } }
+        allowed_domains: { type: array, maxItems: 100, items: { type: string, maxLength: 255 } }
+        expires_at: { type: string, format: date-time }
+
+    AnalyticsFilters:
+      type: object
+      additionalProperties: false
+      properties:
+        link_id: { type: string, format: uuid }
+        viewer:
+          {
+            type: string,
+            maxLength: 320,
+            description: Sent in JSON so raw emails never enter analytics URLs.,
+          }
+        sender: { type: string, format: uuid }
+        revision: { type: integer, minimum: 1 }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+
+    AnalyticsVisibilityRequest:
+      type: object
+      additionalProperties: false
+      required: [scope, subjectIds]
+      properties:
+        scope: { type: string, enum: [private, selected, team, workspace] }
+        subjectIds: { type: array, items: { type: string, format: uuid } }
+
+    StartVisitRequest:
+      type: object
+      additionalProperties: false
+      required: [visible, interacted, analyticsConsent, deviceClass, browserFamily, countryCode]
+      properties:
+        visible:
+          { type: boolean, description: True only when the viewer is at least 50 percent visible. }
+        interacted: { type: boolean }
+        analyticsConsent: { type: boolean }
+        deviceClass: { type: string, enum: [mobile, tablet, desktop, unknown] }
+        browserFamily: { type: string, maxLength: 80 }
+        countryCode: { type: [string, 'null'], minLength: 2, maxLength: 2 }
+
+    EngagementBatch:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              [
+                id,
+                eventType,
+                eventAt,
+                sequence,
+                visibleRatio,
+                visibleDurationMs,
+                tabVisible,
+                recentlyActive,
+              ]
+            properties:
+              id: { type: string, format: uuid, description: Idempotency key. }
+              eventType: { type: string, enum: [start, heartbeat, slide_view, close] }
+              slideId: { type: string, format: uuid }
+              eventAt: { type: string, format: date-time }
+              sequence: { type: integer, minimum: 0 }
+              visibleRatio: { type: number, minimum: 0, maximum: 1 }
+              visibleDurationMs: { type: integer, minimum: 0, maximum: 60000 }
+              tabVisible: { type: boolean }
+              recentlyActive:
+                {
+                  type: boolean,
+                  description: False after 60 seconds without mouse,
+                  touch,
+                  or keyboard activity.,
+                }
+
     OAuthError:
       type: object
       required: [error]

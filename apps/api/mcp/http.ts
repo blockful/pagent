@@ -13,19 +13,27 @@
  * a permissive CORS shape that mirrors the REST CORS policy.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
-import { MAX_BODY_BYTES, ALLOWED_ORIGINS } from '../app.ts';
+import { MAX_BODY_BYTES } from '../app.ts';
 import { clientKey } from '../client-key.ts';
 import { env } from '../schemas.ts';
 import * as store from '../store.ts';
+import { getDeckAnalytics } from '../decks/repository-analytics.ts';
+import { publishDeck } from '../decks/repository-decks.ts';
 import { logger } from '../logger.ts';
 import { verifyAccessToken } from '../auth/jwt.ts';
 import { RateLimiter } from './rate-limit.ts';
 import { registerPagentTools, type PageOps } from './tools.ts';
 import type { McpHttpConfig } from './http-config.ts';
+import {
+  applyBaseHeaders,
+  applyCorsPreflightHeaders,
+  getOrCreateRequestId,
+  readJsonBody,
+  respondJson,
+} from './http-wire.ts';
 
 declare module 'node:http' {
   interface IncomingMessage {
@@ -35,46 +43,21 @@ declare module 'node:http' {
 
 export type { McpHttpConfig } from './http-config.ts';
 
-// Mirrors apps/api/request-id.ts — caller-supplied IDs accepted within bounds,
-// otherwise generated.
-const REQUEST_ID_REGEX = /^[A-Za-z0-9_-]{1,128}$/;
-// Headers a browser-side MCP client might preflight. `Mcp-Session-Id` is
-// reserved by the SDK transport even in stateless mode — clients may still
-// echo it on resumed sessions.
-const CORS_ALLOWED_HEADERS = 'Authorization, Content-Type, Mcp-Session-Id, X-Request-Id';
-// Methods the SDK's streamable HTTP transport actually serves.
-const CORS_ALLOWED_METHODS = 'GET, POST, DELETE, OPTIONS';
-
-function getOrCreateRequestId(req: IncomingMessage): string {
-  const incoming = req.headers['x-request-id'];
-  if (typeof incoming === 'string' && REQUEST_ID_REGEX.test(incoming)) return incoming;
-  return randomBytes(16).toString('hex');
-}
-
-/**
- * Headers applied to every /mcp response: request-id echo, nosniff, and
- * a CORS Allow-Origin that mirrors the REST CORS policy (allow-list in
- * production, `*` when ALLOWED_ORIGINS is unset for local dev).
- */
-function applyBaseHeaders(req: IncomingMessage, res: ServerResponse, requestId: string): void {
-  res.setHeader('X-Request-Id', requestId);
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  const origin = req.headers.origin;
-  if (typeof origin === 'string') {
-    // Always set Vary: Origin when the response varies by Origin — caches
-    // in front of the API need this even when the value is `*`.
-    res.setHeader('Vary', 'Origin');
-    if (!ALLOWED_ORIGINS) {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-    } else if (ALLOWED_ORIGINS.includes(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-    }
-  }
-}
-
 export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
   return {
-    async showUi(spec, ownerId) {
+    async writePresentation(input, publisher) {
+      if (publisher === undefined) throw new TypeError('Authentication required for durable pages');
+      const published = await publishDeck(publisher, input);
+      const base = cfg.publicUrl.replace(/\/$/, '');
+      return {
+        page_id: published.deckId,
+        revision_id: published.revisionId,
+        revision_number: published.revisionNumber,
+        manage_url: `${base}/pages/${published.deckId}`,
+        preview_url: `${base}/pages/${published.deckId}#preview`,
+      };
+    },
+    async writeInteractive(spec, ownerId) {
       // ownerId arrives from the SDK's RequestHandlerExtra.authInfo.extra.sub
       // (set by the Bearer middleware below). Forwarded unchanged into the
       // store so pages created via authenticated MCP carry the right
@@ -86,7 +69,7 @@ export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
         ownerId,
       });
     },
-    async showHtml(html, ownerId) {
+    async writeDocument(html, ownerId) {
       // No request context here — log at the module logger level. The REST
       // POST /new path passes a request-scoped child logger; this is the MCP
       // path. store.createHtmlPage handles sanitize+log+store in one ritual
@@ -102,8 +85,12 @@ export function buildInProcessOps(cfg: McpHttpConfig): PageOps {
         logger,
       );
     },
-    async checkResult(page_id) {
-      return store.advanceResult(page_id);
+    async readResponse(pageId) {
+      return store.advanceResult(pageId);
+    },
+    async readAnalytics(pageId, readerId) {
+      if (readerId === undefined) throw new TypeError('Authentication required for analytics');
+      return getDeckAnalytics(readerId, pageId, {});
     },
   };
 }
@@ -134,8 +121,7 @@ export function makeMcpHttpHandler(cfg: McpHttpConfig) {
 
     // CORS preflight: handled here, never reaches the SDK transport.
     if (req.method === 'OPTIONS') {
-      res.setHeader('Access-Control-Allow-Methods', CORS_ALLOWED_METHODS);
-      res.setHeader('Access-Control-Allow-Headers', CORS_ALLOWED_HEADERS);
+      applyCorsPreflightHeaders(res);
       res.statusCode = 204;
       res.end();
       return;
@@ -170,47 +156,42 @@ export function makeMcpHttpHandler(cfg: McpHttpConfig) {
     // can discover the AS without an out-of-band config step. The check sits
     // after rate-limit (no point validating tokens we'd throttle anyway) but
     // before body parse (a 401 should be cheap and not trigger body reads).
-    if (
-      env.REQUIRE_AUTH &&
-      (req.method === 'GET' || req.method === 'POST' || req.method === 'DELETE')
-    ) {
+    if (req.method === 'GET' || req.method === 'POST' || req.method === 'DELETE') {
       const authHeader = req.headers.authorization;
       const resourceMetadataUrl = `${cfg.apiPublicUrl}/.well-known/oauth-protected-resource`;
       if (!authHeader?.startsWith('Bearer ')) {
-        res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl}"`);
-        respondJson(res, 401, {
-          error: 'unauthorized',
-          message: 'Bearer token required',
-          request_id: requestId,
-        });
-        return;
-      }
-      const token = authHeader.slice('Bearer '.length).trim();
-      try {
-        const claims = await verifyAccessToken(token);
-        // Attach auth info onto the request so the SDK transport can forward
-        // it to tool handlers (the StreamableHTTPServerTransport reads
-        // `req.auth` per the SDK's contract). We carry the verified claims
-        // plus the raw bearer so downstream code can re-mint scoped requests
-        // without re-decoding the JWT.
-        req.auth = {
-          token,
-          clientId: claims.client_id,
-          scopes: claims.scope.split(/\s+/).filter(Boolean),
-          expiresAt: claims.exp,
-          extra: { sub: claims.sub, email: claims.email, handle: claims.handle },
-        };
-      } catch {
-        res.setHeader(
-          'WWW-Authenticate',
-          `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`,
-        );
-        respondJson(res, 401, {
-          error: 'invalid_token',
-          message: 'Invalid or expired access token',
-          request_id: requestId,
-        });
-        return;
+        if (env.REQUIRE_AUTH) {
+          res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl}"`);
+          respondJson(res, 401, {
+            error: 'unauthorized',
+            message: 'Bearer token required',
+            request_id: requestId,
+          });
+          return;
+        }
+      } else {
+        const token = authHeader.slice('Bearer '.length).trim();
+        try {
+          const claims = await verifyAccessToken(token);
+          req.auth = {
+            token,
+            clientId: claims.client_id,
+            scopes: claims.scope.split(/\s+/).filter(Boolean),
+            expiresAt: claims.exp,
+            extra: { sub: claims.sub, email: claims.email, handle: claims.handle },
+          };
+        } catch {
+          res.setHeader(
+            'WWW-Authenticate',
+            `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`,
+          );
+          respondJson(res, 401, {
+            error: 'invalid_token',
+            message: 'Invalid or expired access token',
+            request_id: requestId,
+          });
+          return;
+        }
       }
     }
 
@@ -230,7 +211,7 @@ export function makeMcpHttpHandler(cfg: McpHttpConfig) {
 
     // Stateless: fresh server + transport per request. The page_id is the
     // durable handle, so MCP-session state is unused.
-    const server = new McpServer({ name: 'pagent', version: '0.0.1' });
+    const server = new McpServer({ name: 'pagent', version: '0.1.0' });
     registerPagentTools(server, ops);
 
     const transport = new StreamableHTTPServerTransport({
@@ -257,52 +238,4 @@ export function makeMcpHttpHandler(cfg: McpHttpConfig) {
       }
     }
   };
-}
-
-function respondJson(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(body));
-}
-
-async function readJsonBody(req: IncomingMessage, maxBytes: number): Promise<unknown> {
-  // Reject early if the caller sent a body without claiming JSON. The SDK
-  // would still try to parse it, but failing fast with a clear message
-  // beats an opaque downstream error.
-  const ct = req.headers['content-type']?.toLowerCase() ?? '';
-  if (!ct.startsWith('application/json')) {
-    throw new Error(`Content-Type must be application/json (got ${ct ? `"${ct}"` : 'none'})`);
-  }
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let bytes = 0;
-    let settled = false;
-    const fail = (err: Error) => {
-      if (settled) return;
-      settled = true;
-      // Don't destroy the socket — that would tear down the response we're
-      // about to send. Just stop accumulating; Node will drain the stream.
-      reject(err);
-    };
-    req.on('data', (chunk: Buffer) => {
-      if (settled) return;
-      bytes += chunk.length;
-      if (bytes > maxBytes) {
-        fail(new Error(`request body exceeds the ${maxBytes}-byte limit`));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
-      if (settled) return;
-      settled = true;
-      if (chunks.length === 0) return resolve(undefined);
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-      } catch (err) {
-        reject(err instanceof Error ? err : new Error(String(err)));
-      }
-    });
-    req.on('error', (err) => fail(err));
-    req.on('aborted', () => fail(new Error('request aborted')));
-  });
 }

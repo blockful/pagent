@@ -14,15 +14,64 @@ export function mountAgentUI(pageId: string): void {
 
   const root = document.getElementById('app');
   if (root === null) throw new TypeError('Missing #app mount point');
+  const pathname = location.pathname;
+  const deckDetailMatch = /^\/(?:decks|pages)\/([0-9a-f-]{36})\/?$/i.exec(pathname);
+  const shareMatch = /^\/share\/([^/]+)\/?$/.exec(pathname);
 
-  if (location.pathname === '/_components') {
+  if (pathname === '/_components') {
     root.classList.add('is-home');
     root.appendChild(document.createElement('components-showcase'));
-  } else if (location.pathname === '/demo' || location.pathname === '/demo/') {
+  } else if (pathname === '/_product-components') {
+    root.classList.add('is-home');
+    void import('./product-components.ts').then(() => {
+      root.appendChild(document.createElement('product-components'));
+    });
+  } else if (pathname === '/demo' || pathname === '/demo/') {
     root.classList.add('is-home');
     void import('./demo').then(() => {
       root.appendChild(document.createElement('pagent-demo'));
     });
+  } else if (
+    pathname === '/decks' ||
+    pathname === '/decks/' ||
+    pathname === '/pages' ||
+    pathname === '/pages/'
+  ) {
+    root.classList.add('is-home');
+    void Promise.all([import('./product-navigation.ts'), import('./deck-library.ts')]).then(() => {
+      root.appendChild(document.createElement('deck-library'));
+    });
+  } else if (deckDetailMatch !== null) {
+    root.classList.add('is-home');
+    void Promise.all([import('./product-navigation.ts'), import('./deck-detail.ts')]).then(() => {
+      const element = document.createElement('deck-detail-page');
+      element.setAttribute('deckid', deckDetailMatch[1] ?? '');
+      root.appendChild(element);
+    });
+  } else if (shareMatch !== null) {
+    root.classList.add('is-home');
+    void import('./deck-viewer.ts').then(() => {
+      const element = document.createElement('deck-viewer');
+      element.setAttribute('sharetoken', decodeURIComponent(shareMatch[1] ?? ''));
+      root.appendChild(element);
+    });
+  } else if (pathname === '/view' || pathname === '/view/') {
+    root.classList.add('is-home');
+    void import('./deck-viewer.ts').then(() => {
+      root.appendChild(document.createElement('deck-viewer'));
+    });
+  } else if (pathname === '/privacy' || pathname === '/privacy/') {
+    root.classList.add('is-home');
+    void Promise.all([import('./product-navigation.ts'), import('./privacy-page.ts')]).then(() => {
+      root.appendChild(document.createElement('privacy-page'));
+    });
+  } else if (pathname === '/admin' || pathname === '/admin/') {
+    root.classList.add('is-home');
+    void Promise.all([import('./product-navigation.ts'), import('./workspace-admin.ts')]).then(
+      () => {
+        root.appendChild(document.createElement('workspace-admin'));
+      },
+    );
   } else if (!pageId) {
     root.classList.add('is-home');
     root.appendChild(document.createElement('home-page'));

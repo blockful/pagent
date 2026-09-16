@@ -2,16 +2,22 @@
 
 [![CI](https://github.com/blockful/pagent/actions/workflows/ci.yml/badge.svg)](https://github.com/blockful/pagent/actions/workflows/ci.yml)
 
-Hosted UI rendering for terminal-bound AI agents. The agent emits an A2UI surface to this service, prints a short URL, and reads the user's interactions back via API.
+Pages for AI agents, with exactly two MCP tools. `write` creates a browser page;
+`read` returns its response or presentation analytics. A page can be a temporary
+interactive form, a temporary view-only document, or a durable, shareable
+presentation.
 
 - **Live API:** https://api.pagent.link
 - **Live renderer:** https://pagent.link
 
-See [PRD.md](./PRD.md) for the design and [HANDOFF.md](./docs/HANDOFF.md) for build context.
+See the [v0.1.0 PRD](./docs/PRD-v0.1.0-secure-deck-sharing.md) for the active
+product requirements and [DESIGN.md](./DESIGN.md) for the interface system.
+The root `PRD.md` and `docs/HANDOFF.md` are retained only as historical V0
+context.
 
 ## How it works
 
-A non-technical view of what happens when your agent decides it needs a form:
+A non-technical view of what happens when an agent needs structured input:
 
 ```mermaid
 sequenceDiagram
@@ -24,19 +30,65 @@ sequenceDiagram
     Note over A: A bundled skill teaches the agent <br/>when a real form beats faking one in chat.
     U->>A: "Ask me my favorite color via a UI"
     A->>A: design the form
-    A->>S: show_ui(spec)
+    A->>S: write({ type: "interactive", spec })
     S-->>A: short URL
     A-->>U: prints URL in your terminal
     U->>B: open URL
     B-->>U: render the form
     U->>B: fill out, submit
     B->>S: send the answer
-    A->>S: check_result()
+    A->>S: read({ page_id })
     S-->>A: your answer
     A-->>U: continues the conversation
 ```
 
-In plain English: the agent reads its skill, decides a real form is the right way to ask, hands a form description to the service, and prints a short URL in your terminal. You open it in the browser, fill it out, submit. The agent reads your answer back and the conversation keeps going. The agent never sees you typing — only the final result.
+In plain English: the agent decides which page type fits the job, writes it,
+and prints the returned URL. For an interactive page, you submit once and the
+agent reads the response. For a document, you only view it. For a presentation,
+the authenticated owner manages sharing and reads engagement analytics.
+
+### One page model
+
+| Page type      | Lifecycle                      | What `read` returns     | Authentication                                      |
+| -------------- | ------------------------------ | ----------------------- | --------------------------------------------------- |
+| `interactive`  | Temporary                      | Submitted user response | Optional only while anonymous grace mode is enabled |
+| `document`     | Temporary                      | No response; view-only  | Optional only while anonymous grace mode is enabled |
+| `presentation` | Durable, revisioned, shareable | Engagement analytics    | Required                                            |
+
+Presentation pages have explicit slide boundaries so Pagent can calculate
+active time, completion, furthest slide, and drop-off reliably. The web app
+provides the authenticated page library, page detail, sharing controls, and an
+`/admin` workspace-governance surface. Internal `/v1/decks` REST routes and
+`deck_*` tables retain established implementation names; they are not separate
+product primitives or MCP tools.
+
+### The two MCP tools
+
+- `write` accepts one discriminated page type: `interactive` with an A2UI
+  `spec`, `document` with sanitized `html`, or `presentation` with a title and
+  ordered slides. Supplying a presentation `page_id` creates a new immutable
+  revision of that durable page.
+- `read` accepts a `page_id`. Temporary interactive pages return a response
+  state immediately; durable presentation pages return authorized analytics.
+  `include: "response" | "analytics"` is optional when the page ID already
+  makes the intent clear.
+
+There are no extra management tools. Sharing, access policy, membership,
+retention, and audit operations live in the authenticated web app and REST API.
+
+### Breaking migration
+
+The two-tool contract is intentionally breaking. There are no legacy aliases:
+
+| Removed tool   | Replacement                                           |
+| -------------- | ----------------------------------------------------- |
+| `show_ui`      | `write({ type: "interactive", spec })`                |
+| `show_html`    | `write({ type: "document", html })`                   |
+| `publish_deck` | `write({ type: "presentation", title, slides, ... })` |
+| `check_result` | `read({ page_id, include: "response" })`              |
+
+Restart the MCP client after upgrading so it refreshes the advertised tool
+list. Clients should see exactly `write` and `read`.
 
 ## Layout
 
@@ -53,7 +105,7 @@ apps/
 │   ├── vite.config.ts
 │   ├── vercel.json
 │   └── .env.example
-└── mcp/                             # stdio MCP server: show_ui + check_result
+└── mcp/                             # stdio MCP server: exactly write + read
     ├── server.ts                     # source
     ├── server.bundle.js              # esbuild output, shipped to plugin users
     ├── smoke.mjs
@@ -63,7 +115,7 @@ infra/
     ├── Dockerfile                    # grafana/otel-lgtm + provisioning
     ├── dashboards/                   # Operations + Product dashboards (JSON)
     └── provisioning/                 # Grafana datasources + dashboard provider
-skills/pagent/SKILL.md                # drop-in skill teaching the polling pattern
+skills/pagent/SKILL.md                # drop-in skill for page creation, polling, and analytics
 .claude-plugin/plugin.json            # Claude Code plugin manifest
 .mcp.json                             # plugin's MCP server registration
 ```
@@ -77,30 +129,30 @@ The repo doubles as a Claude Code plugin and a self-hosted marketplace: `.claude
 
 Each app validates its environment at boot/build with Zod and fails loudly on missing or malformed values — no silent defaults that bite in production. `.env.example` files in each app are the source of truth.
 
-| App                                               | Variable                                                                       | Required?             | Validation / default                                                                                   |
-| ------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------ |
-| **api** ([`.env.example`](apps/api/.env.example)) | `DATABASE_URL`                                                                 | **always**            | Non-empty string. Boot fails with a `ZodError` otherwise.                                              |
-|                                                   | `PUBLIC_URL`                                                                   | **production**        | HTTPS renderer origin. Used in `show_ui` responses.                                                    |
-|                                                   | `API_PUBLIC_URL`                                                               | **production**        | HTTPS API origin. Used for OAuth issuer, callbacks, magic links, and discovery metadata.               |
-|                                                   | `ALLOWED_ORIGINS`                                                              | **production**        | Comma-separated origin list. CORS allow-list.                                                          |
-|                                                   | `PORT`                                                                         | optional              | Coerced to number. Default `8787`. Railway sets this.                                                  |
-|                                                   | `PAGE_TTL_MS`                                                                  | optional              | Coerced to number. Default `1800000` (30 min).                                                         |
-|                                                   | `RATE_LIMIT_MAX`                                                               | optional              | Positive integer. Default `30`.                                                                        |
-|                                                   | `RATE_LIMIT_WINDOW_MS`                                                         | optional              | Positive integer. Default `60000`.                                                                     |
-|                                                   | `TRUSTED_PROXY_MODE`                                                           | **production**        | Must be `railway`; trusts Railway's `X-Real-IP` for rate limiting and ignores `X-Forwarded-For`.       |
-|                                                   | `REQUIRE_AUTH`                                                                 | optional              | Boolean. Default `false`; set `true` to protect page creation/results and enable the full OAuth flow.  |
-|                                                   | `JWT_SIGNING_KEY` / `JWT_PUBLIC_KEY`                                           | when auth is required | Base64url DER Ed25519 private/public key pair used to sign and verify access tokens.                   |
-|                                                   | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`                                    | when auth is required | Google OAuth credentials. `GOOGLE_REDIRECT_URI` defaults to `{API_PUBLIC_URL}/oauth/callback/google`.  |
-|                                                   | `AUTH_STATE_SECRET`                                                            | when configured       | OAuth state HMAC secret; at least 32 UTF-8 bytes. Required when auth is enabled.                       |
-|                                                   | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS`                                        | when auth is required | SMTP credentials for magic links. `SMTP_PORT` defaults to `587`; `SMTP_FROM` to `noreply@pagent.link`. |
-|                                                   | `SESSION_MAX_AGE_DAYS` / `REFRESH_TOKEN_MAX_DAYS` / `ACCESS_TOKEN_TTL_SECONDS` | optional              | Defaults `30` / `90` / `3600`.                                                                         |
-|                                                   | `NODE_ENV`                                                                     | optional              | One of `development` \| `production` \| `test`. Gates the production-only refinements above.           |
-|                                                   | `LOG_LEVEL`                                                                    | optional              | Pino level. Default `info`.                                                                            |
-|                                                   | `OTEL_EXPORTER_OTLP_*`                                                         | optional              | OpenTelemetry exporter config. Leave `OTEL_EXPORTER_OTLP_ENDPOINT` unset to disable tracing.           |
-| **web** ([`.env.example`](apps/web/.env.example)) | `VITE_API_URL`                                                                 | **`vite build`**      | Valid URL. Inlined at build time and embedded in CSP. `vite dev` allows it unset (uses Vite proxy).    |
-|                                                   | `API_PORT` / `CLIENT_PORT`                                                     | optional (dev only)   | Valid port (1–65535). Defaults `8787` / `8788`.                                                        |
-| **mcp** ([`.env.example`](apps/mcp/.env.example)) | `PAGENT_URL`                                                                   | optional              | Valid URL when set. Default `https://api.pagent.link`.                                                 |
-|                                                   | `PAGENT_TOKEN`                                                                 | when auth is required | OAuth bearer token used by the stdio MCP transport for protected API calls.                            |
+| App                                               | Variable                                                                       | Required?             | Validation / default                                                                                                                              |
+| ------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **api** ([`.env.example`](apps/api/.env.example)) | `DATABASE_URL`                                                                 | **always**            | Non-empty string. Boot fails with a `ZodError` otherwise.                                                                                         |
+|                                                   | `PUBLIC_URL`                                                                   | **production**        | HTTPS renderer origin. Used in `write` responses.                                                                                                 |
+|                                                   | `API_PUBLIC_URL`                                                               | **production**        | HTTPS API origin. Used for OAuth issuer, callbacks, magic links, and discovery metadata.                                                          |
+|                                                   | `ALLOWED_ORIGINS`                                                              | **production**        | Comma-separated origin list. CORS allow-list.                                                                                                     |
+|                                                   | `PORT`                                                                         | optional              | Coerced to number. Default `8787`. Railway sets this.                                                                                             |
+|                                                   | `PAGE_TTL_MS`                                                                  | optional              | Coerced to number. Default `1800000` (30 min).                                                                                                    |
+|                                                   | `RATE_LIMIT_MAX`                                                               | optional              | Positive integer. Default `30`; caps temporary writes and public viewer access/visit starts per client IP. Engagement delivery uses 20x this cap. |
+|                                                   | `RATE_LIMIT_WINDOW_MS`                                                         | optional              | Positive integer. Default `60000`; shared by the write and viewer limits.                                                                         |
+|                                                   | `TRUSTED_PROXY_MODE`                                                           | **production**        | Must be `railway`; trusts Railway's `X-Real-IP` for rate limiting and ignores `X-Forwarded-For`.                                                  |
+|                                                   | `REQUIRE_AUTH`                                                                 | optional              | Boolean. Default `false`; grace mode permits temporary page writes/response reads only. Durable pages and analytics always require auth.          |
+|                                                   | `JWT_SIGNING_KEY` / `JWT_PUBLIC_KEY`                                           | when auth is required | Base64url DER Ed25519 private/public key pair used to sign and verify access tokens.                                                              |
+|                                                   | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`                                    | when auth is required | Google OAuth credentials. `GOOGLE_REDIRECT_URI` defaults to `{API_PUBLIC_URL}/oauth/callback/google`.                                             |
+|                                                   | `AUTH_STATE_SECRET`                                                            | when configured       | OAuth state HMAC secret; at least 32 UTF-8 bytes. Required when auth is enabled.                                                                  |
+|                                                   | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS`                                        | when auth is required | SMTP credentials for magic links. `SMTP_PORT` defaults to `587`; `SMTP_FROM` to `noreply@pagent.link`.                                            |
+|                                                   | `SESSION_MAX_AGE_DAYS` / `REFRESH_TOKEN_MAX_DAYS` / `ACCESS_TOKEN_TTL_SECONDS` | optional              | Defaults `30` / `90` / `3600`.                                                                                                                    |
+|                                                   | `NODE_ENV`                                                                     | optional              | One of `development` \| `production` \| `test`. Gates the production-only refinements above.                                                      |
+|                                                   | `LOG_LEVEL`                                                                    | optional              | Pino level. Default `info`.                                                                                                                       |
+|                                                   | `OTEL_EXPORTER_OTLP_*`                                                         | optional              | OpenTelemetry exporter config. Leave `OTEL_EXPORTER_OTLP_ENDPOINT` unset to disable tracing.                                                      |
+| **web** ([`.env.example`](apps/web/.env.example)) | `VITE_API_URL`                                                                 | **`vite build`**      | Valid URL. Inlined at build time and embedded in CSP. `vite dev` allows it unset (uses Vite proxy).                                               |
+|                                                   | `API_PORT` / `CLIENT_PORT`                                                     | optional (dev only)   | Valid port (1–65535). Defaults `8787` / `8788`.                                                                                                   |
+| **mcp** ([`.env.example`](apps/mcp/.env.example)) | `PAGENT_URL`                                                                   | optional              | Valid URL when set. Default `https://api.pagent.link`.                                                                                            |
+|                                                   | `PAGENT_TOKEN`                                                                 | when auth is required | OAuth bearer token used by the stdio MCP transport for protected API calls.                                                                       |
 
 When validation fails, the process logs the offending field and exits with a non-zero code — CI catches misconfigured deploys (`build:web` runs in CI with a placeholder `VITE_API_URL`) before they ship.
 
@@ -123,13 +175,17 @@ The MCP server ships pre-bundled (`apps/mcp/server.bundle.js`), so there's no `n
 /mcp
 ```
 
-You should see `pagent` listed with `show_ui` and `check_result` tools. The plugin also ships a skill (`pagent`) that teaches the polling pattern.
+You should see `pagent` listed with exactly `write` and `read`. The plugin also
+ships a skill (`pagent`) that teaches page selection, response polling, and
+presentation analytics.
 
 **3. Use it** — try this prompt:
 
 > "Use the pagent skill to ask me my favorite color via a UI form."
 
-The agent calls `show_ui`, prints a URL (hosted at `https://pagent.link`), you submit, and the conversation continues.
+The agent calls `write` with `type: "interactive"`, prints a URL hosted at
+`https://pagent.link`, you submit, and it calls `read` to continue the
+conversation.
 
 **Point at a different service?** Set `PAGENT_URL` before launching Claude. By default the MCP talks to `https://api.pagent.link`.
 
@@ -175,7 +231,9 @@ url = "https://api.pagent.link/mcp"
 }
 ```
 
-The HTTP MCP runs in the same process as the REST service (single Railway deploy, no extra infra) and shares its tool definitions with the bundled stdio MCP — `show_ui` / `check_result` behave identically across transports, including the polling-pattern guidance baked into the tool descriptions.
+The HTTP MCP runs in the same process as the REST service (single Railway
+deploy, no extra infra) and shares the exact `write` / `read` definitions with
+the bundled stdio MCP.
 
 **Self-hosting?** Replace the URL with `http://your-host:8787/mcp`.
 
@@ -228,14 +286,14 @@ must deploy from the repository root because it uses npm workspaces and serves
 2. Leave **Root Directory** unset so Railway includes the root workspace,
    lockfile, `apps/api`, and `docs/openapi.yaml` and picks up `railway.json`.
 3. Set environment variables (see `apps/api/.env.example`):
-   - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://pagent.link`). Used in `show_ui` responses. **Required in production.** Boot fails loudly if missing.
+   - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://pagent.link`). Used in MCP `write` responses. **Required in production.** Boot fails loudly if missing.
    - `API_PUBLIC_URL` — the Railway public origin of `apps/api` (e.g. `https://api.pagent.link`). Used for OAuth issuer/discovery, default Google callbacks, magic links, and MCP auth metadata. **Required in production.** Must be HTTPS.
    - `ALLOWED_ORIGINS` — comma-separated origins allowed to call the API (set to your Vercel URL). **Required in production.** API boot fails loudly if missing.
    - `PORT` — Railway sets this automatically; the server reads it.
    - `PAGE_TTL_MS` — optional; default 30 minutes.
-   - `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` — optional. Per-IP rate limit on `POST /new`. Defaults: 30 / 60000 (30 req/min). Tune up for load tests.
+   - `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` — optional. Per-IP limits for temporary writes and public viewer access/visit starts. Engagement delivery uses 20x the base cap for heartbeats. Defaults: 30 / 60000.
    - `TRUSTED_PROXY_MODE` — set to `railway` after confirming staging traffic reaches the API only through Railway ingress. This trusts Railway's `X-Real-IP` and ignores `X-Forwarded-For`. **Required in production.**
-   - `REQUIRE_AUTH` — set to `true` to enforce authentication and scopes on protected page and MCP operations. Leave `false` only for the documented rollout grace period.
+   - `REQUIRE_AUTH` — set to `true` to enforce authentication and scopes for temporary page writes/response reads too. Leave `false` only for the documented rollout grace period; durable pages and analytics still require authentication.
    - `JWT_SIGNING_KEY` / `JWT_PUBLIC_KEY` — base64url-encoded DER Ed25519 key pair. Required when `REQUIRE_AUTH=true`.
    - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — Google OAuth credentials. `GOOGLE_REDIRECT_URI` is optional and defaults to `${API_PUBLIC_URL}/oauth/callback/google`.
    - `AUTH_STATE_SECRET` — secret used to authenticate OAuth state. Required when auth is enabled; any configured value must be at least 32 UTF-8 bytes.
@@ -343,7 +401,7 @@ in Grafana from the trace and log streams.
 | Symptom                                             | Likely cause                                             | Where to look                                     | First response                                                                                                                                   |
 | --------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `GET /health` → 503                                 | Postgres unreachable                                     | Supabase status page; Railway DB env vars         | Check Supabase dashboard. If the DB is up but the env var was rotated, restore `DATABASE_URL` in Railway and redeploy.                           |
-| Spike of 429s on `POST /new`                        | Per-IP rate limit hit (default 30 req / 60 s)            | Railway logs — group by client IP                 | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                            |
+| Spike of 429s on temporary writes or viewer POSTs   | Per-IP rate limit hit (default 30 base requests / 60 s)  | Railway logs — group by client IP                 | Legit spike: bump `RATE_LIMIT_MAX` in Railway env and restart (no redeploy needed). Abuse: block at the network edge.                            |
 | 413 on `POST /new`                                  | A2UI spec > 256 KB or total JSON/HTML body > 1 MB        | Response fields `format` and `max_bytes`; API log | Reduce the payload. If the limit must change, adjust `A2UI_MAX_SPEC_BYTES` in `app/config.ts` or `HTML_MAX_BYTES` in `limits.ts`, then redeploy. |
 | CORS errors in the browser console at `pagent.link` | `ALLOWED_ORIGINS` does not include the renderer's origin | Browser DevTools → Network → failing preflight    | Add the missing origin to `ALLOWED_ORIGINS` in Railway env and restart the service.                                                              |
 | Boot failure with `ZodError` in Railway logs        | A required env var is missing                            | Railway logs (the process exits before it binds)  | Read the Zod validation error — it names the missing field. Usually `PUBLIC_URL` or `ALLOWED_ORIGINS`. Set it in Railway, then redeploy.         |
@@ -380,12 +438,12 @@ behaviour without touching code. `apps/api/.env.example` is the source of truth.
 | Var                           | Default                   | Effect                                                                                                    |
 | ----------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `PORT`                        | `8787`                    | Port the server listens on. Railway overrides this automatically.                                         |
-| `PUBLIC_URL`                  | _(required in prod)_      | Base URL of the renderer, returned in `show_ui` responses. Redeploy required after change.                |
+| `PUBLIC_URL`                  | _(required in prod)_      | Base URL of the renderer, returned in MCP `write` responses. Redeploy required after change.              |
 | `API_PUBLIC_URL`              | _(required in prod)_      | API origin used for OAuth issuer, callbacks, magic links, and MCP discovery. Restart required.            |
 | `PAGE_TTL_MS`                 | `1800000` (30 min)        | How long a page lives before expiring. Raising it keeps pages alive longer but grows the DB.              |
 | `ALLOWED_ORIGINS`             | _(required in prod)_      | Comma-separated origins the CORS middleware allows. Add an origin here and restart — no redeploy.         |
-| `RATE_LIMIT_MAX`              | `30`                      | Maximum requests per window per client IP on `POST /new`. Raise for load tests; restart picks it up.      |
-| `RATE_LIMIT_WINDOW_MS`        | `60000` (60 s)            | The rolling window for the rate limit above.                                                              |
+| `RATE_LIMIT_MAX`              | `30`                      | Base per-IP write cap for temporary pages and public viewer access/visit starts; event delivery uses 20x. |
+| `RATE_LIMIT_WINDOW_MS`        | `60000` (60 s)            | Shared rolling window for the write and viewer limits.                                                    |
 | `TRUSTED_PROXY_MODE`          | _(required in prod)_      | Set to `railway` to use Railway's `X-Real-IP` for abuse limits; `X-Forwarded-For` is ignored.             |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(unset = OTel disabled)_ | Grafana Cloud OTLP HTTP base URL. Set to enable traces; unset to disable. Restart required.               |
 | `LOG_LEVEL`                   | `info`                    | Pino log level: `fatal \| error \| warn \| info \| debug \| trace`. Lower = more noise. Restart required. |
@@ -401,6 +459,13 @@ Gaps to keep expectations calibrated:
 - **No CHANGELOG.** Release notes live in GitHub Releases.
 
 ## API
+
+Agents should use MCP `write` and `read`. The REST API powers the renderer and
+authenticated web app; its resource routes are not additional agent tools.
+Temporary pages use the compact routes below. Durable presentation pages,
+share links, viewer sessions, and analytics use authenticated `/v1/decks/...`
+routes because the persistence layer retains its original internal naming.
+See the published OpenAPI document for the complete REST contract.
 
 ```
 POST   /new                  body: { format?, spec } -> { id, url, expires_at }
@@ -428,7 +493,7 @@ With `npm run dev` running, in another terminal:
 ```bash
 npm run smoke
 # (alias for `node apps/mcp/smoke.mjs`)
-# follow the printed URL, fill the form — check_result returns the action
+# follow the printed URL and fill the form — MCP `read` returns the action
 ```
 
 Or with curl, end-to-end:

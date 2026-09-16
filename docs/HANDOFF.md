@@ -1,5 +1,9 @@
-> **Historical document — describes the pre-rename V0 design. The current API
-> is documented in [README.md](../README.md) and [docs/openapi.yaml](openapi.yaml).**
+> **Superseded historical document — describes the pre-rename V0 design.** The
+> current product model has exactly two public MCP tools, `write` and `read`; every
+> `write` output is a Page. A presentation (historically called a deck) is a
+> durable, revisioned, shareable, analyzable Page. The current API is documented
+> in [README.md](../README.md) and [docs/openapi.yaml](openapi.yaml). The old
+> names and implementation plan below are intentionally preserved as history.
 
 # Handoff prompt for next agent
 

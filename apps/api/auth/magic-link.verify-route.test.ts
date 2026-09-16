@@ -33,7 +33,6 @@ vi.mock('nodemailer', () => ({
 
 import * as db from '../db.ts';
 import { app } from '../app.ts';
-import { PUBLIC_URL } from '../app/config.ts';
 import { BASE, clientRow, setupMagicLinkTest, sha256Hex } from './magic-link-test-support.ts';
 import { AUTH_TRANSACTION_COOKIE_NAME } from './route-transaction.ts';
 import { firstCallArgument } from './test-call-support.ts';
@@ -57,12 +56,13 @@ const browserUser = {
   updated_at: new Date(),
 };
 
-function mockBrowserMagicLink(): void {
+function mockBrowserMagicLink(returnTo?: string): void {
   mockMagicLink({
     email: browserUser.email,
     authorizeContext: {
       browserSession: true,
       browserTransactionHash: BROWSER_TRANSACTION_HASH,
+      returnTo,
     },
   });
 }
@@ -324,7 +324,8 @@ describe('GET /oauth/magic', () => {
   });
 
   it('accepts a matching browser transaction and clears it after creating the session', async () => {
-    mockBrowserMagicLink();
+    const returnTo = 'http://localhost:8788/share/opaque-token';
+    mockBrowserMagicLink(returnTo);
     vi.mocked(db.getUserByHandle).mockResolvedValue(null);
     vi.mocked(db.upsertUser).mockResolvedValue(browserUser);
     vi.mocked(db.insertSession).mockResolvedValue();
@@ -337,7 +338,7 @@ describe('GET /oauth/magic', () => {
     );
 
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe(PUBLIC_URL);
+    expect(res.headers.get('location')).toBe(returnTo);
     expect(db.upsertUser).toHaveBeenCalledTimes(1);
     expect(db.insertSession).toHaveBeenCalledTimes(1);
     const setCookie = res.headers.get('set-cookie');

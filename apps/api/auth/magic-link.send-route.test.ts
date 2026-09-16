@@ -361,6 +361,7 @@ describe('POST /oauth/magic/send', () => {
     const state = await signStateJwt({
       browserSession: true,
       browserTransactionHash: 'signed-browser-transaction-hash',
+      returnTo: 'http://localhost:8788/share/opaque-token',
     });
 
     const res = await app.fetch(
@@ -372,6 +373,7 @@ describe('POST /oauth/magic/send', () => {
     expect(arg.authorizeContext).toEqual({
       browserSession: true,
       browserTransactionHash: 'signed-browser-transaction-hash',
+      returnTo: 'http://localhost:8788/share/opaque-token',
       clientId: undefined,
       codeChallenge: undefined,
       codeChallengeMethod: undefined,
