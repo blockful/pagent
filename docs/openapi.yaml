@@ -285,13 +285,18 @@ paths:
       tags: [Auth]
       summary: Start an OAuth authorization-code flow or browser session
       description: |
-        OAuth clients supply `client_id`, `redirect_uri`, an S256 PKCE challenge,
-        and optional scopes/state. The renderer uses `browser_session=1` to start
+        OAuth clients supply `response_type=code`, `client_id`, `redirect_uri`,
+        an S256 PKCE challenge, and optional scopes/state. The renderer uses
+        `browser_session=1` to start
         its cookie-backed browser login. OAuth-client requests return a local,
         cookie-bound consent page that identifies the unverified client, exact
         return destination, and requested scopes before any sign-in provider is
         exposed. Browser-session requests return the sign-in page directly.
       parameters:
+        - name: response_type
+          in: query
+          description: Required and must be `code` for OAuth-client requests; omitted for `browser_session=1`.
+          schema: { type: string, enum: [code] }
         - name: client_id
           in: query
           schema: { type: string }
@@ -316,6 +321,11 @@ paths:
       responses:
         '200':
           description: HTML OAuth consent page or browser-session login page.
+          content:
+            text/html:
+              schema: { type: string }
+        '400':
+          description: HTML error page for missing, unsupported, or unsafe OAuth request parameters.
           content:
             text/html:
               schema: { type: string }
@@ -434,6 +444,12 @@ paths:
       operationId: completeMagicLinkAuthorization
       tags: [Auth]
       summary: Consume a single-use magic sign-in link
+      description: |
+        Inspects the link before consuming it. Browser-session and OAuth links
+        must carry the matching HttpOnly browser transaction; OAuth links also
+        require prior explicit consent and a still-valid registered redirect.
+        An unbound email scanner receives an HTML 400 response without consuming
+        the one-time link, so the intended browser can still complete sign-in.
       parameters:
         - name: token
           in: query
@@ -443,7 +459,7 @@ paths:
         '302':
           description: Redirect to the OAuth client with a code, or to the renderer after browser login.
         '400':
-          description: HTML error page for an invalid, expired, or already-used link.
+          description: HTML error page for a missing, invalid, expired, already-used, or browser-unbound link. Browser-binding failures do not consume an otherwise active link.
           content:
             text/html:
               schema: { type: string }

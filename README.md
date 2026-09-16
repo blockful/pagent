@@ -396,10 +396,10 @@ Gaps to keep expectations calibrated:
 ## API
 
 ```
-POST   /new                  body: { spec }     -> { id, url, expires_at }
-GET    /:id                                     -> { spec, state, result, expires_at }
+POST   /new                  body: { format?, spec } -> { id, url, expires_at }
+GET    /:id                                     -> { spec, format, state, result, expires_at }
 POST   /:id/result           body: <action>     -> { ok }              (browser submits)
-GET    /:id/result                              -> { state, result }   (agent reads, marks "received" on first read)
+GET    /:id/result                              -> { state, result, format } (agent reads, marks "received" on first read)
 ```
 
 The API publishes its OpenAPI 3.1 spec at the conventional locations:
@@ -430,14 +430,14 @@ Or with curl, end-to-end:
 # 1. Create a page with a spec.
 curl -s -X POST http://localhost:8787/new \
   -H 'content-type: application/json' \
-  -d '{"spec":[{"createSurface":{"surfaceId":"main","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json"}},{"updateComponents":{"surfaceId":"main","components":[{"id":"root","component":"Column","children":["title","field","submit"]},{"id":"title","component":"Text","text":"Color?"},{"id":"field","component":"TextField","label":"Color","value":{"path":"/color"}},{"id":"submit-label","component":"Text","text":"Send"},{"id":"submit","component":"Button","child":"submit-label","variant":"primary","action":{"event":{"name":"submitted","context":{"color":{"path":"/color"}}}}}]}}]}'
+  -d '{"format":"a2ui","spec":[{"createSurface":{"surfaceId":"main","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json"}},{"updateComponents":{"surfaceId":"main","components":[{"id":"root","component":"Column","children":["title","field","submit"]},{"id":"title","component":"Text","text":"Color?"},{"id":"field","component":"TextField","label":"Color","value":{"path":"/color"}},{"id":"submit-label","component":"Text","text":"Send"},{"id":"submit","component":"Button","child":"submit-label","variant":"primary","action":{"event":{"name":"submitted","context":{"color":{"path":"/color"}}}}}]}}]}'
 # -> { "id": "<pageId>", "url": "http://localhost:8788/<pageId>", "expires_at": ... }
 
 # 2. Open the URL in a browser and click Send. Then poll:
 curl -s http://localhost:8787/<pageId>/result
-# -> { "state": "open",      "result": null }       (before submit)
-# -> { "state": "submitted", "result": { ... } }    (first read after submit; flips to received)
-# -> { "state": "received",  "result": { ... } }    (subsequent reads)
+# -> { "state": "open",      "result": null,    "format": "a2ui" } (before submit)
+# -> { "state": "submitted", "result": { ... }, "format": "a2ui" } (first read; flips to received)
+# -> { "state": "received",  "result": { ... }, "format": "a2ui" } (subsequent reads)
 ```
 
 ## Releases

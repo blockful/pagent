@@ -354,13 +354,14 @@ server also sets a session cookie.
 
 **Error cases:**
 
-| Status | Error                  | When                                              |
-| ------ | ---------------------- | ------------------------------------------------- |
-| 400    | `invalid_request`      | Missing required parameters                        |
-| 400    | `invalid_client`       | `client_id` not found                              |
-| 400    | `invalid_redirect_uri` | `redirect_uri` not in client's registered URIs     |
+| Status | Response        | When                                                         |
+| ------ | --------------- | ------------------------------------------------------------ |
+| 400    | HTML error page | `response_type` is missing or is not `code`                   |
+| 400    | HTML error page | Another required parameter is missing or PKCE is not `S256`  |
+| 400    | HTML error page | `client_id` is unknown                                       |
+| 400    | HTML error page | `redirect_uri` is unsafe or not an exact registered URI      |
 
-Errors on the authorize endpoint are shown on the login page itself
+Errors on the authorize endpoint are shown on a local HTML error page
 (not redirected), per OAuth 2.1 Section 4.1.2.1 — redirect-based
 errors only go to the redirect URI if we trust it.
 
@@ -444,9 +445,13 @@ Pagent auth code and redirects to the MCP client's `redirect_uri`).
 GET /oauth/magic?token=...
 ```
 
-Internal endpoint. When the user clicks the link in their email, this
-endpoint validates the token, upserts the user, and redirects back into
-the Pagent authorize flow.
+Internal endpoint. It first inspects the active token without consuming it,
+then verifies the same HttpOnly browser transaction that initiated sign-in.
+OAuth-client links additionally require explicit consent and a still-valid
+registered redirect. Only after those checks pass does the endpoint atomically
+consume the token, upsert the user, and continue the Pagent authorize flow.
+Email scanners and other unbound browsers receive an HTML 400 response without
+burning an otherwise active one-time link.
 
 ### 3.9 Browser session endpoints
 
@@ -667,29 +672,26 @@ User Browser           Pagent API                  Email Service
     │◀──────────────────────│                           │
 ```
 
-The Magic Link email includes the full authorize context (client_id,
-redirect_uri, code_challenge, scope, state) encoded in the magic link
-URL or stored server-side keyed by the magic link token. Server-side
-storage is preferred — it keeps the email link shorter and avoids
-leaking OAuth parameters in email logs.
+The Magic Link row stores the full authorize context (`client_id`,
+`redirect_uri`, `code_challenge`, scope, state, consent, and browser-transaction
+hash) server-side keyed by the magic link token hash. The email URL contains
+only the raw one-time token, keeping OAuth parameters out of email logs.
 
 ### 4.4 Browser session flow (renderer / dashboard)
 
-For browser-based access (the renderer, a future dashboard), users
-authenticate via the same `/oauth/authorize` login page. After
-authentication, in addition to issuing an auth code for the OAuth flow,
-the server sets an httpOnly session cookie:
+For browser-based access (the renderer, a future dashboard), users authenticate
+via `/oauth/authorize?browser_session=1`. After authentication, the server sets
+an HttpOnly session cookie; this direct browser path does not issue an OAuth
+authorization code:
 
 ```
 Set-Cookie: pagent_session=<random-128-bit-hex>;
   HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000
 ```
 
-The cookie is set only when the authorize request comes from a
-browser context (detected by the presence of a session-initiating query
-parameter `browser_session=1` or by the absence of a registered
-`client_id` — the renderer doesn't register as an OAuth client, it just
-needs a session).
+The cookie is set only for the explicit session-initiating query parameter
+`browser_session=1`; merely omitting `client_id` from an OAuth request is an
+HTML 400 error.
 
 Direct browser login (not part of an MCP OAuth flow) uses a simplified
 path:
@@ -954,7 +956,7 @@ if (env.REQUIRE_AUTH) {
   if (!authHeader?.startsWith('Bearer ')) {
     // Return 401 with WWW-Authenticate pointing to resource metadata
     res.setHeader('WWW-Authenticate',
-      `Bearer resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource"`
+      `Bearer resource_metadata="${API_PUBLIC_URL}/.well-known/oauth-protected-resource"`
     );
     respondJson(res, 401, {
       error: 'unauthorized',
@@ -1048,9 +1050,11 @@ validated at the token endpoint.
 | Auth code      | URL parameter (transient) | Single-use; 10-minute expiry         |
 | Magic link     | Email (transient)         | Single-use; 15-minute expiry         |
 
-Server-side, all secrets are stored as SHA-256 hashes — session tokens,
-refresh tokens, magic link tokens, authorization codes. The raw values
-exist only in transit (cookie, URL, email).
+Server-side, session tokens, refresh tokens, and magic link tokens are stored
+as SHA-256 hashes; their raw values exist only in transit. Authorization codes
+are high-entropy opaque values stored as the `auth_codes` primary key. They are
+still short-lived, PKCE-bound, and atomically consumed on first successful
+exchange, but they are not hashed in the current schema.
 
 ### 7.3 Rate limiting on auth endpoints
 
@@ -1095,19 +1099,19 @@ callback time so legacy rows cannot bypass it.
 
 ### 7.6 Email enumeration
 
-The Magic Link flow does not reveal whether an email is registered.
-Both "email found" and "email not found" show the same "check your
-email" message. On the backend, if the email is not registered, no
-email is sent (but the response is identical to avoid timing attacks —
-add a small random delay to normalize response times).
+The Magic Link flow does not query or reveal prior registration. Every
+syntactically valid email address follows the same link-creation, delivery,
+and accepted-response path. A user row is upserted only after the browser-bound
+link is successfully redeemed.
 
 ### 7.7 Google OAuth state parameter
 
-The `state` parameter sent to Google encodes the full authorize context
-as a signed JWT (HMAC-SHA256 with a server-side secret). This prevents:
-- Tampering with the redirect URI or code challenge during the Google
-  round-trip.
-- CSRF attacks on the Google callback (the state is unpredictable).
+The `state` parameter sent to Google encodes the authorize context as a signed
+JWT (HMAC-SHA256 with a server-side secret). The signature prevents tampering
+with the redirect URI, PKCE challenge, consent decision, or browser-transaction
+hash. The signed state is not treated as confidential or sufficient by itself:
+the callback must also match the hash of the HttpOnly browser transaction
+cookie before any user mutation or authorization-code issuance.
 
 ## 8. Migration plan
 
@@ -1166,28 +1170,31 @@ as a signed JWT (HMAC-SHA256 with a server-side secret). This prevents:
 
 New environment variables for the API (`apps/api`):
 
-| Variable                   | Required | Default      | Description                                     |
-| -------------------------- | -------- | ------------ | ----------------------------------------------- |
-| `REQUIRE_AUTH`             | No       | `false`      | If `true`, page creation, result reads, and MCP require auth |
-| `JWT_SIGNING_KEY`          | Yes*     | -            | Ed25519 private key, base64url-encoded (DER)     |
-| `JWT_PUBLIC_KEY`           | Yes*     | -            | Ed25519 public key, base64url-encoded (DER)      |
-| `GOOGLE_CLIENT_ID`        | Yes*     | -            | Google OAuth 2.0 client ID                       |
-| `GOOGLE_CLIENT_SECRET`    | Yes*     | -            | Google OAuth 2.0 client secret                   |
-| `GOOGLE_REDIRECT_URI`     | No       | `{PUBLIC_URL}/oauth/callback/google` | Google OAuth callback URI     |
-| `MAGIC_LINK_SECRET`       | Yes*     | -            | HMAC key for signing magic link tokens           |
-| `AUTH_STATE_SECRET`        | Yes*     | -            | HMAC key for signing OAuth state JWTs            |
-| `SESSION_MAX_AGE_DAYS`    | No       | `30`         | Session cookie lifetime in days                  |
-| `REFRESH_TOKEN_MAX_DAYS`  | No       | `90`         | Refresh token lifetime in days                   |
-| `ACCESS_TOKEN_TTL_SECONDS`| No       | `3600`       | JWT access token lifetime in seconds             |
-| `SMTP_HOST`               | Yes*     | -            | SMTP server for magic link emails                |
-| `SMTP_PORT`               | No       | `587`        | SMTP port                                        |
-| `SMTP_USER`               | Yes*     | -            | SMTP username                                    |
-| `SMTP_PASS`               | Yes*     | -            | SMTP password                                    |
-| `SMTP_FROM`               | No       | `noreply@pagent.link` | From address for magic link emails      |
+| Variable                    | Required   | Default                              | Description                                                        |
+| --------------------------- | ---------- | ------------------------------------ | ------------------------------------------------------------------ |
+| `PUBLIC_URL`                | Production | -                                    | HTTPS renderer origin used in generated page URLs                  |
+| `API_PUBLIC_URL`            | Production | -                                    | HTTPS API origin used for OAuth issuer, callbacks, and magic links |
+| `ALLOWED_ORIGINS`           | Production | -                                    | Comma-separated CORS allow-list                                    |
+| `REQUIRE_AUTH`              | No         | `false`                              | If `true`, page creation, result reads, and MCP require auth       |
+| `JWT_SIGNING_KEY`           | Yes*       | -                                    | Ed25519 private key, base64url-encoded (DER)                       |
+| `JWT_PUBLIC_KEY`            | Yes*       | -                                    | Ed25519 public key, base64url-encoded (DER)                        |
+| `GOOGLE_CLIENT_ID`          | Yes*       | -                                    | Google OAuth 2.0 client ID                                         |
+| `GOOGLE_CLIENT_SECRET`      | Yes*       | -                                    | Google OAuth 2.0 client secret                                     |
+| `GOOGLE_REDIRECT_URI`       | No         | `{API_PUBLIC_URL}/oauth/callback/google` | Google OAuth callback URI                                      |
+| `AUTH_STATE_SECRET`         | Yes*       | -                                    | OAuth state HMAC secret; at least 32 UTF-8 bytes                   |
+| `SESSION_MAX_AGE_DAYS`      | No         | `30`                                 | Session cookie lifetime in days                                    |
+| `REFRESH_TOKEN_MAX_DAYS`    | No         | `90`                                 | Refresh token lifetime in days                                     |
+| `ACCESS_TOKEN_TTL_SECONDS`  | No         | `3600`                               | JWT access token lifetime in seconds                               |
+| `SMTP_HOST`                 | Yes*       | -                                    | SMTP server for magic link emails                                  |
+| `SMTP_PORT`                 | No         | `587`                                | SMTP port                                                          |
+| `SMTP_USER`                 | Yes*       | -                                    | SMTP username                                                      |
+| `SMTP_PASS`                 | Yes*       | -                                    | SMTP password                                                      |
+| `SMTP_FROM`                 | No         | `noreply@pagent.link`                | From address for magic link emails                                 |
 
-*Required when `REQUIRE_AUTH=true` or when auth endpoints are
-used. The API boots without them during the grace period (auth
-endpoints return 503 "auth not configured").
+*Required when `REQUIRE_AUTH=true`. Production additionally requires
+`PUBLIC_URL`, `API_PUBLIC_URL`, and `ALLOWED_ORIGINS`; both public URLs must be
+HTTPS origins. Magic links are random opaque tokens stored as hashes and do not
+use a separate `MAGIC_LINK_SECRET`.
 
 New environment variable for the stdio MCP (`apps/mcp`):
 
@@ -1200,14 +1207,19 @@ New environment variable for the stdio MCP (`apps/mcp`):
 The existing `envSchema` in `schemas.ts` is extended:
 
 ```ts
-// Auth-related env vars — optional unless REQUIRE_AUTH is true
-REQUIRE_AUTH: z.coerce.boolean().optional().default(false),
+// Explicit parsing is required because Boolean("false") is true.
+REQUIRE_AUTH: z
+  .union([z.boolean(), z.string()])
+  .optional()
+  .transform((value) =>
+    typeof value === 'boolean' ? value : value === 'true' || value === '1',
+  ),
+API_PUBLIC_URL: z.string().url().optional(),
 JWT_SIGNING_KEY: z.string().optional(),
 JWT_PUBLIC_KEY: z.string().optional(),
 GOOGLE_CLIENT_ID: z.string().optional(),
 GOOGLE_CLIENT_SECRET: z.string().optional(),
 GOOGLE_REDIRECT_URI: z.string().url().optional(),
-MAGIC_LINK_SECRET: z.string().optional(),
 AUTH_STATE_SECRET: z.string().optional(),
 SESSION_MAX_AGE_DAYS: z.coerce.number().int().positive().optional().default(30),
 REFRESH_TOKEN_MAX_DAYS: z.coerce.number().int().positive().optional().default(90),

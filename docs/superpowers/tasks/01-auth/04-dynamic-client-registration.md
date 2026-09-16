@@ -1,17 +1,20 @@
 # 04 — Dynamic client registration
 
+> Status: implemented. This checklist is retained as an as-built contract and
+> has been reconciled with the current runtime.
+
 ## Description
 
 Implement `POST /oauth/register` per RFC 7591. MCP clients self-register before starting the authorization code flow. This endpoint creates rows in the `oauth_clients` table and also implements the `OAuthRegisteredClientsStore` interface from the MCP SDK.
 
-## Files to create/modify
+## As-built files
 
-- `apps/api/auth/clients-store.ts` (new) — implements `OAuthRegisteredClientsStore` interface from `@modelcontextprotocol/sdk/server/auth/clients`. Methods:
-  - `registerClient(metadata)` — validates `redirect_uris` (required, each must be a valid URI), generates `client_id` via `randomUUID()`, inserts into `oauth_clients`. Returns `OAuthClientInformationFull`.
+- `apps/api/auth/clients-store.ts` — implements the registered-client store. Methods:
+  - `registerClient(metadata)` — validates `redirect_uris` against Pagent's redirect policy, generates `client_id` via `randomUUID()`, inserts into `oauth_clients`. Returns `OAuthClientInformationFull`.
   - `getClient(clientId)` — looks up by `client_id` PK. Returns client info or undefined.
-- `apps/api/auth/routes.ts` — add route:
+- `apps/api/auth/route-discovery.ts` — registers:
   - `POST /oauth/register` — validates request body, calls `registerClient()`, returns 201 with client info. Rate-limited to 10/IP/hour.
-- `apps/api/auth/clients-store.test.ts` (new) — tests:
+- `apps/api/auth/clients-store.test.ts` and `routes-register.test.ts` — verify:
   - Successful registration returns `client_id` and echoes back metadata.
   - Missing `redirect_uris` returns 400 `invalid_client_metadata`.
   - Invalid URI in `redirect_uris` returns 400.
@@ -25,7 +28,12 @@ Implement `POST /oauth/register` per RFC 7591. MCP clients self-register before 
 - No `client_secret` is issued (public clients, `token_endpoint_auth_method: "none"`).
 - `client_id` is a UUID.
 - `client_id_issued_at` is a Unix timestamp (seconds).
-- `redirect_uris` is validated: must be a non-empty array of valid URIs.
+- `redirect_uris` is a non-empty array. Remote web callbacks require HTTPS;
+  HTTP is limited to `localhost`, `127.0.0.1`, and `[::1]`; native-client
+  custom schemes are allowed. Credentials, fragments, executable/browser
+  schemes, generic handler schemes, and relative URLs are rejected.
+- Redirect safety and exact registration membership are checked again when
+  authorization starts and completes, including for legacy database rows.
 - `grant_types` defaults to `["authorization_code", "refresh_token"]`.
 - `response_types` defaults to `["code"]`.
 - Rate limit: 10 registrations per IP per hour.
