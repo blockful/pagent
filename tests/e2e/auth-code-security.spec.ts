@@ -86,6 +86,19 @@ test('invalid PKCE cannot consume a valid authorization code', async () => {
     const tokens = tokenResponseSchema.parse(await valid.json());
     expect(await db.getAuthCodeForReplay(code)).toMatchObject({ consumed_at: expect.any(Date) });
 
+    const unboundReplay = await api.post('/oauth/token', {
+      form: {
+        grant_type: 'authorization_code',
+        code,
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code_verifier: `${verifier}-wrong`,
+      },
+    });
+    expect(unboundReplay.status()).toBe(400);
+    const refreshHash = createHash('sha256').update(tokens.refresh_token).digest('hex');
+    expect(await db.getRefreshTokenByHash(refreshHash)).toMatchObject({ revoked_at: null });
+
     const replay = await api.post('/oauth/token', {
       form: {
         grant_type: 'authorization_code',
@@ -96,10 +109,45 @@ test('invalid PKCE cannot consume a valid authorization code', async () => {
       },
     });
     expect(replay.status()).toBe(400);
-    const refreshHash = createHash('sha256').update(tokens.refresh_token).digest('hex');
     expect(await db.getRefreshTokenByHash(refreshHash)).toMatchObject({
       revoked_at: expect.any(Date),
     });
+
+    const concurrentApi = api;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const concurrentCode = `e2e-concurrent-code-${runId}-${attempt}`;
+      const concurrentVerifier = `e2e-concurrent-verifier-${runId}-${attempt}`;
+      await db.insertAuthCode({
+        code: concurrentCode,
+        userId: user.id,
+        clientId,
+        redirectUri,
+        codeChallenge: createHash('sha256').update(concurrentVerifier).digest('base64url'),
+        codeChallengeMethod: 'S256',
+        scope: 'page:create',
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      const exchange = () =>
+        concurrentApi.post('/oauth/token', {
+          headers: { 'x-forwarded-for': `198.51.100.${attempt + 1}` },
+          form: {
+            grant_type: 'authorization_code',
+            code: concurrentCode,
+            client_id: clientId,
+            redirect_uri: redirectUri,
+            code_verifier: concurrentVerifier,
+          },
+        });
+      const responses = await Promise.all([exchange(), exchange()]);
+      expect(responses.map((response) => response.status()).sort()).toEqual([200, 400]);
+      const winner = responses.find((response) => response.status() === 200);
+      if (winner === undefined) throw new TypeError('concurrent exchange had no winner');
+      const winnerTokens = tokenResponseSchema.parse(await winner.json());
+      const winnerHash = createHash('sha256').update(winnerTokens.refresh_token).digest('hex');
+      expect(await db.getRefreshTokenByHash(winnerHash)).toMatchObject({
+        revoked_at: expect.any(Date),
+      });
+    }
   } finally {
     await api?.dispose();
     await stopServer?.();

@@ -139,6 +139,7 @@ test('requires explicit browser-bound consent before exposing OAuth sign-in choi
   const client = registeredClientSchema.parse(await jsonResponse(registration));
   const authorize = new URL('/oauth/authorize', localApiUrl());
   authorize.search = new URLSearchParams({
+    response_type: 'code',
     client_id: client.client_id,
     redirect_uri: 'https://client.example/callback',
     code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
@@ -163,6 +164,29 @@ test('requires explicit browser-bound consent before exposing OAuth sign-in choi
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByText('Authorization cancelled.')).toBeVisible();
   expect(page.url()).toBe(`${localApiUrl()}/oauth/authorize/consent`);
+});
+
+test('rejects an OAuth authorization request without response_type=code', async () => {
+  const registration = await api?.post('/oauth/register', {
+    data: {
+      client_name: 'Invalid response type client',
+      redirect_uris: ['https://client.example/callback'],
+    },
+  });
+  expect(registration?.status()).toBe(201);
+  const client = registeredClientSchema.parse(await jsonResponse(registration));
+  const authorize = new URL('/oauth/authorize', localApiUrl());
+  authorize.search = new URLSearchParams({
+    client_id: client.client_id,
+    redirect_uri: 'https://client.example/callback',
+    code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
+    code_challenge_method: 'S256',
+  }).toString();
+
+  const response = await api?.get(`${authorize.pathname}${authorize.search}`);
+
+  expect(response?.status()).toBe(400);
+  expect(response?.headers()['content-type']).toContain('text/html');
 });
 
 test('does not consume a browser-bound magic link when an unbound scanner opens it', async () => {

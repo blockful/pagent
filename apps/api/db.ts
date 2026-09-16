@@ -17,8 +17,12 @@ export type { OAuthClientInsert, OAuthClientRow } from './db/oauth-clients.ts';
 export { getUserByHandle, getUserById, upsertUser } from './db/users.ts';
 export type { UserRow, UserUpsertInput } from './db/users.ts';
 
-export { consumeAuthCode, getAuthCodeForReplay, insertAuthCode } from './db/auth-codes.ts';
-export type { AuthCodeInsert, AuthCodeRow } from './db/auth-codes.ts';
+export {
+  consumeAuthCodeAndInsertRefreshToken,
+  getAuthCodeForReplay,
+  insertAuthCode,
+} from './db/auth-codes.ts';
+export type { AuthCodeInsert, AuthCodeRow, ConsumedAuthCode } from './db/auth-codes.ts';
 
 export {
   getRefreshTokenByHash,

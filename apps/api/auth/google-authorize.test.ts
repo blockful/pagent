@@ -201,6 +201,26 @@ describe('GET /oauth/authorize', () => {
     expect(html).toContain('code_challenge');
   });
 
+  it('rejects a missing response_type for an OAuth client request', async () => {
+    const params = Object.fromEntries(
+      Object.entries(VALID_AUTHORIZE).filter(([key]) => key !== 'response_type'),
+    );
+
+    const res = await app.fetch(new Request(authorizeUrl(params)));
+
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain('response_type must be code');
+  });
+
+  it('rejects an unsupported response_type for an OAuth client request', async () => {
+    const res = await app.fetch(
+      new Request(authorizeUrl({ ...VALID_AUTHORIZE, response_type: 'token' })),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain('response_type must be code');
+  });
+
   it('renders an error for code_challenge_method=plain', async () => {
     vi.mocked(db.getOAuthClientById).mockResolvedValueOnce(clientRow);
     const res = await app.fetch(

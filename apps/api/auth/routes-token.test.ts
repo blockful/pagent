@@ -52,7 +52,7 @@ function pkceS256(verifier: string): string {
 describe('POST /oauth/token', () => {
   beforeEach(() => {
     vi.mocked(db.getOAuthClientById).mockReset();
-    vi.mocked(db.consumeAuthCode).mockReset();
+    vi.mocked(db.consumeAuthCodeAndInsertRefreshToken).mockReset();
     vi.mocked(db.getAuthCodeForReplay).mockReset();
     vi.mocked(db.getUserById).mockReset();
     vi.mocked(db.insertRefreshToken).mockReset();
@@ -78,7 +78,7 @@ describe('POST /oauth/token', () => {
       expires_at: new Date(Date.now() + 60_000),
       consumed_at: null,
     });
-    vi.mocked(db.consumeAuthCode).mockResolvedValueOnce({
+    vi.mocked(db.consumeAuthCodeAndInsertRefreshToken).mockResolvedValueOnce({
       userId: TOKEN_USER_ROW.id,
       clientId: TOKEN_CLIENT_ID,
       redirectUri: TOKEN_REDIRECT_URI,
@@ -164,7 +164,6 @@ describe('POST /oauth/token', () => {
 
   it('returns invalid_grant for an invalid auth code (no consume row)', async () => {
     vi.mocked(db.getOAuthClientById).mockResolvedValue(TOKEN_CLIENT_ROW);
-    vi.mocked(db.consumeAuthCode).mockResolvedValueOnce(null);
     vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce(null);
     const res = await app.fetch(
       postToken(

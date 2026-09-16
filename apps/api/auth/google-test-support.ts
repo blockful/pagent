@@ -8,6 +8,7 @@ export const BASE = 'http://localhost';
 export const GOOGLE_KID = 'test-google-kid';
 
 export const VALID_AUTHORIZE = {
+  response_type: 'code',
   client_id: 'a1b2c3d4-e5f6-4321-9876-abcdef012345',
   redirect_uri: 'http://localhost:9876/callback',
   code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',

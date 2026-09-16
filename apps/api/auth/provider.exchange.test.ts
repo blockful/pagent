@@ -12,10 +12,9 @@ import {
 } from './provider-test-support.ts';
 
 vi.mock('../db.ts', () => ({
-  consumeAuthCode: vi.fn(),
+  consumeAuthCodeAndInsertRefreshToken: vi.fn(),
   getAuthCodeForReplay: vi.fn(),
   getUserById: vi.fn(),
-  insertRefreshToken: vi.fn(),
   revokeAllRefreshTokensForFamily: vi.fn(),
 }));
 
@@ -60,7 +59,7 @@ describe('exchangeAuthCode', () => {
 
     vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
     vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce(storedAuthCode(challenge));
-    vi.mocked(db.consumeAuthCode).mockResolvedValueOnce({
+    vi.mocked(db.consumeAuthCodeAndInsertRefreshToken).mockResolvedValueOnce({
       userId: USER_ROW.id,
       clientId: CLIENT_ID,
       redirectUri: REDIRECT_URI,
@@ -70,17 +69,6 @@ describe('exchangeAuthCode', () => {
       resource: null,
     });
     vi.mocked(db.getUserById).mockResolvedValueOnce(USER_ROW);
-    vi.mocked(db.insertRefreshToken).mockImplementation(async (input) => ({
-      id: 'rt-row-id',
-      user_id: input.userId,
-      client_id: input.clientId,
-      token_hash: input.tokenHash,
-      scope: input.scope,
-      created_at: new Date(),
-      expires_at: input.expiresAt,
-      revoked_at: null,
-    }));
-
     const response = await exchangeAuthCode('auth-code-abc', CLIENT_ID, REDIRECT_URI, verifier);
 
     expect(response.token_type).toBe('Bearer');
@@ -96,7 +84,7 @@ describe('exchangeAuthCode', () => {
 
     expect(response.refresh_token).toMatch(/^rt_[0-9a-f]{64}$/);
 
-    const insertArg = vi.mocked(db.insertRefreshToken).mock.calls.at(0)?.at(0);
+    const insertArg = vi.mocked(db.consumeAuthCodeAndInsertRefreshToken).mock.calls.at(0)?.[1];
     expect(insertArg?.tokenHash).toBe(sha256Hex(response.refresh_token));
     expect(insertArg?.tokenHash).not.toBe(response.refresh_token);
     expect(insertArg?.userId).toBe(USER_ROW.id);
@@ -120,8 +108,7 @@ describe('exchangeAuthCode', () => {
       code: 'invalid_grant',
     });
 
-    expect(db.consumeAuthCode).not.toHaveBeenCalled();
-    expect(db.insertRefreshToken).not.toHaveBeenCalled();
+    expect(db.consumeAuthCodeAndInsertRefreshToken).not.toHaveBeenCalled();
   });
 
   it('rejects unknown / expired authorization code with invalid_grant', async () => {
@@ -133,24 +120,25 @@ describe('exchangeAuthCode', () => {
     ).rejects.toMatchObject({
       code: 'invalid_grant',
     });
-    expect(db.consumeAuthCode).not.toHaveBeenCalled();
+    expect(db.consumeAuthCodeAndInsertRefreshToken).not.toHaveBeenCalled();
   });
 
   it('detects auth code replay and revokes the issued refresh-token family', async () => {
+    const verifier = 'replay-verifier-string-with-enough-entropy';
     vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
     vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce(
-      storedAuthCode('irrelevant', {
+      storedAuthCode(pkceChallenge(verifier), {
         code: 'replay-code',
         consumed_at: new Date(Date.now() - 30_000),
       }),
     );
 
     await expect(
-      exchangeAuthCode('replay-code', CLIENT_ID, REDIRECT_URI, 'verifier'),
+      exchangeAuthCode('replay-code', CLIENT_ID, REDIRECT_URI, verifier),
     ).rejects.toMatchObject({ code: 'invalid_grant' });
 
     expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(USER_ROW.id, CLIENT_ID);
-    expect(db.consumeAuthCode).not.toHaveBeenCalled();
+    expect(db.consumeAuthCodeAndInsertRefreshToken).not.toHaveBeenCalled();
   });
 
   it('revokes the refresh-token family when a concurrent exchange wins consumption', async () => {
@@ -161,14 +149,67 @@ describe('exchangeAuthCode', () => {
     vi.mocked(db.getAuthCodeForReplay)
       .mockResolvedValueOnce(stored)
       .mockResolvedValueOnce({ ...stored, consumed_at: new Date() });
-    vi.mocked(db.consumeAuthCode).mockResolvedValueOnce(null);
+    vi.mocked(db.getUserById).mockResolvedValueOnce(USER_ROW);
+    vi.mocked(db.consumeAuthCodeAndInsertRefreshToken).mockResolvedValueOnce(null);
 
     await expect(
       exchangeAuthCode('raced-code', CLIENT_ID, REDIRECT_URI, verifier),
     ).rejects.toMatchObject({ code: 'invalid_grant' });
 
-    expect(db.consumeAuthCode).toHaveBeenCalledOnce();
+    expect(db.consumeAuthCodeAndInsertRefreshToken).toHaveBeenCalledOnce();
     expect(db.revokeAllRefreshTokensForFamily).toHaveBeenCalledWith(USER_ROW.id, CLIENT_ID);
+  });
+
+  it('does not revoke for a consumed code with an invalid PKCE verifier', async () => {
+    const verifier = 'correct-consumed-verifier-with-enough-entropy';
+    vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
+    vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce(
+      storedAuthCode(pkceChallenge(verifier), { consumed_at: new Date() }),
+    );
+
+    await expect(
+      exchangeAuthCode('consumed-code', CLIENT_ID, REDIRECT_URI, `${verifier}-wrong`),
+    ).rejects.toMatchObject({ code: 'invalid_grant' });
+
+    expect(db.revokeAllRefreshTokensForFamily).not.toHaveBeenCalled();
+  });
+
+  it('does not revoke for a consumed code with a mismatched client or redirect', async () => {
+    const verifier = 'bound-consumed-verifier-with-enough-entropy';
+    const consumed = storedAuthCode(pkceChallenge(verifier), { consumed_at: new Date() });
+    vi.mocked(getClient).mockResolvedValue(CLIENT_INFO);
+    vi.mocked(db.getAuthCodeForReplay).mockResolvedValue(consumed);
+
+    await expect(
+      exchangeAuthCode(
+        'consumed-code',
+        '22222222-3333-4444-5555-666666666666',
+        REDIRECT_URI,
+        verifier,
+      ),
+    ).rejects.toMatchObject({ code: 'invalid_grant' });
+    await expect(
+      exchangeAuthCode('consumed-code', CLIENT_ID, 'https://attacker.example/callback', verifier),
+    ).rejects.toMatchObject({ code: 'invalid_grant' });
+
+    expect(db.revokeAllRefreshTokensForFamily).not.toHaveBeenCalled();
+  });
+
+  it('does not revoke for an expired consumed code', async () => {
+    const verifier = 'expired-consumed-verifier-with-enough-entropy';
+    vi.mocked(getClient).mockResolvedValueOnce(CLIENT_INFO);
+    vi.mocked(db.getAuthCodeForReplay).mockResolvedValueOnce(
+      storedAuthCode(pkceChallenge(verifier), {
+        expires_at: new Date(Date.now() - 1_000),
+        consumed_at: new Date(Date.now() - 2_000),
+      }),
+    );
+
+    await expect(
+      exchangeAuthCode('expired-consumed-code', CLIENT_ID, REDIRECT_URI, verifier),
+    ).rejects.toMatchObject({ code: 'invalid_grant' });
+
+    expect(db.revokeAllRefreshTokensForFamily).not.toHaveBeenCalled();
   });
 
   it('rejects unknown client_id with invalid_client (401)', async () => {
@@ -180,7 +221,7 @@ describe('exchangeAuthCode', () => {
       code: 'invalid_client',
       status: 401,
     });
-    expect(db.consumeAuthCode).not.toHaveBeenCalled();
+    expect(db.consumeAuthCodeAndInsertRefreshToken).not.toHaveBeenCalled();
   });
 
   it('rejects redirect_uri mismatch with invalid_grant', async () => {
@@ -194,7 +235,7 @@ describe('exchangeAuthCode', () => {
     ).rejects.toMatchObject({
       code: 'invalid_grant',
     });
-    expect(db.consumeAuthCode).not.toHaveBeenCalled();
+    expect(db.consumeAuthCodeAndInsertRefreshToken).not.toHaveBeenCalled();
   });
 
   it('rejects a registered client_id mismatch without consuming the code', async () => {
@@ -208,7 +249,7 @@ describe('exchangeAuthCode', () => {
       exchangeAuthCode('auth-code-abc', otherClientId, REDIRECT_URI, verifier),
     ).rejects.toMatchObject({ code: 'invalid_grant' });
 
-    expect(db.consumeAuthCode).not.toHaveBeenCalled();
+    expect(db.consumeAuthCodeAndInsertRefreshToken).not.toHaveBeenCalled();
   });
 
   it('rejects missing required parameters with invalid_request', async () => {

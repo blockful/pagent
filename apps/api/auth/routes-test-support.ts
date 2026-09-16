@@ -18,7 +18,7 @@ vi.mock('../db.ts', () => ({
   getUserByHandle: vi.fn(),
   getUserById: vi.fn(),
   insertAuthCode: vi.fn(),
-  consumeAuthCode: vi.fn(),
+  consumeAuthCodeAndInsertRefreshToken: vi.fn(),
   getAuthCodeForReplay: vi.fn(),
   insertRefreshToken: vi.fn(),
   getRefreshTokenByHash: vi.fn(),

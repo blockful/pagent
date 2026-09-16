@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import * as db from '../db.ts';
 import { logger } from '../logger.ts';
 import { getClient } from './clients-store.ts';
-import { mintTokens, pkceVerify, TokenError, type TokenResponse } from './token-core.ts';
+import { pkceVerify, prepareTokenPair, TokenError, type TokenResponse } from './token-core.ts';
 
 // 10-minute auth-code TTL per spec §3.4. Enough for the browser redirect +
 // the MCP client's POST /oauth/token; longer windows just extend the
@@ -53,10 +53,11 @@ export async function createAuthCode(
  * Sequence:
  *   1. Read the code and verify expiry, PKCE, client_id, and redirect_uri.
  *      Invalid exchange attempts must not consume an otherwise valid code.
- *   2. Atomically consume the validated code (UPDATE ... WHERE consumed_at IS NULL).
+ *   2. Atomically consume the validated code and insert its refresh token
+ *      while holding the token-family replay lock.
  *   3. If the code was already consumed, revoke any refresh tokens issued
  *      from that code's user/client — RFC 6749 §4.1.2 SHOULD.
- *   4. Mint access + refresh tokens.
+ *   4. Return the prepared access + refresh pair.
  */
 export async function exchangeAuthCode(
   code: string,
@@ -84,9 +85,6 @@ export async function exchangeAuthCode(
   if (!stored) {
     throw new TokenError('invalid_grant', 'Authorization code is invalid or expired');
   }
-  if (stored.consumed_at !== null) {
-    await revokeForAuthCodeReplay(code, stored.user_id, stored.client_id);
-  }
   if (stored.expires_at.getTime() <= Date.now()) {
     throw new TokenError('invalid_grant', 'Authorization code is invalid or expired');
   }
@@ -108,10 +106,17 @@ export async function exchangeAuthCode(
     throw new TokenError('invalid_grant', 'redirect_uri does not match authorization code');
   }
 
-  // Atomic single-use consume after all request-controlled bindings pass.
-  // A concurrent valid exchange can still win between the read and UPDATE;
-  // that loser is a replay and retains the family-revocation behavior.
-  const consumed = await db.consumeAuthCode(code);
+  if (stored.consumed_at !== null) {
+    await revokeForAuthCodeReplay(code, stored.user_id, stored.client_id);
+  }
+
+  const user = await db.getUserById(stored.user_id);
+  if (!user) {
+    throw new TokenError('invalid_grant', 'User no longer exists');
+  }
+  const prepared = await prepareTokenPair(user, clientId, stored.scope);
+
+  const consumed = await db.consumeAuthCodeAndInsertRefreshToken(code, prepared.refreshToken);
   if (!consumed) {
     const replay = await db.getAuthCodeForReplay(code);
     if (replay && replay.consumed_at !== null) {
@@ -120,16 +125,7 @@ export async function exchangeAuthCode(
     throw new TokenError('invalid_grant', 'Authorization code is invalid or expired');
   }
 
-  // Resolve the user so we can populate JWT claims. cascade delete would have
-  // purged the auth_code if the user disappeared, so this should always
-  // succeed — but a defensive null check keeps a missing row from crashing
-  // the request.
-  const user = await db.getUserById(consumed.userId);
-  if (!user) {
-    throw new TokenError('invalid_grant', 'User no longer exists');
-  }
-
-  return mintTokens(user, clientId, consumed.scope);
+  return prepared.response;
 }
 
 async function revokeForAuthCodeReplay(

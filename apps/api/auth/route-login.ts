@@ -56,7 +56,18 @@ export function registerLoginRoutes(authRoutes: AuthRouter): void {
       return renderNoStoreHtml(c, renderLoginPage({ signedState }));
     }
 
-    const { client_id, redirect_uri, code_challenge, code_challenge_method, scope, state } = query;
+    const {
+      response_type,
+      client_id,
+      redirect_uri,
+      code_challenge,
+      code_challenge_method,
+      scope,
+      state,
+    } = query;
+    if (response_type !== 'code') {
+      return renderError(c, 'response_type must be code');
+    }
     if (typeof client_id !== 'string' || client_id.length === 0) {
       return renderError(c, 'Missing required parameter: client_id');
     }

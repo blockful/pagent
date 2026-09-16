@@ -1,4 +1,5 @@
 import { client } from './connection.ts';
+import type { RefreshTokenInsert } from './refresh-tokens.ts';
 
 // ---------------------------------------------------------------------------
 // Auth codes (PKCE authorization codes)
@@ -40,10 +41,9 @@ export async function insertAuthCode(input: AuthCodeInsert): Promise<void> {
 }
 
 /**
- * Row returned by `consumeAuthCode` and `getAuthCodeForReplay`. Mirrors the
- * `auth_codes` column layout but the caller usually only needs the fields the
- * token endpoint compares against (user_id, client_id, redirect_uri, PKCE
- * bits, scope/resource).
+ * Row returned by `getAuthCodeForReplay`. Mirrors the `auth_codes` column
+ * layout and carries every binding the token endpoint validates before either
+ * issuing tokens or treating a second exchange as a replay.
  */
 export type AuthCodeRow = {
   code: string;
@@ -59,19 +59,7 @@ export type AuthCodeRow = {
   consumed_at: Date | null;
 };
 
-/**
- * Atomically consume an authorization code: set `consumed_at = now()` and
- * return the row's binding fields, but only if the row exists, hasn't expired,
- * and hasn't already been consumed. The single-statement UPDATE ... WHERE
- * consumed_at IS NULL is what gives us the single-use guarantee — concurrent
- * token requests race on this filter and at most one wins.
- *
- * Returns null when the code is unknown / expired / already consumed. The
- * token endpoint then disambiguates via `getAuthCodeForReplay` to decide
- * whether to treat the failure as a replay (which triggers family revocation
- * per RFC 6749 §4.1.2).
- */
-export async function consumeAuthCode(code: string): Promise<{
+export type ConsumedAuthCode = {
   userId: string;
   clientId: string;
   redirectUri: string;
@@ -79,45 +67,76 @@ export async function consumeAuthCode(code: string): Promise<{
   codeChallengeMethod: string;
   scope: string | null;
   resource: string | null;
-} | null> {
+};
+
+/**
+ * Atomically consume an authorization code and insert its initial refresh
+ * token while holding the same family lock used by replay revocation. The
+ * transaction closes the gap where a losing exchange could revoke an empty
+ * family before the winner inserted its token.
+ *
+ * Returns null when the code is unknown / expired / already consumed. The
+ * token endpoint then disambiguates via `getAuthCodeForReplay` to decide
+ * whether to treat the failure as a replay (which triggers family revocation
+ * per RFC 6749 §4.1.2).
+ */
+export async function consumeAuthCodeAndInsertRefreshToken(
+  code: string,
+  refreshToken: RefreshTokenInsert,
+): Promise<ConsumedAuthCode | null> {
   const c = client();
-  const rows = await c<
-    {
-      user_id: string;
-      client_id: string;
-      redirect_uri: string;
-      code_challenge: string;
-      code_challenge_method: string;
-      scope: string | null;
-      resource: string | null;
-    }[]
-  >`
-    update auth_codes
-    set consumed_at = now()
-    where code = ${code}
-      and consumed_at is null
-      and expires_at > now()
-    returning user_id, client_id, redirect_uri, code_challenge,
-             code_challenge_method, scope, resource
-  `;
-  if (rows.length === 0) return null;
-  const r = rows[0]!;
-  return {
-    userId: r.user_id,
-    clientId: r.client_id,
-    redirectUri: r.redirect_uri,
-    codeChallenge: r.code_challenge,
-    codeChallengeMethod: r.code_challenge_method,
-    scope: r.scope,
-    resource: r.resource,
-  };
+  return c.begin(async (tx): Promise<ConsumedAuthCode | null> => {
+    await tx`
+      select pg_advisory_xact_lock(
+        hashtextextended(${refreshToken.userId} || chr(31) || ${refreshToken.clientId}, 0)
+      )
+    `;
+    const rows = await tx<
+      {
+        user_id: string;
+        client_id: string;
+        redirect_uri: string;
+        code_challenge: string;
+        code_challenge_method: string;
+        scope: string | null;
+        resource: string | null;
+      }[]
+    >`
+      update auth_codes
+      set consumed_at = now()
+      where code = ${code}
+        and user_id = ${refreshToken.userId}
+        and client_id = ${refreshToken.clientId}
+        and consumed_at is null
+        and expires_at > now()
+      returning user_id, client_id, redirect_uri, code_challenge,
+               code_challenge_method, scope, resource
+    `;
+    const row = rows[0];
+    if (row === undefined) return null;
+    await tx`
+      insert into refresh_tokens (user_id, client_id, token_hash, scope, expires_at)
+      values (
+        ${refreshToken.userId}, ${refreshToken.clientId}, ${refreshToken.tokenHash},
+        ${refreshToken.scope}, ${refreshToken.expiresAt}
+      )
+    `;
+    return {
+      userId: row.user_id,
+      clientId: row.client_id,
+      redirectUri: row.redirect_uri,
+      codeChallenge: row.code_challenge,
+      codeChallengeMethod: row.code_challenge_method,
+      scope: row.scope,
+      resource: row.resource,
+    };
+  });
 }
 
 /**
- * Look up an auth code without consuming it. Used by the token endpoint after
- * `consumeAuthCode` returns null to disambiguate "unknown / expired" from
- * "already consumed" — RFC 6749 §4.1.2 suggests revoking any tokens issued
- * from a replayed code, which we can only do if we know the row exists.
+ * Look up an auth code without consuming it. The token endpoint validates the
+ * stored bindings before mutation, and re-reads after a lost consume race to
+ * distinguish a valid replay from an unknown or expired code.
  *
  * Returns null when the row doesn't exist. Expiry and prior consumption are
  * NOT filtered here — the caller decides what to do with each state.
