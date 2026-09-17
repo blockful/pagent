@@ -22,6 +22,7 @@ class DeckSharingPanel extends LitElement {
     editing: { state: true },
     loading: { state: true },
     saving: { state: true },
+    saveError: { state: true },
     error: { state: true },
     createdUrl: { state: true },
     revokeCandidate: { state: true },
@@ -39,6 +40,7 @@ class DeckSharingPanel extends LitElement {
   declare editing: ShareLink | null;
   declare loading: boolean;
   declare saving: boolean;
+  declare saveError: string | null;
   declare error: string | null;
   declare createdUrl: string | null;
   declare revokeCandidate: ShareLink | null;
@@ -56,6 +58,7 @@ class DeckSharingPanel extends LitElement {
     this.editing = null;
     this.loading = true;
     this.saving = false;
+    this.saveError = null;
     this.error = null;
     this.createdUrl = null;
     this.revokeCandidate = null;
@@ -83,24 +86,28 @@ class DeckSharingPanel extends LitElement {
   }
 
   private async openEditor(link: ShareLink | null): Promise<void> {
+    if (this.saving) return;
     this.editing = link;
     this.createdUrl = null;
+    this.saveError = null;
     await this.updateComplete;
     const dialog = this.renderRoot.querySelector('#link-dialog');
     if (dialog instanceof HTMLDialogElement) dialog.showModal();
   }
 
-  private closeEditor(): void {
+  private closeEditor(force = false): void {
+    if (this.saving && !force) return;
     const dialog = this.renderRoot.querySelector('#link-dialog');
     if (dialog instanceof HTMLDialogElement) dialog.close();
   }
 
   private async saveLink(event: Event): Promise<void> {
     event.preventDefault();
+    if (this.saving) return;
     if (!(event.currentTarget instanceof HTMLFormElement)) return;
     const body = parseShareLinkFormData(new FormData(event.currentTarget));
     this.saving = true;
-    this.error = null;
+    this.saveError = null;
     try {
       if (this.editing === null) {
         const created = await apiJson(
@@ -114,11 +121,11 @@ class DeckSharingPanel extends LitElement {
           method: 'PUT',
           body: JSON.stringify(body),
         });
-        this.closeEditor();
+        this.closeEditor(true);
       }
       await this.loadLinks();
     } catch (error) {
-      this.error = error instanceof Error ? error.message : 'Could not save link';
+      this.saveError = error instanceof Error ? error.message : 'Could not save link';
     } finally {
       this.saving = false;
     }
@@ -232,6 +239,7 @@ class DeckSharingPanel extends LitElement {
       loading: this.loading,
       saving: this.saving,
       error: this.error,
+      saveError: this.saveError,
       createdUrl: this.createdUrl,
       revokeCandidate: this.revokeCandidate,
       revoking: this.revoking,

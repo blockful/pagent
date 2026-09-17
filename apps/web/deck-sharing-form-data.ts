@@ -9,13 +9,7 @@ export type ShareLinkFormBody = {
 };
 
 export function parseShareLinkFormData(data: FormData): ShareLinkFormBody {
-  const audience = formValue(data, 'audience');
-  const accessMode: ShareLinkAccessMode =
-    audience === 'anyone'
-      ? 'anyone'
-      : data.get('require_auth') === 'on'
-        ? 'authenticated'
-        : 'allowed_email';
+  const accessMode = selectedAccessMode(data);
   const allowed = formValue(data, 'allowed')
     .split(/[\n,]/)
     .map((entry) => entry.trim())
@@ -29,6 +23,13 @@ export function parseShareLinkFormData(data: FormData): ShareLinkFormBody {
     allowed_domains: accessMode === 'anyone' ? [] : allowed.filter(isAllowedDomain),
     ...(expiry ? { expires_at: new Date(expiry).toISOString() } : {}),
   };
+}
+
+function selectedAccessMode(data: FormData): ShareLinkAccessMode {
+  const accessMode = formValue(data, 'access_mode');
+  if (accessMode === 'anyone') return accessMode;
+  if (accessMode === 'allowed_email') return accessMode;
+  return 'authenticated';
 }
 
 function formValue(data: FormData, key: string): string {

@@ -19,7 +19,7 @@ export function renderDeckTable(decks: readonly DeckListItem[]): TemplateResult 
           <th>Owner</th>
           <th>Sender</th>
           <th>Status</th>
-          <th>Access</th>
+          <th>Latest share-link access</th>
           <th>Links</th>
           <th>Viewers</th>
           <th>Last viewed</th>
@@ -41,7 +41,7 @@ function renderDeckRow(deck: DeckListItem): TemplateResult {
     <td data-label="Owner">${deck.ownerEmail}</td>
     <td data-label="Sender">${deck.latestSenderEmail ?? '—'}</td>
     <td data-label="Status"><span class=${`badge ${deck.status}`}>${deck.status}</span></td>
-    <td data-label="Access">${accessLabel(deck.accessMode)}</td>
+    <td data-label="Latest share-link access">${accessLabel(deck.accessMode)}</td>
     <td data-label="Links" class="mono">${deck.linkCount}</td>
     <td data-label="Viewers" class="mono">${deck.uniqueViewers ?? 'Withheld'}</td>
     <td data-label="Last viewed">

@@ -156,6 +156,13 @@ export const envSchema = z.preprocess(
         });
       }
       if (cfg.NODE_ENV === 'production') {
+        if (hasDisabledDatabaseSsl(cfg.DATABASE_URL)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['DATABASE_URL'],
+            message: 'DATABASE_URL with sslmode=disable is not allowed in production.',
+          });
+        }
         if (cfg.TRUSTED_PROXY_MODE === undefined) {
           ctx.addIssue({
             code: 'custom',
@@ -230,6 +237,13 @@ function isHttpsOrigin(value: string): boolean {
     parsed.search === '' &&
     parsed.hash === ''
   );
+}
+
+function hasDisabledDatabaseSsl(value: string): boolean {
+  if (!URL.canParse(value)) return false;
+  return new URL(value).searchParams
+    .getAll('sslmode')
+    .some((mode) => mode.toLowerCase() === 'disable');
 }
 
 function isHttpsUrl(value: string): boolean {

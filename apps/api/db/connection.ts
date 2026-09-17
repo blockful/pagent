@@ -25,10 +25,27 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}
 
 let sql: ReturnType<typeof postgres> | null = null;
 
-export function databaseSsl(connectionString: string): false | 'verify-full' {
-  return new URL(connectionString).searchParams.get('sslmode') === 'disable'
-    ? false
-    : 'verify-full';
+export class DatabaseTlsPolicyError extends Error {
+  readonly code = 'DATABASE_TLS_POLICY' as const;
+
+  constructor() {
+    super('DATABASE_URL with sslmode=disable is not allowed in production');
+    this.name = 'DatabaseTlsPolicyError';
+  }
+}
+
+export function databaseSsl(
+  connectionString: string,
+  runtime = process.env.NODE_ENV,
+): false | 'verify-full' {
+  const sslmodes = new URL(connectionString).searchParams
+    .getAll('sslmode')
+    .map((mode) => mode.toLowerCase());
+  const isDisabled = sslmodes.includes('disable');
+  if (isDisabled && runtime === 'production') {
+    throw new DatabaseTlsPolicyError();
+  }
+  return isDisabled ? false : 'verify-full';
 }
 
 export async function init(connectionString: string): Promise<void> {

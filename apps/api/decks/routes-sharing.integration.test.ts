@@ -13,10 +13,13 @@ const integration = describe.runIf(databaseUrl !== undefined);
 const publishedSchema = z.object({ deckId: z.string().uuid() });
 const createdLinkSchema = z.object({ id: z.string().uuid(), token: z.string().min(20) });
 const sessionSchema = z.object({ kind: z.literal('granted'), sessionToken: z.string().min(20) });
+const anonymousSessionSchema = sessionSchema.extend({ identityConfidence: z.literal('anonymous') });
 
 integration('deck sharing routes', () => {
   const setup = postgres(databaseUrl ?? '', { ssl: false, prepare: false });
   let ownerCookie = '';
+  let editorCookie = '';
+  let editorId = '';
   let viewerCookie = '';
   let deckId = '';
 
@@ -38,7 +41,15 @@ integration('deck sharing routes', () => {
       name: 'Viewer',
       avatarUrl: null,
     });
+    const editor = await db.upsertUser({
+      email: 'editor@pagent.test',
+      handle: 'editor',
+      name: 'Editor',
+      avatarUrl: null,
+    });
+    editorId = editor.id;
     ownerCookie = `${SESSION_COOKIE_NAME}=${await createSession(owner.id)}`;
+    editorCookie = `${SESSION_COOKIE_NAME}=${await createSession(editor.id)}`;
     viewerCookie = `${SESSION_COOKIE_NAME}=${await createSession(viewer.id)}`;
     const response = await ownerRequest('/v1/decks', 'POST', {
       title: 'Sharing launch',
@@ -207,6 +218,78 @@ integration('deck sharing routes', () => {
     expect(await deckAfter.json()).toEqual({ error: 'revoked' });
   });
 
+  it('excludes authenticated owners and content editors on normal public links', async () => {
+    // Given
+    const link = await createLink({ name: 'Normal public link', access_mode: 'anyone' });
+    const added = await ownerRequest(`/v1/decks/${deckId}/access/members`, 'POST', {
+      email: 'editor@pagent.test',
+      role: 'member',
+    });
+    const collaborated = await ownerRequest(`/v1/decks/${deckId}/access/collaborators`, 'PUT', {
+      memberIds: [editorId],
+    });
+    expect(added.status).toBe(201);
+    expect(collaborated.status).toBe(204);
+
+    // When
+    const ownerAccess = anonymousSessionSchema.parse(
+      await (
+        await shareRequest({
+          path: '/v1/share/access',
+          method: 'POST',
+          token: link.token,
+          body: {},
+          cookie: ownerCookie,
+        })
+      ).json(),
+    );
+    const editorAccess = anonymousSessionSchema.parse(
+      await (
+        await shareRequest({
+          path: '/v1/share/access',
+          method: 'POST',
+          token: link.token,
+          body: {},
+          cookie: editorCookie,
+        })
+      ).json(),
+    );
+    const viewerAccess = anonymousSessionSchema.parse(
+      await (
+        await shareRequest({
+          path: '/v1/share/access',
+          method: 'POST',
+          token: link.token,
+          body: {},
+          cookie: viewerCookie,
+        })
+      ).json(),
+    );
+    const ownerVisit = await viewerRequest({
+      path: '/v1/viewer/visits',
+      method: 'POST',
+      token: ownerAccess.sessionToken,
+      body: visitBody(),
+    });
+    const editorVisit = await viewerRequest({
+      path: '/v1/viewer/visits',
+      method: 'POST',
+      token: editorAccess.sessionToken,
+      body: visitBody(),
+    });
+    const viewerVisit = await viewerRequest({
+      path: '/v1/viewer/visits',
+      method: 'POST',
+      token: viewerAccess.sessionToken,
+      body: visitBody(),
+    });
+
+    // Then
+    expect(await ownerVisit.json()).toEqual({ kind: 'excluded' });
+    expect(await editorVisit.json()).toEqual({ kind: 'excluded' });
+    expect(await viewerVisit.json()).toMatchObject({ kind: 'started' });
+  });
+
   it('denies another workspace user access to a link request queue', async () => {
     // Given
     const link = await createLink({ name: 'Private queue', access_mode: 'anyone' });
@@ -273,5 +356,16 @@ function requestInit(
     method,
     headers: cleanHeaders,
     body: body === undefined ? undefined : JSON.stringify(body),
+  };
+}
+
+function visitBody() {
+  return {
+    visible: true,
+    interacted: true,
+    analyticsConsent: true,
+    deviceClass: 'desktop',
+    browserFamily: 'Chromium',
+    countryCode: null,
   };
 }

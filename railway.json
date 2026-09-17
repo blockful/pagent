@@ -5,7 +5,7 @@
     "buildCommand": "npm run check:deploy"
   },
   "deploy": {
-    "startCommand": "npm -w @pagent/api run start",
+    "startCommand": "NODE_ENV=production npm -w @pagent/api run start",
     "healthcheckPath": "/health",
     "restartPolicyType": "ON_FAILURE"
   }

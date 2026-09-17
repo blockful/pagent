@@ -44,7 +44,7 @@ export function renderUnavailableDeckDetailPage(accessDenied: boolean): Template
         <h1>${accessDenied ? 'You don’t have access to this page.' : 'Page unavailable.'}</h1>
         <p class="lede">
           ${accessDenied
-            ? 'Content and analytics require an explicit workspace grant. Ask a workspace administrator for access.'
+            ? 'Page content requires an explicit workspace grant. Ask a workspace administrator for access.'
             : 'We couldn’t open this page. Return to Pages to choose another page or try again later.'}
         </p>
         <a class="button" href="/pages">Back to Pages</a>

@@ -5,17 +5,20 @@ import { homeStyles } from './home-styles.js';
 class HomePage extends LitElement {
   static properties = {
     copied: { state: true },
+    copyError: { state: true },
   };
 
   static styles = homeStyles;
 
   declare copied: boolean;
+  declare copyError: string | null;
 
   private _copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     super();
     this.copied = false;
+    this.copyError = null;
   }
 
   connectedCallback() {
@@ -54,12 +57,19 @@ class HomePage extends LitElement {
   }
 
   private async _onCopy() {
+    this.copyError = null;
     try {
       await navigator.clipboard.writeText(AGENT_PROMPT);
+      this.copied = true;
     } catch {
-      // clipboard may be unavailable (insecure context); still flash UX
+      this.copied = false;
+      this.copyError = 'Copy failed. Select the prompt below and copy it manually.';
+      if (this._copyTimer) {
+        clearTimeout(this._copyTimer);
+        this._copyTimer = null;
+      }
+      return;
     }
-    this.copied = true;
     if (this._copyTimer) clearTimeout(this._copyTimer);
     this._copyTimer = setTimeout(() => {
       this.copied = false;
@@ -67,7 +77,7 @@ class HomePage extends LitElement {
   }
 
   render() {
-    return renderHomeContent(this.copied, () => this._onCopy());
+    return renderHomeContent(this.copied, () => this._onCopy(), this.copyError);
   }
 }
 

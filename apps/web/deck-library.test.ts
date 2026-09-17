@@ -75,6 +75,10 @@ describe('deck-library', () => {
       `/pages/${DECK_ID}`,
     );
     expect(library.shadowRoot?.textContent).toContain('Pages');
+    const accessHeader = library.shadowRoot?.querySelector('th:nth-child(5)')?.textContent?.trim();
+    const accessCell = library.shadowRoot?.querySelector('tbody td:nth-child(5)');
+    expect(accessHeader).toBeTruthy();
+    expect(accessCell?.getAttribute('data-label')).toBe(accessHeader);
     expect(
       Array.from(library.shadowRoot?.querySelectorAll('[data-label="Viewers"]') ?? []).map((cell) =>
         cell.textContent?.trim(),

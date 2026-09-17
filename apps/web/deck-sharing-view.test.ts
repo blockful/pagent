@@ -2,6 +2,7 @@
 
 import { html, render } from 'lit';
 import { describe, expect, it, vi } from 'vitest';
+import { renderSharingEditor } from './deck-sharing-editor-view.ts';
 import { isSpecificAudience, renderSharingPanel } from './deck-sharing-view.ts';
 import type { AccessRequest, ShareLink } from './deck-types.ts';
 
@@ -36,6 +37,99 @@ describe('isSpecificAudience', () => {
     expect(isSpecificAudience({ accessMode: 'authenticated' })).toBe(true);
   });
 
+  it('keeps save failures and the busy lock inside the share-link editor', () => {
+    // Given
+    const container = document.createElement('div');
+    const authenticatedLink = { ...link, accessMode: 'authenticated' as const };
+
+    // When
+    render(
+      html`${renderSharingPanel({
+        links: [authenticatedLink],
+        requests: [],
+        requestLinkId: null,
+        editing: authenticatedLink,
+        loading: false,
+        saving: true,
+        error: null,
+        saveError: 'Could not save link',
+        createdUrl: null,
+        revokeCandidate: null,
+        revoking: false,
+        previewingLinkId: null,
+        requestsLoading: false,
+        decidingRequestId: null,
+        onOpenEditor: vi.fn(),
+        onCloseEditor: vi.fn(),
+        onSaveLink: vi.fn(),
+        onOpenRevoke: vi.fn(),
+        onCloseRevoke: vi.fn(),
+        onConfirmRevoke: vi.fn(),
+        onPreview: vi.fn(),
+        onShowRequests: vi.fn(),
+        onDecide: vi.fn(),
+        onCopyCreated: vi.fn(),
+      })}`,
+      container,
+    );
+
+    // Then
+    const editor = container.querySelector('#link-dialog');
+    const accessModels = Array.from(
+      editor?.querySelectorAll<HTMLInputElement>('input[type="radio"]') ?? [],
+    );
+    expect(accessModels.map((control) => control.name)).toEqual([
+      'access_mode',
+      'access_mode',
+      'access_mode',
+    ]);
+    expect(accessModels.map((control) => control.value)).toEqual([
+      'anyone',
+      'allowed_email',
+      'authenticated',
+    ]);
+    expect(editor?.querySelector('[role="alert"]')?.textContent).toContain('Could not save link');
+    expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(
+      Array.from(
+        editor?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>(
+          'input, textarea, button',
+        ) ?? [],
+      ).every((control) => control.disabled),
+    ).toBe(true);
+    const cancel = new Event('cancel', { cancelable: true });
+    editor?.dispatchEvent(cancel);
+    expect(cancel.defaultPrevented).toBe(true);
+  });
+
+  it('locks copying while a newly created link is still saving', () => {
+    // Given
+    const container = document.createElement('div');
+
+    // When
+    render(
+      renderSharingEditor({
+        editing: null,
+        saving: true,
+        saveError: null,
+        createdUrl: 'https://pagent.test/share/share-token',
+        onCloseEditor: vi.fn(),
+        onSaveLink: vi.fn(),
+        onCopyCreated: vi.fn(),
+      }),
+      container,
+    );
+
+    // Then
+    expect(
+      Array.from(
+        container.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>(
+          'input, textarea, button',
+        ) ?? [],
+      ).every((control) => control.disabled),
+    ).toBe(true);
+  });
+
   it('shows bounded owner action states and a confirmation before revoking a link', () => {
     const container = document.createElement('div');
 
@@ -48,6 +142,7 @@ describe('isSpecificAudience', () => {
         loading: false,
         saving: false,
         error: 'Could not load access requests',
+        saveError: null,
         createdUrl: null,
         revokeCandidate: link,
         revoking: true,
@@ -105,6 +200,7 @@ describe('isSpecificAudience', () => {
         loading: false,
         saving: false,
         error: 'Could not revoke link',
+        saveError: null,
         createdUrl: null,
         revokeCandidate: link,
         revoking: false,

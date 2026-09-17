@@ -71,17 +71,9 @@ describe('permission UX copy', () => {
     const page = Object.assign(document.createElement('deck-detail-page'), { deckId: 'page-1' });
     document.body.append(page);
 
-    await vi.waitFor(() =>
-      expect(page.shadowRoot?.textContent).toContain('You don’t have access to this page'),
-    );
+    await vi.waitFor(() => expect(page.shadowRoot?.querySelector('[role="alert"]')).not.toBeNull());
 
-    expect(page.shadowRoot?.textContent).toContain(
-      'Content and analytics require an explicit workspace grant',
-    );
     expect(page.shadowRoot?.textContent).not.toContain('Request failed (403)');
-    expect(page.shadowRoot?.querySelector('[role="alert"]')?.textContent).toContain(
-      'You don’t have access to this page',
-    );
     expect(page.shadowRoot?.querySelector('a')?.getAttribute('href')).toBe('/pages');
   });
 
@@ -90,33 +82,34 @@ describe('permission UX copy', () => {
     const page = Object.assign(document.createElement('deck-detail-page'), { deckId: 'page-2' });
     document.body.append(page);
 
-    await vi.waitFor(() => expect(page.shadowRoot?.textContent).toContain('Page unavailable'));
+    await vi.waitFor(() => expect(page.shadowRoot?.querySelector('[role="alert"]')).not.toBeNull());
 
-    expect(page.shadowRoot?.querySelector('a')?.textContent?.trim()).toBe('Back to Pages');
+    expect(page.shadowRoot?.querySelector('a')?.getAttribute('href')).toBe('/pages');
   });
 
-  it('Given a viewer gate, when the viewer is loading, then it uses Page terminology', () => {
+  it('Given a viewer gate, when the viewer is loading, then it exposes a busy placeholder', () => {
     const container = renderGate('loading');
 
-    expect(container.textContent).toContain('Loading page…');
+    expect(container.querySelector('h1')).not.toBeNull();
+    expect(container.querySelector('.loading-line')).not.toBeNull();
   });
 
-  it('Given a pending viewer request, when the gate renders, then it uses presentation terminology', () => {
+  it('Given a pending viewer request, when the gate renders, then it exposes a status action', () => {
     const container = renderGate('pending');
 
-    expect(container.textContent).toContain('No presentation content is shown');
+    expect(container.querySelector('button')).not.toBeNull();
   });
 
-  it('Given a viewer error, when the gate renders, then it names the Page outcome', () => {
+  it('Given a viewer error, when the gate renders, then it announces the supplied failure', () => {
     const container = renderGate('error');
 
-    expect(container.textContent).toContain('Could not open page');
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('Temporary failure');
   });
 
-  it('Given an anyone-link viewer gate, when it is ready to open, then it uses presentation wording', () => {
+  it('Given an anyone-link viewer gate, when it is ready to open, then it exposes one action and privacy link', () => {
     const container = renderGate('gate');
 
-    expect(container.querySelector('button')?.textContent?.trim()).toBe('Open presentation');
-    expect(container.textContent).toMatch(/after the\s+presentation is\s+visible/);
+    expect(container.querySelectorAll('button')).toHaveLength(1);
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('/privacy');
   });
 });

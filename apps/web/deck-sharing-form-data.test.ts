@@ -12,9 +12,8 @@ describe('parseShareLinkFormData', () => {
     // Given
     const data = formData({
       name: 'Public review',
-      audience: 'anyone',
+      access_mode: 'anyone',
       allowed: 'buyer@example.com, @example.com',
-      require_auth: 'on',
     });
 
     // When
@@ -32,7 +31,7 @@ describe('parseShareLinkFormData', () => {
     // Given
     const data = formData({
       name: 'Prospects',
-      audience: 'specific',
+      access_mode: 'allowed_email',
       allowed: ' buyer@example.com, @example.com\npartner.example\n\n',
     });
 
@@ -44,9 +43,9 @@ describe('parseShareLinkFormData', () => {
     expect(parsed.allowed_domains).toEqual(['@example.com', 'partner.example']);
   });
 
-  it('maps a specific audience with the selected authentication checkbox to authenticated', () => {
+  it('maps the selected authenticated model to authenticated', () => {
     // Given
-    const data = formData({ name: 'Confidential', audience: 'specific', require_auth: 'on' });
+    const data = formData({ name: 'Confidential', access_mode: 'authenticated' });
 
     // When
     const parsed = parseShareLinkFormData(data);
@@ -55,9 +54,9 @@ describe('parseShareLinkFormData', () => {
     expect(parsed.access_mode).toBe('authenticated');
   });
 
-  it('maps an absent authentication checkbox to allowed email', () => {
+  it('maps the selected email model to allowed email', () => {
     // Given
-    const data = formData({ name: 'Named buyers', audience: 'specific' });
+    const data = formData({ name: 'Named buyers', access_mode: 'allowed_email' });
 
     // When
     const parsed = parseShareLinkFormData(data);
@@ -66,11 +65,31 @@ describe('parseShareLinkFormData', () => {
     expect(parsed.access_mode).toBe('allowed_email');
   });
 
+  it('uses the one selected access model instead of combining legacy audience controls', () => {
+    // Given
+    const data = formData({
+      name: 'Confidential',
+      access_mode: 'authenticated',
+      audience: 'anyone',
+      require_auth: 'on',
+      allowed: 'buyer@example.com',
+    });
+
+    // When
+    const parsed = parseShareLinkFormData(data);
+
+    // Then
+    expect(parsed).toMatchObject({
+      access_mode: 'authenticated',
+      allowed_emails: ['buyer@example.com'],
+    });
+  });
+
   it('serializes an optional expiry as an ISO timestamp', () => {
     // Given
     const data = formData({
       name: 'Limited review',
-      audience: 'anyone',
+      access_mode: 'anyone',
       expires_at: '2026-12-24T18:30',
     });
 

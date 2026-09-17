@@ -34,6 +34,7 @@ type AccessLinkRow = {
   readonly id: string;
   readonly deck_id: string;
   readonly workspace_id: string;
+  readonly owner_id: string;
   readonly access_mode: 'anyone' | 'allowed_email' | 'authenticated';
   readonly expires_at: Date | null;
   readonly revoked_at: Date | null;
@@ -44,7 +45,7 @@ type AccessLinkRow = {
 
 async function loadAccessLink(token: string): Promise<AccessLinkRow> {
   const rows = await db.database()<AccessLinkRow[]>`
-    select sl.id, sl.deck_id, d.workspace_id, sl.access_mode, sl.expires_at,
+    select sl.id, sl.deck_id, d.workspace_id, d.owner_id, sl.access_mode, sl.expires_at,
       sl.revoked_at, d.deleted_at,
       coalesce(array_agg(a.audience_value) filter (where a.audience_type = 'email'), '{}') as allowed_emails,
       coalesce(array_agg(a.audience_value) filter (where a.audience_type = 'domain'), '{}') as allowed_domains
@@ -73,6 +74,19 @@ async function isApproved(linkId: string, email: string): Promise<boolean> {
     ) as approved
   `;
   return rows[0]?.approved ?? false;
+}
+
+async function isContentEditor(link: AccessLinkRow, userId: string): Promise<boolean> {
+  const rows = await db.database()<{ content_editor: boolean }[]>`
+    select exists (
+      select 1 from deck_collaborators dc
+      join workspace_members wm
+        on wm.workspace_id = ${link.workspace_id} and wm.user_id = dc.user_id
+      where dc.deck_id = ${link.deck_id} and dc.user_id = ${userId}
+        and dc.can_view_content = true and wm.status = 'active'
+    ) as content_editor
+  `;
+  return rows[0]?.content_editor ?? false;
 }
 
 export async function grantViewerAccess(input: ViewerAccessInput): Promise<ViewerAccessResult> {
@@ -125,14 +139,18 @@ export async function grantViewerAccess(input: ViewerAccessInput): Promise<Viewe
     link.expires_at === null || link.expires_at > sevenDaysFromNow
       ? sevenDaysFromNow
       : link.expires_at;
+  const authenticatedUser = input.authenticatedUser;
+  const analyticsExcluded =
+    authenticatedUser !== undefined &&
+    (authenticatedUser.id === link.owner_id || (await isContentEditor(link, authenticatedUser.id)));
   await db.database().begin(async (tx) => {
     const sessions = await tx<{ id: string }[]>`
       insert into viewer_sessions (
         share_link_id, token_hash, viewer_user_id, viewer_email,
-        identity_confidence, expires_at
+        identity_confidence, analytics_excluded, expires_at
       ) values (
         ${link.id}, ${hashOpaqueToken(sessionToken)}, ${viewerUserId}, ${viewerEmail},
-        ${confidence}, ${expiresAt}
+        ${confidence}, ${analyticsExcluded}, ${expiresAt}
       ) returning id
     `;
     const sessionId = sessions[0]?.id;

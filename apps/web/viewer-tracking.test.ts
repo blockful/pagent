@@ -172,6 +172,20 @@ describe('EngagementTracker retry queue', () => {
     });
   });
 
+  it('Given a mounted viewer with tracking, when focus returns, then activity tracking resumes and cleanup removes the listener', () => {
+    const markActivity = vi.fn();
+    const viewer = document.createElement('deck-viewer');
+    Reflect.set(viewer, 'tracker', { markActivity, stop: vi.fn() });
+    document.body.append(viewer);
+
+    window.dispatchEvent(new Event('focus'));
+    expect(markActivity).toHaveBeenCalledTimes(1);
+
+    viewer.remove();
+    window.dispatchEvent(new Event('focus'));
+    expect(markActivity).toHaveBeenCalledTimes(1);
+  });
+
   it('Given more pending events than the queue allows, when delivery resumes, then it sends capped batches', async () => {
     vi.useFakeTimers();
     let resumeDelivery: (() => void) | undefined;

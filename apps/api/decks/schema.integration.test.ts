@@ -1,6 +1,7 @@
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { initialDeckSchemaMigration } from './migrations/0001-initial-deck-schema.ts';
+import { viewerSessionAnalyticsExclusionMigration } from './migrations/0002-add-viewer-session-analytics-exclusion.ts';
 import {
   DeckMigrationHistoryError,
   runDeckMigrations,
@@ -70,13 +71,16 @@ integration('deck database schema', () => {
   });
 
   it('records the applied deck schema version', async () => {
-    const expectedMigration = { version: 1, name: 'initial_deck_schema' };
+    const expectedMigrations = [
+      { version: 1, name: 'initial_deck_schema' },
+      { version: 2, name: 'add_viewer_session_analytics_exclusion' },
+    ];
 
     const rows = await sql<{ version: number; name: string }[]>`
       select version, name from deck_schema_migrations order by version
     `;
 
-    expect(rows).toEqual([expectedMigration]);
+    expect(rows).toEqual(expectedMigrations);
   });
 
   it('preserves existing deck data when baselining a pre-ledger deployment', async () => {
@@ -114,13 +118,13 @@ integration('deck database schema', () => {
     const rows = await sql<{ count: number }[]>`
       select count(*)::integer as count from deck_schema_migrations
     `;
-    expect(rows).toEqual([{ count: 1 }]);
+    expect(rows).toEqual([{ count: 2 }]);
   });
 
   it('rolls back schema and ledger changes when a migration fails', async () => {
     class PlannedMigrationError extends Error {}
     const failingMigration = {
-      version: 2,
+      version: 3,
       name: 'planned_failure',
       async up(database) {
         await database`create table migration_should_roll_back (id integer primary key)`;
@@ -128,7 +132,11 @@ integration('deck database schema', () => {
       },
     } satisfies DeckMigration;
 
-    const migration = runDeckMigrations(sql, [initialDeckSchemaMigration, failingMigration]);
+    const migration = runDeckMigrations(sql, [
+      initialDeckSchemaMigration,
+      viewerSessionAnalyticsExclusionMigration,
+      failingMigration,
+    ]);
 
     await expect(migration).rejects.toBeInstanceOf(PlannedMigrationError);
     const rows = await sql<{ table_name: string | null }[]>`
@@ -138,7 +146,7 @@ integration('deck database schema', () => {
     const ledger = await sql<{ version: number }[]>`
       select version from deck_schema_migrations order by version
     `;
-    expect(ledger).toEqual([{ version: 1 }]);
+    expect(ledger).toEqual([{ version: 1 }, { version: 2 }]);
   });
 
   it('rejects divergent applied migration history', async () => {

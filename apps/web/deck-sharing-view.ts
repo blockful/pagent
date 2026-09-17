@@ -12,6 +12,7 @@ type SharingPanelViewInput = {
   readonly loading: boolean;
   readonly saving: boolean;
   readonly error: string | null;
+  readonly saveError: string | null;
   readonly createdUrl: string | null;
   readonly revokeCandidate: ShareLink | null;
   readonly revoking: boolean;
@@ -42,7 +43,9 @@ export function renderSharingPanel(input: SharingPanelViewInput): TemplateResult
           Each link owns its access rule, sender attribution, expiry, and analytics.
         </p>
       </div>
-      <button class="button" @click=${() => input.onOpenEditor(null)}>Create share link</button>
+      <button class="button" ?disabled=${input.saving} @click=${() => input.onOpenEditor(null)}>
+        Create share link
+      </button>
     </section>
     ${input.error ? html`<p class="notice error" role="alert">${input.error}</p>` : nothing}
     ${input.loading
@@ -71,6 +74,7 @@ export function renderSharingPanel(input: SharingPanelViewInput): TemplateResult
     ${renderSharingEditor({
       editing: input.editing,
       saving: input.saving,
+      saveError: input.saveError,
       createdUrl: input.createdUrl,
       onCloseEditor: input.onCloseEditor,
       onSaveLink: input.onSaveLink,

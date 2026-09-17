@@ -108,10 +108,35 @@ describe('withRetry', () => {
 
 describe('databaseSsl', () => {
   it('verifies certificates unless sslmode=disable is explicit', () => {
-    expect(databaseSsl('postgresql://user:pass@db.example.com/app')).toBe('verify-full');
-    expect(databaseSsl('postgresql://user:pass@db.example.com/app?sslmode=require')).toBe(
+    expect(databaseSsl('postgresql://user:pass@db.example.com/app', 'development')).toBe(
       'verify-full',
     );
+    expect(
+      databaseSsl('postgresql://user:pass@db.example.com/app?sslmode=require', 'development'),
+    ).toBe('verify-full');
+    expect(databaseSsl('postgresql://user:pass@localhost/app?sslmode=disable', 'development')).toBe(
+      false,
+    );
+  });
+
+  it('rejects sslmode=disable in production', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+
+    try {
+      expect(() =>
+        databaseSsl('postgresql://user:pass@db.example.com/app?sslmode=disable'),
+      ).toThrow('DATABASE_URL with sslmode=disable is not allowed in production');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('preserves sslmode=disable for development and test runtimes', () => {
+    vi.stubEnv('NODE_ENV', 'development');
     expect(databaseSsl('postgresql://user:pass@localhost/app?sslmode=disable')).toBe(false);
+
+    vi.stubEnv('NODE_ENV', 'test');
+    expect(databaseSsl('postgresql://user:pass@localhost/app?sslmode=disable')).toBe(false);
+    vi.unstubAllEnvs();
   });
 });

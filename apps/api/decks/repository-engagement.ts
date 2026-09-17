@@ -38,13 +38,14 @@ export async function startVisit(
       identity_confidence: IdentityConfidence;
       viewer_email: string | null;
       preview: boolean;
+      analytics_excluded: boolean;
       consent_required: boolean;
       workspace_id: string;
       deck_id: string;
     }[]
   >`
     select vs.id as session_id, sl.id as share_link_id, r.id as revision_id,
-      vs.identity_confidence, vs.viewer_email, vs.preview,
+      vs.identity_confidence, vs.viewer_email, vs.preview, vs.analytics_excluded,
       w.analytics_consent_required as consent_required, d.workspace_id, d.id as deck_id
     from viewer_sessions vs
     join share_links sl on sl.id = vs.share_link_id
@@ -59,7 +60,9 @@ export async function startVisit(
   `;
   const session = rows[0];
   if (session === undefined) throw new EngagementForbiddenError();
-  if (session.preview || !input.visible || !input.interacted) return { kind: 'excluded' };
+  if (session.preview || session.analytics_excluded || !input.visible || !input.interacted) {
+    return { kind: 'excluded' };
+  }
   if (session.consent_required && !input.analyticsConsent) {
     await database`
       insert into audit_log (
@@ -72,6 +75,9 @@ export async function startVisit(
     return { kind: 'tracking_disabled' };
   }
   return database.begin(async (tx) => {
+    await tx`
+      select pg_advisory_xact_lock(hashtextextended(${session.session_id}, 0))
+    `;
     await tx`
       update visits set ended_at = last_activity_at + interval '30 minutes'
       where viewer_session_id = ${session.session_id} and ended_at is null

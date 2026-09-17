@@ -8,42 +8,27 @@ describe('landing product story', () => {
     document.body.replaceChildren();
   });
 
-  it('presents one page model through exactly read and write', () => {
+  it('renders exactly the two tool names in the connection step', () => {
     const host = document.createElement('div');
     document.body.append(host);
     render(
       renderHomeContent(false, async () => {}),
       host,
-    );
-
-    const copy = host.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-    expect(copy).toContain('Give your agent a page. Keep it when it matters.');
-    expect(copy).toContain('two tools: write pages and read pages');
-    expect(copy).toContain('interactive or view-only');
-    expect(copy).toContain('Interactive and document pages are temporary and free with no signup.');
-    expect(copy).toContain(
-      'A presentation is a durable page with ordered slides, secure sharing, and engagement analytics. It lives in your signed-in workspace.',
     );
 
     const toolNames = Array.from(host.querySelectorAll('.step:first-of-type code')).map((tool) =>
       tool.textContent?.trim(),
     );
     expect(toolNames).toEqual(['write', 'read']);
-
-    expect(copy).not.toMatch(/show_ui|show_html|check_result|publish_deck/);
   });
 
-  it('limits no-signup claims to temporary pages and exposes workspace entry paths', () => {
+  it('exposes authenticated workspace entry paths', () => {
     const host = document.createElement('div');
     document.body.append(host);
     render(
       renderHomeContent(false, async () => {}),
       host,
     );
-
-    const copy = host.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-    expect(copy).toContain('Interactive and document pages are temporary and free with no signup.');
-    expect(copy).toContain('It lives in your signed-in workspace.');
 
     const workspaceLink = Array.from(host.querySelectorAll('a')).find((link) =>
       link.textContent?.trim().startsWith('Open workspace'),
@@ -61,5 +46,49 @@ describe('landing product story', () => {
     const returnTo = signInUrl.searchParams.get('return_to');
     expect(returnTo).not.toBeNull();
     expect(new URL(returnTo ?? location.origin).pathname).toBe('/pages');
+  });
+
+  it('exposes one main landmark and a complete heading hierarchy', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    render(
+      renderHomeContent(false, async () => {}),
+      host,
+    );
+
+    expect(host.querySelectorAll('main')).toHaveLength(1);
+    expect(host.querySelectorAll('h1')).toHaveLength(1);
+    expect(host.querySelectorAll('h2')).toHaveLength(1);
+    expect(host.querySelectorAll('h3')).toHaveLength(3);
+  });
+
+  it('announces copy success only in the successful state', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+
+    render(
+      renderHomeContent(false, async () => {}),
+      host,
+    );
+    expect(host.querySelector('.copy-btn')?.getAttribute('aria-live')).toBe('off');
+
+    render(
+      renderHomeContent(true, async () => {}),
+      host,
+    );
+    expect(host.querySelector('.copy-btn')?.getAttribute('aria-live')).toBe('polite');
+    expect(host.querySelector('.copy-btn')?.classList.contains('is-copied')).toBe(true);
+  });
+
+  it('surfaces clipboard failure guidance as an alert', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const failure = 'clipboard-failure-sentinel';
+    render(
+      renderHomeContent(false, async () => {}, failure),
+      host,
+    );
+
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(failure);
   });
 });

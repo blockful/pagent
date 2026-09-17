@@ -90,6 +90,31 @@ describe('envSchema', () => {
     expect(r.success).toBe(true);
   });
 
+  it('rejects production DATABASE_URL with sslmode=disable', () => {
+    const r = envSchema.safeParse({
+      DATABASE_URL: 'postgresql://user:pass@db.example.com/app?sslmode=disable',
+      NODE_ENV: 'production',
+      ALLOWED_ORIGINS: 'https://pagent.link',
+      PUBLIC_URL: 'https://pagent.link',
+      API_PUBLIC_URL: 'https://api.pagent.link',
+      TRUSTED_PROXY_MODE: 'railway',
+    });
+
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.some((i) => i.path.includes('DATABASE_URL'))).toBe(true);
+    }
+  });
+
+  it.each(['development', 'test'] as const)('allows sslmode=disable in %s', (nodeEnv) => {
+    const r = envSchema.safeParse({
+      DATABASE_URL: 'postgresql://user:pass@localhost/app?sslmode=disable',
+      NODE_ENV: nodeEnv,
+    });
+
+    expect(r.success).toBe(true);
+  });
+
   it('requires an explicit trusted proxy mode in production', () => {
     const r = envSchema.safeParse({
       DATABASE_URL: 'x',

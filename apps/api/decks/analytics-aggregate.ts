@@ -18,6 +18,10 @@ function viewerKey(visit: AnalyticsVisitRow): string {
 
 export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAnalytics {
   const { owner, visitRows, slideRows, engagementRows } = input;
+  const visitRowsById = new Map<string, AnalyticsVisitRow>();
+  for (const visit of visitRows) {
+    if (!visitRowsById.has(visit.id)) visitRowsById.set(visit.id, visit);
+  }
   const engagementsByVisit = new Map<string, AnalyticsEngagementRow[]>();
   for (const engagement of engagementRows) {
     const current = engagementsByVisit.get(engagement.visitId) ?? [];
@@ -61,9 +65,13 @@ export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAn
       })),
     };
   });
+  const visitDetailsById = new Map<string, VisitDetail>();
+  for (const visit of visits) {
+    if (!visitDetailsById.has(visit.id)) visitDetailsById.set(visit.id, visit);
+  }
   const visitors = new Map<string, MutableVisitor>();
   for (const visit of visitRows) {
-    const detail = visits.find((candidate) => candidate.id === visit.id);
+    const detail = visitDetailsById.get(visit.id);
     if (detail === undefined) continue;
     const key = viewerKey(visit);
     const current = visitors.get(key);
@@ -99,14 +107,14 @@ export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAn
   }
   for (const engagement of engagementRows) {
     const accumulator = slideAccumulators.get(engagement.id);
-    const visit = visitRows.find((candidate) => candidate.id === engagement.visitId);
+    const visit = visitRowsById.get(engagement.visitId);
     if (accumulator === undefined || visit === undefined) continue;
     accumulator.activeDurationMs += engagement.activeDurationMs;
     if (engagement.qualified) {
       accumulator.viewers.add(viewerKey(visit));
       accumulator.qualifiedVisits += 1;
     }
-    const detail = visits.find((candidate) => candidate.id === engagement.visitId);
+    const detail = visitDetailsById.get(engagement.visitId);
     if (detail?.completion !== 1 && detail?.lastSlide === engagement.ordinal)
       accumulator.exits += 1;
   }

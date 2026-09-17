@@ -26,11 +26,13 @@ import { grantViewerAccess, requestAccess } from './repository-sharing.ts';
 
 const shareToken = 'share-token-'.padEnd(32, 'x');
 const viewerSession = 'viewer-session-'.padEnd(32, 'x');
+const limitedViewerSession = 'limited-viewer-session-'.padEnd(32, 'z');
+const secondViewerSession = 'second-viewer-session-'.padEnd(32, 'y');
 const visitId = '33333333-3333-4333-8333-333333333333';
 let app: Hono<{ Variables: AuthVariables }>;
 
 beforeAll(async () => {
-  process.env.RATE_LIMIT_MAX = '1';
+  process.env.RATE_LIMIT_MAX = '10';
   process.env.RATE_LIMIT_WINDOW_MS = '60000';
   process.env.TRUSTED_PROXY_MODE = 'railway';
   const { viewerRoutes } = await import('./routes-viewer.ts');
@@ -75,10 +77,27 @@ async function expectLimited(response: Response) {
   });
 }
 
+function eventBody(eventCount: number) {
+  return {
+    events: Array.from({ length: eventCount }, () => ({
+      id: '44444444-4444-4444-8444-444444444444',
+      eventType: 'heartbeat',
+      eventAt: new Date().toISOString(),
+      sequence: 1,
+      visibleRatio: 1,
+      visibleDurationMs: 10_000,
+      tabVisible: true,
+      recentlyActive: true,
+    })),
+  };
+}
+
 describe('public viewer write rate limits', () => {
   it('shares one per-IP bucket across access and request writes', async () => {
     const credential = { name: 'x-share-token', value: shareToken };
-    expect((await post('/v1/share/access', '203.0.113.10', credential, {})).status).toBe(200);
+    for (let index = 0; index < 10; index += 1) {
+      expect((await post('/v1/share/access', '203.0.113.10', credential, {})).status).toBe(200);
+    }
     await expectLimited(
       await post(
         '/v1/share/request',
@@ -88,7 +107,7 @@ describe('public viewer write rate limits', () => {
         '198.51.100.99',
       ),
     );
-    expect(grantViewerAccess).toHaveBeenCalledOnce();
+    expect(grantViewerAccess).toHaveBeenCalledTimes(10);
     expect(requestAccess).not.toHaveBeenCalled();
 
     expect(
@@ -110,39 +129,74 @@ describe('public viewer write rate limits', () => {
       browserFamily: 'Chromium',
       countryCode: null,
     };
-    expect((await post('/v1/viewer/visits', '203.0.113.20', credential, body)).status).toBe(200);
+    for (let index = 0; index < 10; index += 1) {
+      expect((await post('/v1/viewer/visits', '203.0.113.20', credential, body)).status).toBe(200);
+    }
     await expectLimited(await post('/v1/viewer/visits', '203.0.113.20', credential, body));
-    expect(startVisit).toHaveBeenCalledOnce();
+    expect(startVisit).toHaveBeenCalledTimes(10);
   });
 
-  it('allows heartbeat volume but caps event ingestion', async () => {
+  it('accepts a full 10-event batch within the event-ingestion limit', async () => {
     const credential = { name: 'x-viewer-session', value: viewerSession };
-    const body = {
-      events: [
-        {
-          id: '44444444-4444-4444-8444-444444444444',
-          eventType: 'heartbeat',
-          eventAt: new Date().toISOString(),
-          sequence: 1,
-          visibleRatio: 1,
-          visibleDurationMs: 10_000,
-          tabVisible: true,
-          recentlyActive: true,
-        },
-      ],
-    };
-    for (let index = 0; index < 20; index += 1) {
-      const response = await post(
-        `/v1/viewer/visits/${visitId}/events`,
-        '203.0.113.30',
-        credential,
-        body,
-      );
-      expect(response.status).toBe(202);
+    const response = await post(
+      `/v1/viewer/visits/${visitId}/events`,
+      '203.0.113.30',
+      credential,
+      eventBody(10),
+    );
+    expect(response.status).toBe(202);
+    expect(ingestEngagement).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an 11-event batch before repository work', async () => {
+    const credential = { name: 'x-viewer-session', value: viewerSession };
+    const response = await post(
+      `/v1/viewer/visits/${visitId}/events`,
+      '203.0.113.31',
+      credential,
+      eventBody(11),
+    );
+    expect(response.status).toBe(400);
+    expect(ingestEngagement).not.toHaveBeenCalled();
+  });
+
+  it('caps each valid viewer session while preserving a shared-IP event ceiling', async () => {
+    const firstCredential = { name: 'x-viewer-session', value: limitedViewerSession };
+    const secondCredential = { name: 'x-viewer-session', value: secondViewerSession };
+    const ip = '203.0.113.40';
+    const body = eventBody(1);
+
+    for (let index = 0; index < 30; index += 1) {
+      expect(
+        (await post(`/v1/viewer/visits/${visitId}/events`, ip, firstCredential, body)).status,
+      ).toBe(202);
     }
     await expectLimited(
-      await post(`/v1/viewer/visits/${visitId}/events`, '203.0.113.30', credential, body),
+      await post(`/v1/viewer/visits/${visitId}/events`, ip, firstCredential, body),
     );
-    expect(ingestEngagement).toHaveBeenCalledTimes(20);
+
+    for (let index = 0; index < 9; index += 1) {
+      expect(
+        (await post(`/v1/viewer/visits/${visitId}/events`, ip, secondCredential, body)).status,
+      ).toBe(202);
+    }
+    await expectLimited(
+      await post(`/v1/viewer/visits/${visitId}/events`, ip, secondCredential, body),
+    );
+    expect(ingestEngagement).toHaveBeenCalledTimes(39);
+  });
+
+  it('keeps invalid viewer-session headers in the IP bucket before session limiting', async () => {
+    const credential = { name: 'x-viewer-session', value: 'invalid' };
+    const body = eventBody(1);
+    const ip = '203.0.113.41';
+
+    for (let index = 0; index < 40; index += 1) {
+      expect((await post(`/v1/viewer/visits/${visitId}/events`, ip, credential, body)).status).toBe(
+        400,
+      );
+    }
+    await expectLimited(await post(`/v1/viewer/visits/${visitId}/events`, ip, credential, body));
+    expect(ingestEngagement).not.toHaveBeenCalled();
   });
 });

@@ -1858,7 +1858,7 @@ components:
         events:
           type: array
           minItems: 1
-          maxItems: 100
+          maxItems: 10
           items:
             type: object
             additionalProperties: false

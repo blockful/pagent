@@ -43,6 +43,6 @@ export const engagementBodySchema = z
           .strict(),
       )
       .min(1)
-      .max(100),
+      .max(10),
   })
   .strict();

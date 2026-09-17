@@ -1,4 +1,4 @@
-import { html } from 'lit';
+import { html, nothing } from 'lit';
 import { loginUrl } from './deck-api.ts';
 
 export const MCP_URL = 'https://api.pagent.link/mcp';
@@ -8,8 +8,12 @@ export const AGENT_PROMPT = `Add this MCP and install the Skill at the user leve
 MCP:    ${MCP_URL}
 Skill:  download https://pagent.link/SKILL.md using curl and write it to ~/.claude/skills/pagent/SKILL.md`;
 
-export const renderHomeContent = (copied: boolean, onCopy: () => Promise<void>) => html`
-  <div class="page">
+export const renderHomeContent = (
+  copied: boolean,
+  onCopy: () => Promise<void>,
+  copyError: string | null = null,
+) => html`
+  <main class="page">
     <div class="container">
       <nav class="nav">
         <span class="badge"><span class="dot"></span>Pagent</span>
@@ -44,11 +48,14 @@ export const renderHomeContent = (copied: boolean, onCopy: () => Promise<void>) 
               type="button"
               class="copy-btn ${copied ? 'is-copied' : ''}"
               @click=${() => onCopy()}
-              aria-label="Copy install prompt to clipboard"
-              aria-live="polite"
+              aria-label=${copied
+                ? 'Install prompt copied to clipboard'
+                : 'Copy install prompt to clipboard'}
+              aria-live=${copied ? 'polite' : 'off'}
             >
               ${copied ? 'Copied ✓' : 'Copy prompt'}
             </button>
+            ${copyError ? html`<span role="alert">${copyError}</span>` : nothing}
           </div>
           <pre class="install-body is-prompt"><code>${AGENT_PROMPT}</code></pre>
         </div>
@@ -101,7 +108,7 @@ export const renderHomeContent = (copied: boolean, onCopy: () => Promise<void>) 
         </div>
       </header>
 
-      <p class="section-label"><span>One page model</span><span>two tools</span></p>
+      <h2 class="section-label"><span>One page model</span><span>two tools</span></h2>
 
       <section class="steps">
         <article class="step">
@@ -138,5 +145,5 @@ export const renderHomeContent = (copied: boolean, onCopy: () => Promise<void>) 
         </a>
       </div>
     </div>
-  </div>
+  </main>
 `;

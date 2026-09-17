@@ -10,8 +10,8 @@ const [railwayConfig, packageManifest] = await Promise.all([
 if (railwayConfig.build?.buildCommand !== 'npm run check:deploy') {
   throw new Error('Railway must validate the root deployment layout after installing dependencies');
 }
-if (railwayConfig.deploy?.startCommand !== 'npm -w @pagent/api run start') {
-  throw new Error('Railway must start the API through the root workspace');
+if (railwayConfig.deploy?.startCommand !== 'NODE_ENV=production npm -w @pagent/api run start') {
+  throw new Error('Railway must start the API in production mode through the root workspace');
 }
 if (!packageManifest.workspaces?.includes('apps/api')) {
   throw new Error('The root package manifest must include the API workspace');

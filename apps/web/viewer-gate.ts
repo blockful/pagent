@@ -45,7 +45,14 @@ export function renderViewerGate(input: GateInput): TemplateResult {
       <p class="lede">
         No presentation content is shown until they approve this link-specific request.
       </p>
-      <button class="button" @click=${input.onCheckRequest}>Check status</button>`;
+      <button
+        class="button"
+        @click=${input.onCheckRequest}
+        ?disabled=${input.submitting}
+        aria-busy=${String(input.submitting)}
+      >
+        ${input.submitting ? 'Checking…' : 'Check status'}
+      </button>`;
   if (input.state === 'denied')
     return html`<p class="eyebrow">Access denied</p>
       <h1>The sender did not approve this request.</h1>
@@ -65,17 +72,30 @@ export function renderViewerGate(input: GateInput): TemplateResult {
       <p class="lede">
         For privacy, Pagent does not reveal which addresses or domains are allowed.
       </p>
-      <form class="stack" @submit=${input.onRequestApproval}>
+      <form class="stack" @submit=${input.onRequestApproval} aria-busy=${String(input.submitting)}>
         <div class="field">
           <label for="request-email">Email for the request</label
-          ><input id="request-email" name="email" type="email" required />
+          ><input
+            id="request-email"
+            name="email"
+            type="email"
+            required
+            ?disabled=${input.submitting}
+          />
         </div>
-        <button class="button" type="submit">Request access</button>
+        <button
+          class="button"
+          type="submit"
+          ?disabled=${input.submitting}
+          aria-busy=${String(input.submitting)}
+        >
+          ${input.submitting ? 'Requesting…' : 'Request access'}
+        </button>
       </form>`;
   if (input.state === 'error')
     return html`<p class="eyebrow">Could not open page</p>
       <h1>Something went wrong.</h1>
-      <p class="notice error" role="alert">${input.message}</p>`;
+      <p class="notice error" role="alert" tabindex="-1">${input.message}</p>`;
   return html`<p class="eyebrow">Shared by ${input.metadata?.senderEmail}</p>
     <h1>${input.metadata?.deckTitle}</h1>
     <p class="lede">${gateExplanation(input.metadata)}</p>
@@ -83,17 +103,34 @@ export function renderViewerGate(input: GateInput): TemplateResult {
       ? html`<button
           class="button"
           @click=${input.onRequestAccess}
+          ?disabled=${input.submitting}
           aria-busy=${String(input.submitting)}
         >
-          Open presentation
+          ${input.submitting ? 'Opening…' : 'Open presentation'}
         </button>`
-      : html`<form class="stack" @submit=${input.onSubmitEmail}>
+      : html`<form
+          class="stack"
+          @submit=${input.onSubmitEmail}
+          aria-busy=${String(input.submitting)}
+        >
           <div class="field">
             <label for="viewer-email">Allowed email</label
-            ><input id="viewer-email" name="email" type="email" autocomplete="email" required />
+            ><input
+              id="viewer-email"
+              name="email"
+              type="email"
+              autocomplete="email"
+              required
+              ?disabled=${input.submitting}
+            />
           </div>
-          <button class="button" type="submit" aria-busy=${String(input.submitting)}>
-            Continue
+          <button
+            class="button"
+            type="submit"
+            ?disabled=${input.submitting}
+            aria-busy=${String(input.submitting)}
+          >
+            ${input.submitting ? 'Continuing…' : 'Continue'}
           </button>
         </form>`}`;
 }
@@ -104,9 +141,12 @@ function renderNotice(input: GateInput): TemplateResult {
     presentation is visible and you interact. <a href="/privacy">Read the privacy notice</a>.${input
       .metadata?.analyticsConsentRequired
       ? html`<label class="choice"
-          ><input type="checkbox" .checked=${input.consent} @change=${input.onConsentChange} /><span
-            >I consent to engagement analytics.</span
-          ></label
+          ><input
+            type="checkbox"
+            .checked=${input.consent}
+            @change=${input.onConsentChange}
+            ?disabled=${input.submitting}
+          /><span>I consent to engagement analytics.</span></label
         >`
       : nothing}
   </div>`;

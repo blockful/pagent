@@ -63,12 +63,14 @@ class DeckViewer extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('focus', this.onFocus);
     window.addEventListener('pagehide', this.onPageHide);
     void this.load();
   }
 
   disconnectedCallback(): void {
     window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('focus', this.onFocus);
     window.removeEventListener('pagehide', this.onPageHide);
     this.observer?.disconnect();
     this.tracker?.stop();
@@ -79,8 +81,7 @@ class DeckViewer extends LitElement {
     if (this.shareToken === '') {
       const preview = sessionStorage.getItem('pagent-owner-preview');
       if (preview === null) {
-        this.message = 'Owner preview session is missing.';
-        this.state = 'error';
+        this.handleError(new Error('Owner preview session is missing.'));
         return;
       }
       this.sessionToken = preview;
@@ -123,21 +124,10 @@ class DeckViewer extends LitElement {
   }
 
   private async requestAccess(email?: string): Promise<void> {
+    if (this.submitting) return;
     this.submitting = true;
     try {
-      const access = await apiJson('/v1/share/access', viewerAccessSchema, {
-        method: 'POST',
-        headers: { 'x-share-token': this.shareToken },
-        body: JSON.stringify(email === undefined ? {} : { email }),
-      });
-      if (access.kind === 'authentication_required') this.state = 'authentication';
-      else if (access.kind === 'email_required') this.state = 'gate';
-      else if (access.kind === 'unavailable') this.state = 'unavailable';
-      else {
-        this.sessionToken = access.sessionToken;
-        sessionStorage.setItem(viewerSessionKey(this.shareToken), access.sessionToken);
-        await this.loadDeck();
-      }
+      await this.completeAccessRequest(email);
     } catch (error) {
       this.handleError(error);
     } finally {
@@ -147,6 +137,7 @@ class DeckViewer extends LitElement {
 
   private async submitEmail(event: Event): Promise<void> {
     event.preventDefault();
+    if (this.submitting) return;
     if (!(event.currentTarget instanceof HTMLFormElement)) return;
     const email = new FormData(event.currentTarget).get('email');
     if (typeof email === 'string') await this.requestAccess(email);
@@ -154,28 +145,60 @@ class DeckViewer extends LitElement {
 
   private async requestAccessApproval(event: Event): Promise<void> {
     event.preventDefault();
+    if (this.submitting) return;
     if (!(event.currentTarget instanceof HTMLFormElement)) return;
     const email = new FormData(event.currentTarget).get('email');
     if (typeof email !== 'string') return;
-    const requested = await apiJson('/v1/share/request', requestedAccessSchema, {
-      method: 'POST',
-      headers: { 'x-share-token': this.shareToken },
-      body: JSON.stringify({ email }),
-    });
-    sessionStorage.setItem(accessRequestKey(this.shareToken), requested.requestId);
-    sessionStorage.setItem(`${accessRequestKey(this.shareToken)}:email`, email);
-    this.state = 'pending';
+    this.submitting = true;
+    try {
+      const requested = await apiJson('/v1/share/request', requestedAccessSchema, {
+        method: 'POST',
+        headers: { 'x-share-token': this.shareToken },
+        body: JSON.stringify({ email }),
+      });
+      sessionStorage.setItem(accessRequestKey(this.shareToken), requested.requestId);
+      sessionStorage.setItem(`${accessRequestKey(this.shareToken)}:email`, email);
+      this.state = 'pending';
+    } catch (error) {
+      this.handleError(error);
+    } finally {
+      this.submitting = false;
+    }
   }
 
   private async checkRequest(): Promise<void> {
+    if (this.submitting) return;
     const requestId = sessionStorage.getItem(accessRequestKey(this.shareToken));
     if (requestId === null) return;
-    const status = await getAccessRequestStatus(this.shareToken, requestId);
-    if (status === 'approved') {
-      const email =
-        sessionStorage.getItem(`${accessRequestKey(this.shareToken)}:email`) ?? undefined;
-      await this.requestAccess(email);
-    } else this.state = status;
+    this.submitting = true;
+    try {
+      const status = await getAccessRequestStatus(this.shareToken, requestId);
+      if (status === 'approved') {
+        const email =
+          sessionStorage.getItem(`${accessRequestKey(this.shareToken)}:email`) ?? undefined;
+        await this.completeAccessRequest(email);
+      } else this.state = status;
+    } catch (error) {
+      this.handleError(error);
+    } finally {
+      this.submitting = false;
+    }
+  }
+
+  private async completeAccessRequest(email?: string): Promise<void> {
+    const access = await apiJson('/v1/share/access', viewerAccessSchema, {
+      method: 'POST',
+      headers: { 'x-share-token': this.shareToken },
+      body: JSON.stringify(email === undefined ? {} : { email }),
+    });
+    if (access.kind === 'authentication_required') this.state = 'authentication';
+    else if (access.kind === 'email_required') this.state = 'gate';
+    else if (access.kind === 'unavailable') this.state = 'unavailable';
+    else {
+      this.sessionToken = access.sessionToken;
+      sessionStorage.setItem(viewerSessionKey(this.shareToken), access.sessionToken);
+      await this.loadDeck();
+    }
   }
 
   private async loadDeck(report = true): Promise<boolean> {
@@ -227,10 +250,16 @@ class DeckViewer extends LitElement {
   };
 
   private onPageHide = (): void => this.tracker?.close();
+  private onFocus = (): void => this.tracker?.markActivity();
   private handleError(error: unknown): void {
     const failure = viewerFailure(error);
     this.state = failure.state;
     this.message = failure.message;
+    if (failure.state === 'error') {
+      void this.updateComplete.then(() => {
+        this.renderRoot.querySelector<HTMLElement>('[role="alert"]')?.focus();
+      });
+    }
   }
 
   render() {
