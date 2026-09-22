@@ -1,9 +1,24 @@
-import { html, type TemplateResult } from 'lit';
+import { html, nothing, type TemplateResult } from 'lit';
 import type { DeckAnalytics } from './deck-types.ts';
 
-export function visitSequence(visit: DeckAnalytics['visits'][number]): string {
-  if (visit.sequenceComplete === false) return 'Not recorded (older visit)';
-  return visit.slideSequence.map((slide) => slide.ordinal).join(' → ') || '—';
+export function visitSequence(visit: DeckAnalytics['visits'][number]): TemplateResult {
+  if (visit.sequenceComplete === false) return html`Not recorded (older visit)`;
+  return html`<span>${visit.slideSequence.map((slide) => slide.ordinal).join(' → ') || '—'}</span>
+    ${visit.slideSequence.length === 0
+      ? nothing
+      : html`<details>
+          <summary class="button quiet">Time by slide</summary>
+          <p class="caption">Qualified views, in order.</p>
+          <ol>
+            ${visit.slideSequence.map(
+              (slide) =>
+                html`<li>
+                  Slide ${slide.ordinal}${slide.title === null ? '' : ` · ${slide.title}`}:
+                  ${duration(slide.activeDurationMs)}
+                </li>`,
+            )}
+          </ol>
+        </details>`}`;
 }
 
 export function metric(label: string, value: string | number): TemplateResult {

@@ -126,6 +126,14 @@ test('reading and revisiting slides preserves dwell, actual sequence, and drop-o
     await ownerPage.goto(`/pages/${fixture.deckId}#overview`);
     await expect(ownerPage.getByText('1 → 2 → 1', { exact: true })).toBeVisible();
     await expect(ownerPage.locator('td[data-label="Last"]')).toHaveText('1');
+    const times = ownerPage.locator('details');
+    await times.getByText('Time by slide', { exact: true }).focus();
+    await ownerPage.keyboard.press('Enter');
+    await expect(times).toHaveAttribute('open', '');
+    await expect(times.locator('li')).toHaveCount(3);
+    await expect(times.locator('li').first()).toContainText('Slide 1 · Slide 1:');
+    await expect(times.locator('li').nth(1)).toContainText('Slide 2 · Slide 2:');
+    await expect(times.locator('li').last()).toContainText('Slide 1 · Slide 1:');
     expect(pageErrors).toEqual([]);
   } finally {
     await viewer.close();
