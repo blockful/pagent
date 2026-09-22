@@ -89,7 +89,11 @@ test('owner previews the submitted document without creating a visit', async ({
   for (const width of [375, 768, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     await page.evaluate(() => window.scrollTo(0, 0));
-    await page.screenshot({ path: `${evidence}/owner-${width}.png`, fullPage: true });
+    await page.screenshot({
+      path: `${evidence}/owner-${width}.png`,
+      fullPage: true,
+      animations: 'disabled',
+    });
   }
   const analytics = analyticsSchema.parse(
     await (await ownerApi.get(`/v1/decks/${deckId}/analytics`)).json(),
@@ -255,6 +259,7 @@ test('HTML analytics stays usable without invented slide completion, and revocat
       await page.screenshot({
         path: `${evidence}/analytics-${tab.toLowerCase()}-${width}.png`,
         fullPage: true,
+        animations: 'disabled',
       });
     }
   }

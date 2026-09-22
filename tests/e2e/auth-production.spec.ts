@@ -55,6 +55,7 @@ const mcpAnalyticsSchema = z.object({
     page_id: z.string().uuid(),
     type: z.literal('presentation'),
     analytics: z.object({
+      contentFormat: z.literal('html'),
       owner: z.object({ id: z.string().uuid(), email: z.string().email() }),
       overview: z.object({
         totalVisits: z.number().int().nonnegative(),
@@ -68,10 +69,6 @@ const mcpAnalyticsSchema = z.object({
 });
 const e2eApiUrl = process.env.E2E_API_URL ?? 'http://127.0.0.1:8787';
 const mcpPresentationTitle = `MCP browser acceptance ${randomUUID()}`;
-const mcpPresentationSlideIds = Array.from(
-  { length: 10 },
-  (_, index) => `mcp-browser-slide-${index + 1}`,
-);
 test.describe.configure({ mode: 'serial' });
 
 let api: APIRequestContext | undefined;
@@ -388,7 +385,7 @@ test('stdio MCP reads a result with a page:read token', async () => {
   }
 });
 
-test('stdio MCP writes a ten-slide presentation that an authenticated owner can preview without visits', async ({
+test('stdio MCP writes authored HTML that an authenticated owner can preview without visits', async ({
   page,
 }) => {
   const client = await connectStdioClient(localApiUrl(), await token('page:create page:read'));
@@ -399,11 +396,7 @@ test('stdio MCP writes a ten-slide presentation that an authenticated owner can 
         arguments: {
           type: 'presentation',
           title: mcpPresentationTitle,
-          slides: mcpPresentationSlideIds.map((id, index) => ({
-            id,
-            title: `MCP browser slide ${index + 1}`,
-            html: `<h1>MCP browser slide ${index + 1}</h1>`,
-          })),
+          html: '<!doctype html><html><body><h1>Authored MCP document</h1><button onclick="this.textContent=\'Script works\'">Run authored script</button></body></html>',
         },
       }),
     );
@@ -423,7 +416,11 @@ test('stdio MCP writes a ten-slide presentation that an authenticated owner can 
     await page.goto('/pages');
     await expect(page.getByRole('heading', { name: 'Pages' })).toBeVisible();
     await page.getByRole('link', { name: mcpPresentationTitle, exact: true }).click();
-    await expect(page.getByText('Slide 1 of 10')).toBeVisible();
+    const frame = page.frameLocator('document-frame iframe');
+    await expect(frame.getByRole('heading', { name: 'Authored MCP document' })).toBeVisible();
+    await frame.getByRole('button', { name: 'Run authored script' }).click();
+    await expect(frame.getByRole('button', { name: 'Script works' })).toBeVisible();
+    await expect(page.locator('.viewer-controls')).toHaveCount(0);
 
     const analytics = mcpAnalyticsSchema.parse(
       await client.callTool({
@@ -459,8 +456,9 @@ test('stdio MCP reads analytics for a durable presentation page', async () => {
       page_id: presentationPageId(),
       type: 'presentation',
       analytics: {
+        contentFormat: 'html',
         overview: { totalVisits: 0, uniqueViewers: 0 },
-        slides: mcpPresentationSlideIds.map((stableSlideId) => ({ stableSlideId })),
+        slides: [],
         visitors: [],
         visits: [],
       },

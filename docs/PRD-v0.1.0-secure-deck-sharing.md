@@ -657,6 +657,16 @@ the next presentation-lifecycle milestone. The release may ship behind feature
 flags, but v0.1.0 should not be described as complete until the secure
 share-to-insight workflow works end to end.
 
+### Reliability follow-ups from the production audit
+
+- Bound analytics read cost as event history grows. The current query materializes
+  matching raw events in application memory; move duration totals and sequence
+  compaction to database-side aggregation before claiming high-volume capacity.
+  This inherited limitation affects HTML and legacy decks ([review finding](https://github.com/blockful/pagent/pull/23#discussion_r4076196710)).
+- Preserve the triggering interaction when an engagement delivery receives a stale
+  visit `410`, so the replacement visit can start without another user action
+  ([review finding](https://github.com/blockful/pagent/pull/23#discussion_r4076196698)).
+
 ## 18. Launch acceptance criteria
 
 The release is ready when all of the following are observable in production or a production-equivalent environment:

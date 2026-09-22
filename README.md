@@ -174,7 +174,7 @@ Each app validates its environment at boot/build with Zod and fails loudly on mi
 |                                                   | `NODE_EXTRA_CA_CERTS`                                                          | Supabase in production | Path to the bundled Supabase root CA so `verify-full` can validate the pooler certificate.                                                              |
 |                                                   | `PUBLIC_URL`                                                                   | **production**         | HTTPS renderer origin. Used in `write` responses.                                                                                                       |
 |                                                   | `API_PUBLIC_URL`                                                               | **production**         | HTTPS API origin. Used for OAuth issuer, callbacks, magic links, and discovery metadata.                                                                |
-|                                                   | `ALLOWED_ORIGINS`                                                              | **production**         | Comma-separated origin list. CORS allow-list.                                                                                                           |
+|                                                   | `ALLOWED_ORIGINS`                                                              | **HTML frames / prod** | Exact renderer origins for CORS and protected HTML frames. Required for HTML in every environment, e.g. `http://localhost:8788` locally.                |
 |                                                   | `PORT`                                                                         | optional               | Coerced to number. Default `8787`. Railway sets this.                                                                                                   |
 |                                                   | `PAGE_TTL_MS`                                                                  | optional               | Coerced to number. Default `1800000` (30 min).                                                                                                          |
 |                                                   | `RATE_LIMIT_MAX`                                                               | optional               | Positive integer. Default `30`; caps writes and viewer starts per IP. Events: 4x/IP, 30/session/window, 10/request.                                     |
@@ -328,7 +328,7 @@ must deploy from the repository root because it uses npm workspaces and serves
 3. Set environment variables (see `apps/api/.env.example`):
    - `PUBLIC_URL` — the Vercel URL of `apps/web` (e.g. `https://pagent.link`). Used in MCP `write` responses. **Required in production.** Boot fails loudly if missing.
    - `API_PUBLIC_URL` — the Railway public origin of `apps/api` (e.g. `https://api.pagent.link`). Used for OAuth issuer/discovery, default Google callbacks, magic links, and MCP auth metadata. **Required in production.** Must be HTTPS.
-   - `ALLOWED_ORIGINS` — comma-separated origins allowed to call the API (set to your Vercel URL). **Required in production.** API boot fails loudly if missing.
+   - `ALLOWED_ORIGINS` — comma-separated exact renderer origins (set to your Vercel origin). **Required for HTML frames in every environment**; use the actual browser origin, e.g. `http://localhost:8788` locally. Missing/mismatched origins return 403. Production API boot also fails if missing.
    - `PORT` — Railway sets this automatically; the server reads it.
    - `PAGE_TTL_MS` — optional; default 30 minutes.
    - `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` — optional. Per-IP limits for temporary writes and public viewer access/visit starts. Engagement delivery allows 4x the base cap per IP, 30 requests per viewer session, and at most 10 events per request. Defaults: 30 / 60000.
@@ -450,6 +450,12 @@ in Grafana from the trace and log streams.
 
 ### Rollback
 
+After HTML migration 4 has run, prefer a forward fix. A pre-HTML API rejects the
+applied migration and cannot read HTML revisions. Any revert must preserve migration
+4's registration and HTML storage/read compatibility; never delete the migration
+ledger entry, column, or saved content. Verify API, renderer, and rebuilt MCP together
+against migrated legacy and HTML data. See [the release runbook](docs/RELEASING.md#rollback).
+
 The MCP plugin marketplace tracks `main`. Rolling back means reverting the bad
 commit on `main`; Railway and Vercel auto-redeploy on push.
 
@@ -483,7 +489,7 @@ behaviour without touching code. `apps/api/.env.example` is the source of truth.
 | `PUBLIC_URL`                  | _(required in prod)_      | Base URL of the renderer, returned in MCP `write` responses. Redeploy required after change.                                                                              |
 | `API_PUBLIC_URL`              | _(required in prod)_      | API origin used for OAuth issuer, callbacks, magic links, and MCP discovery. Restart required.                                                                            |
 | `PAGE_TTL_MS`                 | `1800000` (30 min)        | How long a page lives before expiring. Raising it keeps pages alive longer but grows the DB.                                                                              |
-| `ALLOWED_ORIGINS`             | _(required in prod)_      | Comma-separated origins the CORS middleware allows. Add an origin here and restart — no redeploy.                                                                         |
+| `ALLOWED_ORIGINS`             | _(required for HTML)_     | Exact renderer origins for CORS and protected HTML frames in all environments. Update and restart the API. Production boot also requires this setting.                    |
 | `RATE_LIMIT_MAX`              | `30`                      | Base per-IP write cap for temporary pages and public viewer access/visit starts; event delivery uses 4x per IP plus a 30-request viewer-session cap and 10-event batches. |
 | `RATE_LIMIT_WINDOW_MS`        | `60000` (60 s)            | Shared rolling window for the write and viewer limits.                                                                                                                    |
 | `TRUSTED_PROXY_MODE`          | _(required in prod)_      | Set to `railway` to use Railway's `X-Real-IP` for abuse limits; `X-Forwarded-For` is ignored.                                                                             |

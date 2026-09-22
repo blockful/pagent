@@ -43,7 +43,11 @@ stories rather than relying on a successful build alone:
   analytics reads reject unauthenticated callers.
 - An authenticated presentation can be revised, shared, viewed, and read for
   analytics.
-- Read slide 1, advance to slide 2, then return to slide 1. Check that time
+- Publish a complete HTML document through the rebuilt stdio MCP bundle. Verify
+  its own JavaScript in owner preview and a shared link, no preview visits, and
+  page-level analytics with unavailable slide/completion metrics. Set exact
+  `ALLOWED_ORIGINS` for the renderer in every environment, including local QA.
+- For legacy structured decks, read slide 1, advance to slide 2, then return to slide 1. Check that time
   remains attributed to the slide actually read, sequence is `1 → 2 → 1`, and
   last slide/drop-off is 1 without increasing distinct-slide completion.
 - Backgrounding and sixty-second inactivity pause active time. Returning in
@@ -162,6 +166,15 @@ When a bug on `main` needs a patch release without pulling in unfinished feature
 ---
 
 ## Rollback
+
+**Database compatibility comes first.** After migration 4 has run, do not deploy
+the pre-HTML API (`b93e330` or earlier) or blindly revert the HTML feature. The
+migrator rejects unknown applied versions, and old readers cannot render HTML
+revisions. Prefer a forward fix. If reverting application changes, retain migration
+4's registration and the HTML storage/read compatibility, rebuild the MCP bundle,
+and test against a migrated database containing both legacy and HTML revisions.
+Never delete migration ledger rows, the HTML column, or saved revisions to make
+an older binary start. Keep API, renderer, and MCP contracts compatible together.
 
 The plugin marketplace install tracks `main`. There is no per-install version pinning today. Rolling back a bad release means:
 

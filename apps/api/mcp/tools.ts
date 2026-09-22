@@ -118,7 +118,7 @@ const readInputSchema = z
   .strict();
 
 const WRITE_DESCRIPTION =
-  'Write one Pagent page. Interactive and document pages are temporary. A durable presentation is one complete HTML document, with its own layout and inline JavaScript in an isolated sandbox. No slide schema is required. Presentation pages are revisioned, shareable, and analyzable. Use self-contained assets; network access is blocked. Return the page URL to the user.';
+  'Write one Pagent page. Interactive and document pages are temporary. A durable presentation is one complete HTML document, with its own layout and inline JavaScript in an isolated sandbox. No slide schema is required. Presentation pages are revisioned, shareable, and analyzable. Use self-contained assets; network APIs and external assets are blocked. Browser sandbox restrictions are not a general network-isolation guarantee. Return the page URL to the user.';
 
 const READ_DESCRIPTION =
   'Read a page response or durable presentation analytics. The page id selects the sensible default; use include only to be explicit. This call returns immediately and never waits.';
