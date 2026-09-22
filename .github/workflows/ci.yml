@@ -73,6 +73,10 @@ jobs:
           echo "NODE_EXTRA_CA_CERTS=$pagent_tls_dir/server.crt" >> "$GITHUB_ENV"
           echo "PGSSLROOTCERT=$pagent_tls_dir/server.crt" >> "$GITHUB_ENV"
 
+      - name: Verify production test database TLS
+        run: |
+          test "$(psql "$DATABASE_URL" -XAtc 'select ssl from pg_stat_ssl where pid = pg_backend_pid()')" = t
+
       - name: Prepare deck integration databases
         env:
           PGPASSWORD: postgres
