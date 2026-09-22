@@ -81,7 +81,8 @@ export function renderSharingEditor(input: SharingEditorViewInput): TemplateResu
               ?disabled=${input.saving}
             /><span
               ><strong>Allowed email</strong><br /><small
-                >No inbox verification. Matching viewers are labeled Unverified.</small
+                >Anyone who knows an allowed address can open it. No inbox verification; viewers are
+                labeled Unverified.</small
               ></span
             ></label
           >
@@ -94,7 +95,8 @@ export function renderSharingEditor(input: SharingEditorViewInput): TemplateResu
               ?disabled=${input.saving}
             /><span
               ><strong>Authenticated viewer</strong><br /><small
-                >Viewer signs in with an allowed email or domain.</small
+                >Viewer signs in with an allowed email or domain. Recommended for confidential
+                material.</small
               ></span
             ></label
           >

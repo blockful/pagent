@@ -43,8 +43,21 @@ stories rather than relying on a successful build alone:
   analytics reads reject unauthenticated callers.
 - An authenticated presentation can be revised, shared, viewed, and read for
   analytics.
+- Read slide 1, advance to slide 2, then return to slide 1. Check that time
+  remains attributed to the slide actually read, sequence is `1 → 2 → 1`, and
+  last slide/drop-off is 1 without increasing distinct-slide completion.
+- Backgrounding and sixty-second inactivity pause active time. Returning in
+  the same tab after thirty minutes starts a new visit.
 - `/admin` enforces workspace-admin access and does not reveal private page
   content or viewer-level analytics without an explicit grant.
+
+The analytics qualification migration is additive and runs at API startup.
+Historical raw events did not retain the one-second qualification result, so
+their exact appearance order cannot be reconstructed reliably. Such visits
+return `sequenceComplete: false`, an empty sequence, and no asserted last slide
+or exit; the UI labels their sequence as unrecorded. Existing slide totals,
+distinct completion, and immutable revision history remain intact. Do not
+backfill guessed order or claim previously misattributed dwell was repaired.
 
 ### 2. CI gate
 
