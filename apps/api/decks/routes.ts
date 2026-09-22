@@ -5,6 +5,7 @@ import { ownerSharingRoutes } from './routes-sharing-owner.ts';
 import { permissionRoutes } from './routes-permissions.ts';
 import { viewerRoutes } from './routes-viewer.ts';
 import { workspaceAdminRoutes } from './routes-workspace-admin.ts';
+import { documentRoutes } from './routes-document.ts';
 
 export const deckRoutes = new Hono<{ Variables: AuthVariables }>();
 
@@ -13,3 +14,4 @@ deckRoutes.route('/', ownerSharingRoutes);
 deckRoutes.route('/', permissionRoutes);
 deckRoutes.route('/', viewerRoutes);
 deckRoutes.route('/', workspaceAdminRoutes);
+deckRoutes.route('/', documentRoutes);

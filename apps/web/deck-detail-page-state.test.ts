@@ -30,4 +30,14 @@ describe('deck detail page state', () => {
       'access',
     ]);
   });
+
+  it('omits slide analytics for HTML-only pages', () => {
+    expect(availableDeckDetailTabs(true, true, false)).toEqual([
+      'preview',
+      'overview',
+      'visitors',
+      'links',
+      'access',
+    ]);
+  });
 });

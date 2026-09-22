@@ -88,6 +88,9 @@ jobs:
             pagent_deck_engagement_d3a0_test \
             pagent_deck_engagement_concurrent_d3a0_test \
             pagent_engagement_readiness_20260922_test \
+            pagent_html_backend_20260922_test \
+            pagent_html_frame_test \
+            pagent_visit_revision_20260922_test \
             pagent_deck_permissions_d3a0_test \
             pagent_deck_sharing_d3a0_test \
             pagent_deck_routes_sharing_d3a0_test \

@@ -30,8 +30,8 @@ export const renderHomeContent = (
         </p>
         <p class="lede lede-followup">
           <strong
-            >A presentation is a durable page with ordered slides, secure sharing, and engagement
-            analytics. It lives in your signed-in workspace.</strong
+            >A presentation is your HTML file, with its own layout and interactions, secure sharing,
+            and engagement analytics. It lives in your signed-in workspace.</strong
           >
         </p>
 
@@ -133,7 +133,7 @@ export const renderHomeContent = (
           <h3>Read what happened</h3>
           <p>
             <code>read</code> returns page state and submitted answers. Durable presentation pages
-            also surface visits, slide activity, and drop-off analytics in your workspace.
+            also surface visits, viewers, and active reading time in your workspace.
           </p>
         </article>
       </section>

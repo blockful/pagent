@@ -138,7 +138,11 @@ class DeckDetailPage extends LitElement {
   }
 
   private availableTabs(): readonly DetailTab[] {
-    return availableDeckDetailTabs(this.analytics !== null, this.canManage());
+    return availableDeckDetailTabs(
+      this.analytics !== null,
+      this.canManage(),
+      this.analytics?.contentFormat !== 'html',
+    );
   }
 
   private canManage(): boolean {

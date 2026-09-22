@@ -43,13 +43,15 @@ const visit: DeckAnalytics['visits'][number] = {
 
 function overview(currentVisit: typeof visit): HTMLElement {
   const analytics: DeckAnalytics = {
+    contentFormat: currentVisit.contentFormat,
+    revisionNumbers: [currentVisit.revisionNumber],
     owner: { id: currentVisit.senderId, email: currentVisit.senderEmail },
     overview: {
       totalVisits: 1,
       uniqueViewers: 1,
       lastViewed: currentVisit.lastActivityAt,
       averageActiveTimeMs: 10_000,
-      averageCompletion: 2 / 3,
+      averageCompletion: currentVisit.completion,
       topSlide: null,
     },
     visitors: [],
@@ -74,6 +76,25 @@ function overview(currentVisit: typeof visit): HTMLElement {
 }
 
 describe('per-visit slide time', () => {
+  it('reports HTML page attention without slide navigation or completion metrics', () => {
+    const container = overview({
+      ...visit,
+      contentFormat: 'html',
+      completion: null,
+      viewedSlides: null,
+      furthestSlide: null,
+      lastSlide: null,
+      slideSequence: [],
+    });
+    expect(container.textContent).not.toContain('Average completion');
+    expect(container.querySelector('[data-label="Completion"]')).toBeNull();
+    expect(container.querySelector('[data-label="Document"]')?.textContent).toContain(
+      'HTML document · revision 1',
+    );
+    expect(container.querySelector('details')).toBeNull();
+    expect(container.querySelector('#analytics-revision')?.textContent).toContain('Revision 1');
+    expect(container.querySelector('[data-label="Active"]')?.textContent).toBe('10s');
+  });
   it('shows each ordered appearance and its own duration without replacing distinct completion', () => {
     const container = overview(visit);
     expect(container.querySelector('summary')?.textContent?.trim()).toBe('Time by slide');
@@ -83,6 +104,7 @@ describe('per-visit slide time', () => {
       ),
     ).toEqual(['Slide 1 · Opening: 3s', 'Slide 2: 4s', 'Slide 1 · Opening: 3s']);
     expect(container.querySelector('[data-label="Completion"]')?.textContent).toBe('67%');
+    expect(container.textContent).not.toContain('HTML pages report');
   });
 
   it('does not invent a breakdown when an older visit has incomplete history', () => {

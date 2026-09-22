@@ -40,6 +40,7 @@ export const deckPreviewSchema = z.object({
   title: z.string(),
   revisionId: z.string().uuid(),
   revisionNumber: z.number().int().positive(),
+  html: z.string().nullable().optional(),
   slides: z.array(slideSchema),
 });
 export type DeckPreview = z.infer<typeof deckPreviewSchema>;
@@ -62,6 +63,7 @@ export const deckDetailSchema = z.object({
       id: z.string().uuid(),
       revisionNumber: z.number().int(),
       slideCount: z.number().int(),
+      contentFormat: z.enum(['html', 'slides']).optional(),
       createdByEmail: z.string().email(),
       createdAt: dateSchema,
     }),
@@ -169,13 +171,15 @@ const slideRollupSchema = z.object({
   exits: z.number().int(),
 });
 export const analyticsSchema = z.object({
+  contentFormat: z.enum(['html', 'slides', 'mixed']).optional(),
+  revisionNumbers: z.array(z.number().int()).optional(),
   owner: z.object({ id: z.string().uuid(), email: z.string().email() }),
   overview: z.object({
     totalVisits: z.number().int(),
     uniqueViewers: z.number().int(),
     lastViewed: nullableDateSchema,
     averageActiveTimeMs: z.number(),
-    averageCompletion: z.number(),
+    averageCompletion: z.number().nullable(),
     topSlide: slideRollupSchema.nullable(),
   }),
   visitors: z.array(
@@ -186,7 +190,7 @@ export const analyticsSchema = z.object({
       lastVisit: dateSchema,
       visits: z.number().int(),
       totalActiveTimeMs: z.number(),
-      maximumCompletion: z.number(),
+      maximumCompletion: z.number().nullable(),
     }),
   ),
   slides: z.array(slideRollupSchema),
@@ -202,9 +206,10 @@ export const analyticsSchema = z.object({
       senderId: z.string().uuid(),
       senderEmail: z.string().email(),
       revisionNumber: z.number().int(),
+      contentFormat: z.enum(['html', 'slides']).optional(),
       totalActiveTimeMs: z.number(),
-      viewedSlides: z.number().int(),
-      completion: z.number(),
+      viewedSlides: z.number().int().nullable(),
+      completion: z.number().nullable(),
       furthestSlide: z.number().int().nullable(),
       lastSlide: z.number().int().nullable(),
       sequenceComplete: z.boolean().optional(),

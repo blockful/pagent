@@ -1,118 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { aggregateDeckAnalytics } from './analytics-aggregate.ts';
+import {
+  analyticsInput,
+  firstStartedAt,
+  firstLastActivityAt,
+  secondStartedAt,
+  secondLastActivityAt,
+} from './analytics-aggregate-fixture.ts';
 
 describe('deck analytics aggregation', () => {
   it('rolls up visits and engagements by visit identifier', () => {
     // Given
-    const firstStartedAt = new Date('2026-09-01T12:00:00.000Z');
-    const firstLastActivityAt = new Date('2026-09-01T12:03:00.000Z');
-    const secondStartedAt = new Date('2026-09-02T12:00:00.000Z');
-    const secondLastActivityAt = new Date('2026-09-02T12:01:00.000Z');
-    const analyticsInput = {
-      owner: { id: 'owner-1', email: 'owner@example.test' },
-      visitRows: [
-        {
-          id: 'visit-1',
-          viewerSessionId: 'session-1',
-          viewerUserId: null,
-          viewerEmail: 'viewer@example.test',
-          identityConfidence: 'authenticated' as const,
-          startedAt: firstStartedAt,
-          lastActivityAt: firstLastActivityAt,
-          revisionNumber: 1,
-          linkId: 'link-1',
-          linkName: 'Customer link',
-          senderId: 'sender-1',
-          senderEmail: 'sender@example.test',
-          totalSlides: 2,
-        },
-        {
-          id: 'visit-2',
-          viewerSessionId: 'session-2',
-          viewerUserId: null,
-          viewerEmail: null,
-          identityConfidence: 'anonymous' as const,
-          startedAt: secondStartedAt,
-          lastActivityAt: secondLastActivityAt,
-          revisionNumber: 1,
-          linkId: 'link-1',
-          linkName: 'Customer link',
-          senderId: 'sender-1',
-          senderEmail: 'sender@example.test',
-          totalSlides: 2,
-        },
-      ],
-      slideRows: [
-        {
-          id: 'slide-1',
-          revisionNumber: 1,
-          stableSlideId: 'stable-slide-1',
-          ordinal: 1,
-          title: 'Introduction',
-        },
-        {
-          id: 'slide-2',
-          revisionNumber: 1,
-          stableSlideId: 'stable-slide-2',
-          ordinal: 2,
-          title: 'Details',
-        },
-      ],
-      engagementRows: [
-        {
-          visitId: 'visit-1',
-          id: 'slide-1',
-          revisionNumber: 1,
-          stableSlideId: 'stable-slide-1',
-          ordinal: 1,
-          title: 'Introduction',
-          activeDurationMs: 100,
-          viewCount: 1,
-          qualified: true,
-          firstSequence: 2,
-          lastSequence: 2,
-        },
-        {
-          visitId: 'visit-1',
-          id: 'slide-2',
-          revisionNumber: 1,
-          stableSlideId: 'stable-slide-2',
-          ordinal: 2,
-          title: 'Details',
-          activeDurationMs: 200,
-          viewCount: 1,
-          qualified: true,
-          firstSequence: 1,
-          lastSequence: 1,
-        },
-        {
-          visitId: 'visit-2',
-          id: 'slide-1',
-          revisionNumber: 1,
-          stableSlideId: 'stable-slide-1',
-          ordinal: 1,
-          title: 'Introduction',
-          activeDurationMs: 100,
-          viewCount: 1,
-          qualified: true,
-          firstSequence: 1,
-          lastSequence: 1,
-        },
-        {
-          visitId: 'missing-visit',
-          id: 'slide-1',
-          revisionNumber: 1,
-          stableSlideId: 'stable-slide-1',
-          ordinal: 1,
-          title: 'Introduction',
-          activeDurationMs: 999,
-          viewCount: 1,
-          qualified: true,
-          firstSequence: 1,
-          lastSequence: 1,
-        },
-      ],
-    };
 
     // When
     const eventRows = analyticsInput.engagementRows.map((row) => ({
@@ -128,6 +26,8 @@ describe('deck analytics aggregation', () => {
     // Then
     expect(analytics).toEqual({
       owner: analyticsInput.owner,
+      contentFormat: 'slides',
+      revisionNumbers: [1],
       overview: {
         totalVisits: 2,
         uniqueViewers: 2,
@@ -206,6 +106,7 @@ describe('deck analytics aggregation', () => {
           senderEmail: 'sender@example.test',
           revisionNumber: 1,
           totalActiveTimeMs: 300,
+          contentFormat: 'slides',
           viewedSlides: 2,
           completion: 1,
           furthestSlide: 2,
@@ -240,6 +141,7 @@ describe('deck analytics aggregation', () => {
           senderEmail: 'sender@example.test',
           revisionNumber: 1,
           totalActiveTimeMs: 100,
+          contentFormat: 'slides',
           viewedSlides: 1,
           completion: 0.5,
           furthestSlide: 1,

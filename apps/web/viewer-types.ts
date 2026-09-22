@@ -38,6 +38,7 @@ export const viewerDeckSchema = z.object({
   viewerSessionId: z.string().uuid(),
   identityConfidence: identitySchema,
   preview: z.boolean(),
+  html: z.string().nullable().optional(),
   slides: z.array(slideSchema),
 });
 export type ViewerDeck = z.infer<typeof viewerDeckSchema>;

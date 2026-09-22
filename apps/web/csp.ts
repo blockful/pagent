@@ -10,9 +10,12 @@
 export function buildCsp(apiUrl: string | undefined): string {
   const googleFontsStylesheetOrigin = 'https://fonts.googleapis.com';
   let connectSrc = `'self' ${googleFontsStylesheetOrigin}`;
+  let documentSources = "'self'";
   if (apiUrl) {
     try {
       connectSrc = `'self' ${new URL(apiUrl).origin} ${googleFontsStylesheetOrigin}`;
+      const origin = new URL(apiUrl).origin;
+      documentSources += ` ${origin}/v1/viewer/document ${origin}/v1/owner/document`;
     } catch {
       connectSrc = `'self' ${googleFontsStylesheetOrigin}`;
     }
@@ -25,7 +28,8 @@ export function buildCsp(apiUrl: string | undefined): string {
     "img-src 'self' data: blob:",
     `connect-src ${connectSrc}`,
     "object-src 'none'",
-    "form-action 'self'",
+    `form-action ${documentSources}`,
+    `frame-src ${documentSources}`,
   ].join('; ');
 }
 

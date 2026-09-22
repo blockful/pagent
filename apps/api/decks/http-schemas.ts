@@ -12,6 +12,7 @@ export const accessDecisionBodySchema = z
 
 export const startVisitBodySchema = z
   .object({
+    revisionId: z.string().uuid().optional(),
     visible: z.boolean(),
     interacted: z.boolean(),
     analyticsConsent: z.boolean(),

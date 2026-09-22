@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en" data-authored-document="yes">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Independent Studio</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: #082b35;
+        color: #f8ead3;
+        font-family: Georgia, serif;
+      }
+      main {
+        min-height: 100dvh;
+        display: grid;
+        align-content: center;
+        gap: 24px;
+        padding: clamp(24px, 8vw, 100px);
+      }
+      h1 {
+        max-width: 15ch;
+        font-size: clamp(40px, 7vw, 88px);
+        font-weight: normal;
+        line-height: 1.05;
+        margin: 0;
+      }
+      p {
+        max-width: 48ch;
+        font:
+          18px/1.6 system-ui,
+          sans-serif;
+      }
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      button {
+        border: 1px solid currentColor;
+        border-radius: 0;
+        background: transparent;
+        color: inherit;
+        min-height: 48px;
+        padding: 12px 20px;
+        font:
+          16px system-ui,
+          sans-serif;
+        cursor: pointer;
+      }
+      button:focus-visible {
+        outline: 3px solid #ebae64;
+        outline-offset: 4px;
+      }
+      button:hover {
+        background: #144350;
+      }
+      [hidden] {
+        display: none;
+      }
+      .label {
+        font:
+          12px/1.5 system-ui,
+          sans-serif;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="label">Independent Studio / 2026</div>
+      <section id="intro">
+        <h1>Your story.<br />Your HTML.</h1>
+        <p>
+          This document owns its colors, layout, and navigation. Nothing has been converted into a
+          slide schema.
+        </p>
+      </section>
+      <section id="details" hidden>
+        <h1>Built to move.</h1>
+        <p>Inline JavaScript switches chapters. Keyboard navigation works here too.</p>
+      </section>
+      <nav aria-label="Chapters">
+        <button id="previous" type="button">Opening chapter</button>
+        <button id="next" type="button">Next chapter</button>
+      </nav>
+      <output id="chapter" aria-live="polite">Chapter one</output>
+    </main>
+    <script>
+      const intro = document.getElementById('intro');
+      const details = document.getElementById('details');
+      function showDetails(selected) {
+        intro.hidden = selected;
+        details.hidden = !selected;
+        document.getElementById('chapter').textContent = selected ? 'Chapter two' : 'Chapter one';
+      }
+      document.getElementById('next').addEventListener('click', () => showDetails(true));
+      document.getElementById('previous').addEventListener('click', () => showDetails(false));
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowRight') showDetails(true);
+        if (event.key === 'ArrowLeft') showDetails(false);
+      });
+    </script>
+  </body>
+</html>

@@ -2,6 +2,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import type { DeckAnalytics } from './deck-types.ts';
 
 export function visitSequence(visit: DeckAnalytics['visits'][number]): TemplateResult {
+  if (visit.contentFormat === 'html') return html`HTML document · revision ${visit.revisionNumber}`;
   if (visit.sequenceComplete === false) return html`Not recorded (older visit)`;
   return html`<div>
     <span class="mono"
@@ -52,7 +53,8 @@ export function duration(milliseconds: number): string {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-export function percent(value: number): string {
+export function percent(value: number | null): string {
+  if (value === null) return '—';
   return new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 0 }).format(
     value,
   );

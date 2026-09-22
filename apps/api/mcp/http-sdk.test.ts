@@ -58,13 +58,15 @@ beforeEach(() => {
     revisionNumber: 1,
   });
   vi.mocked(getDeckAnalytics).mockResolvedValue({
+    contentFormat: 'html',
+    revisionNumbers: [1],
     owner: { id: '00000000-0000-4000-8000-000000000010', email: 'owner@example.com' },
     overview: {
       totalVisits: 3,
       uniqueViewers: 2,
       lastViewed: null,
       averageActiveTimeMs: 4_000,
-      averageCompletion: 0.5,
+      averageCompletion: null,
       topSlide: null,
     },
     visitors: [],
@@ -227,7 +229,7 @@ describe('SDK client', () => {
         arguments: {
           type: 'presentation',
           title: 'Northstar',
-          slides: [{ id: 'cover', html: '<h1>Northstar</h1>' }],
+          html: '<!doctype html><html><head><title>Northstar</title></head><body><h1>Northstar</h1></body></html>',
         },
       });
       expect(written.structuredContent).toMatchObject({

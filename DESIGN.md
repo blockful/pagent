@@ -214,7 +214,17 @@ may remain literal when they do not represent a reusable spacing decision.
 - **Motion**: button press feedback only; removed under reduced motion.
 - **Layout**: centered document-scrolling surface on the warm canvas at mobile, tablet, and desktop widths.
 
-### Presentation frame and controls
+### HTML document frame
+
+- **Structure**: the submitted HTML document in an isolated iframe, with no Pagent canvas, slide navigation, imposed aspect ratio, or injected visual styling.
+- **Variants**: full-viewport shared page and bounded owner preview. Previously published structured-slide revisions retain their legacy controls.
+- **States**: loading, ready, load failure with retry, unavailable access.
+- **Accessibility**: a descriptive iframe title and accessible loading/error feedback. Authors own their document's semantics, navigation, responsive layout, and accessibility.
+- **Security**: scripts run with an opaque origin; no Pagent cookies, storage, parent DOM, external resources, forms, popups, or top navigation. The stored HTML is unchanged; the served document adds nonvisual activity instrumentation only.
+- **Analytics**: visits and active time apply to HTML pages. Do not show invented slide counts or completion percentages when the author supplies no slide model.
+- **Layout**: the shared document fills `100dvh` without product chrome. Owner preview uses the existing detail grid and a viewport-height frame. Pagent tokens apply only to surrounding management and status UI, never inside authored content.
+
+### Legacy presentation frame and controls
 
 - **Structure**: presentation page identity, slide viewport, previous/next, current count, fullscreen, optional filmstrip.
 - **Variants**: owner preview and tracked viewer.

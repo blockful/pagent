@@ -28,9 +28,14 @@ class PrivacyPage extends LitElement {
             <h2>What is recorded</h2>
             <p>
               After a presentation page is at least half visible and you interact, Pagent may record
-              the visit time, share link, presentation revision, viewed slides, active time,
-              completion, device class, browser family, and coarse country. Background tabs and
-              periods without activity for 60 seconds do not add active time.
+              the visit time, share link, presentation revision, active time, device class, browser
+              family, and coarse country. Older structured presentations also record viewed slides
+              and completion; HTML pages do not infer these measures. Background tabs and periods
+              without activity for 60 seconds do not add active time.
+            </p>
+            <p>
+              HTML engagement is best-effort telemetry. Author scripts or security policies can
+              interfere with measurement, so it is not proof of human attention.
             </p>
             <p>
               Identity is shown as <strong>Anonymous</strong>, <strong>Unverified</strong>, or

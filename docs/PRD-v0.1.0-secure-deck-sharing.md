@@ -13,6 +13,15 @@
 > pages; `read` retrieves an interactive response or authorized presentation
 > analytics. The former tool names are removed with no compatibility aliases.
 
+> **Binding clarification — 2026-09-22:** The full submitted HTML document is
+> the durable presentation. `write` accepts `title` and `html`, with optional
+> metadata and `page_id` for a new revision. Pagent preserves the exact UTF-8
+> source in `deck_revisions.html`, imposes no slide structure, and runs author
+> JavaScript only in an isolated sandbox. This supersedes the earlier
+> structured-slide and no-script requirements for durable presentations.
+> Temporary document sanitization is unchanged. Legacy REST slide payloads and
+> stored slide revisions retain their existing renderer and analytics.
+
 ## 1. Executive summary
 
 Pagent v0.1.0 turns an agent-generated presentation into a durable, controlled
@@ -23,7 +32,7 @@ recipient engaged with the proposal.
 The release adds four connected capabilities:
 
 1. **Controlled page sharing:** public links, allowed-email access, or creator-required authentication.
-2. **Viewer engagement analytics:** who viewed, active time, slides viewed, most-engaged slide, completion, and drop-off.
+2. **Viewer engagement analytics:** who viewed and active time; existing slide revisions also retain slide completion and drop-off metrics.
 3. **Page management:** one dashboard to preview presentation pages, manage links and access, revoke sharing, and inspect engagement.
 4. **Internal analytics permissions:** analytics can remain private or be shared with selected people, teams, or the verified workspace/domain.
 
@@ -42,7 +51,7 @@ These are recommended defaults, not hidden assumptions:
 - For stronger protection, the creator can require authentication through a one-time code, magic link, Google sign-in, or an existing Pagent session.
 - Private analytics are visible to the deck owner and the creator of the relevant share link. Workspace administrators see metadata but do not silently bypass private viewer-level analytics.
 - Deck content is retained until deleted. Viewer-level analytics are retained for 12 months by default, subject to workspace policy.
-- The first release supports agent-generated presentation pages with explicit slide boundaries. It does not infer reliable slide analytics from arbitrary temporary document pages.
+- A presentation is a self-contained HTML document, including its own CSS and inline JavaScript. Pagent does not infer slides or completion from it. Legacy structured slides remain a REST/storage compatibility path only.
 
 ## 3. Problem
 
@@ -58,7 +67,7 @@ Pagent can currently render an agent-generated HTML artifact at a unique URL, bu
 
 This makes Pagent useful for showing an artifact, but not yet suitable as the system of record for client proposals, fundraising decks, sales presentations, or confidential reports.
 
-## 4. Current product baseline
+## 4. Historical product baseline (v0.0.1)
 
 Pagent v0.0.1 already provides useful foundations:
 
@@ -69,7 +78,7 @@ Pagent v0.0.1 already provides useful foundations:
 - Coarse operational counters for page creation and page views.
 - A view-only HTML renderer suitable for visual artifacts.
 
-The current model is not sufficient for this feature:
+That historical model was not sufficient for this feature:
 
 - Pages expire after a short TTL and have no durable deck identity.
 - The renderer has no stable slide model.
@@ -84,8 +93,8 @@ The current model is not sufficient for this feature:
 
 - Let a sender publish and share a proposal in under two minutes.
 - Let a sender protect a deck without creating unnecessary friction for a client.
-- Let a sender know who engaged, for how long, and with which slides.
-- Let a sender quickly identify the last slide reached and the main drop-off point.
+- Let a sender know who engaged and for how long.
+- Preserve meaningful slide completion and drop-off for legacy slide revisions, without inventing them for HTML documents.
 - Let an owner control which colleagues can see deck content, links, and viewer analytics.
 - Let a manager find proposals by sender, client/link, status, and recent engagement.
 
@@ -97,7 +106,7 @@ The current model is not sufficient for this feature:
 
 ### 5.3 Technical goals
 
-- Reuse the current auth, HTML sanitization, and Postgres foundations.
+- Reuse the current auth and Postgres foundations; retain sanitization for temporary documents and legacy slides, with isolated raw-HTML delivery for durable presentations.
 - Expose exactly `write` and `read` over both MCP transports, with no legacy tool aliases.
 - Keep page-type behavior simple: temporary interactive/document pages and durable presentation pages.
 - Store raw engagement events separately from operational telemetry.
@@ -114,27 +123,27 @@ The current model is not sufficient for this feature:
 - CRM, Slack, or email automation integrations.
 - AI-generated engagement scores or claims about buyer intent.
 - Public analytics pages for external clients.
-- Analytics for arbitrary document pages without explicit slide boundaries.
+- Inferred slide boundaries, slide completion, or reading progress for arbitrary HTML; analytics for temporary document pages.
 
 ## 7. Terminology
 
-| Term                     | Definition                                                                          |
-| ------------------------ | ----------------------------------------------------------------------------------- |
-| **Page**                 | Pagent's public product primitive.                                                  |
-| **Presentation page**    | Durable, revisioned Page owned by a Pagent user or workspace.                       |
-| **Deck**                 | Legacy/internal name for a presentation page.                                       |
-| **Slide**                | Ordered, stable unit within a deck, identified by an immutable slide ID.            |
-| **Deck revision**        | Immutable snapshot of deck content.                                                 |
-| **Share link**           | Revocable URL for a deck, with its own name, access policy, expiry, and analytics.  |
-| **Sender**               | User who creates a share link. May differ from the deck owner.                      |
-| **Viewer**               | External or internal person opening a share link.                                   |
-| **Visit**                | One engagement session for one viewer or anonymous browser on one share link.       |
-| **Viewer access policy** | Rule controlling who may open a share link.                                         |
-| **Analytics visibility** | Rule controlling which authenticated workspace members may inspect engagement data. |
+| Term                     | Definition                                                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| **Page**                 | Pagent's public product primitive.                                                                                        |
+| **Presentation page**    | Durable, revisioned HTML document owned by a Pagent user or workspace; also includes retained legacy slide presentations. |
+| **Deck**                 | Legacy/internal name for a presentation page.                                                                             |
+| **Slide**                | Ordered, stable unit in a legacy structured-slide revision; not imposed on HTML documents.                                |
+| **Deck revision**        | Immutable snapshot of deck content.                                                                                       |
+| **Share link**           | Revocable URL for a deck, with its own name, access policy, expiry, and analytics.                                        |
+| **Sender**               | User who creates a share link. May differ from the deck owner.                                                            |
+| **Viewer**               | External or internal person opening a share link.                                                                         |
+| **Visit**                | One engagement session for one viewer or anonymous browser on one share link.                                             |
+| **Viewer access policy** | Rule controlling who may open a share link.                                                                               |
+| **Analytics visibility** | Rule controlling which authenticated workspace members may inspect engagement data.                                       |
 
-In product UI and agent-facing contracts, use **Page** for the artifact and
-**slide** for an ordered unit within a presentation page. Do not present Deck as
-a separate object model.
+In product UI and agent-facing contracts, use **Page** for the artifact. Use
+**slide** only for a legacy structured-slide revision or the author's own
+document content. Do not present Deck as a separate object model.
 
 ## 8. Primary users and jobs
 
@@ -158,7 +167,7 @@ a separate object model.
 
 ### 9.1 Publish and share a controlled deck
 
-1. An agent publishes an ordered set of slides as a durable deck.
+1. An agent publishes a complete HTML document as a durable presentation page.
 2. The owner opens the deck in Pagent and selects **Share**.
 3. The owner names the link, for example `Acme - September proposal`.
 4. The owner chooses an access mode and optional expiry.
@@ -199,10 +208,10 @@ sequenceDiagram
 
 ### 9.3 Review engagement
 
-1. The sender opens **Pages** and sees last viewed, unique viewers, average active time, and completion.
+1. The sender opens **Pages** and sees last viewed, unique viewers, and average active time.
 2. The sender opens a deck and selects **Analytics**.
-3. The overview shows visits over time, average completion, top slide by active time, and drop-off distribution.
-4. The sender selects a viewer to see each visit, slide sequence, active time per slide, furthest slide reached, and last slide viewed.
+3. The overview shows visits over time and active time, identifying the content format and revisions in scope.
+4. The sender selects a viewer to see each visit and its active time. Legacy slide visits additionally show slide sequence, completion, furthest/last slide, and slide-level time. HTML visits leave these metrics unavailable, not zero.
 5. Public-link visits appear as anonymous unless the viewer later authenticates in the same visit.
 
 ### 9.4 Share analytics internally
@@ -226,7 +235,7 @@ Agent-facing creation uses `write` with a required `type` discriminator:
 
 - `interactive`: an A2UI specification for a temporary, single-response page.
 - `document`: sanitized HTML for a temporary, view-only page.
-- `presentation`: title, ordered slides with stable IDs and sanitized HTML,
+- `presentation`: title and the full HTML document,
   plus optional description, client/account label, or `page_id` update target.
 
 Agent-facing retrieval uses `read`. It returns a temporary interactive response
@@ -237,9 +246,15 @@ mode is enabled. Requests that present invalid or expired Bearer credentials
 fail closed with `401`; grace-mode callers choosing anonymous access omit the
 `Authorization` header.
 
-Explicit slide boundaries remain a product requirement. MCP advertises only
-`write` and `read`; link management and governance stay in the authenticated
-web/REST surfaces.
+The submitted document is the deck, with its own layout and interactions.
+MCP advertises only `write` and `read`; link management and governance stay in
+the authenticated web/REST surfaces. `POST /v1/decks` accepts either `html` or
+legacy `slides`, never both. The legacy form remains solely for shipped
+clients and records; new agent-facing publishing uses `html`.
+
+HTML source is stored exactly, without sanitizing or fabricating a slide. The
+supported runtime is self-contained HTML/CSS/inline JavaScript in an
+opaque-origin sandbox. Section 14.1 defines its restrictions.
 
 ### 10.2 One presentation page, multiple share links
 
@@ -256,13 +271,13 @@ Analytics can be viewed per link or aggregated across the presentation page. Thi
 ### 10.3 Revisions
 
 - Editing or republishing a presentation page creates a new immutable revision.
-- Authorized editors can browse and preview earlier revisions from the Page's
-  version history.
-- Restoring an earlier revision creates a new latest revision from that
-  snapshot; it never overwrites or deletes existing history.
+- Immutable snapshots are retained now. Browsing/previewing earlier revisions
+  and restoring a snapshot are P1, not a current UI capability.
+- A future restore creates a new latest revision from the snapshot; it never
+  overwrites or deletes existing history.
 - By default, active share links follow the latest published revision.
-- Historical visits retain the revision ID viewed, so slide analytics remain interpretable.
-- Reordering or deleting slides never rewrites historical event meaning.
+- Historical visits retain the revision ID viewed and its content format, so updates never reinterpret earlier analytics.
+- Legacy slide revisions retain their stable slide IDs and historical event meaning.
 
 Pinning a link to a specific revision is P1 if it threatens the release schedule.
 
@@ -283,7 +298,7 @@ Priority meanings:
 | DM-03 | P0       | Users can search by page title, link/client name, owner, or sender.                                                                                         |
 | DM-04 | P0       | Users can filter by Mine, Shared with me, Team/workspace, active, expired, and revoked.                                                                     |
 | DM-05 | P0       | A presentation-page detail screen contains Preview, Analytics, Share links, and Settings/Access.                                                            |
-| DM-06 | P0       | Owners can rename, archive, restore, and delete a page. Deletion requires confirmation and revokes all links immediately.                                   |
+| DM-06 | P0       | Owners can rename, archive, restore an archived page, and delete a page. Deletion requires confirmation and revokes all links immediately.                  |
 | DM-07 | P0       | Users can preview the exact latest presentation revision without generating analytics.                                                                      |
 | DM-08 | P1       | Users can duplicate a presentation page or create a new client-specific link from the list.                                                                 |
 | DM-09 | P0       | Workspace administrators can open `/admin` for membership, policy, audit, and page-metadata governance without implicit content or viewer-analytics access. |
@@ -320,16 +335,16 @@ Allowed email is still an access rule, but it only proves that the viewer knows 
 
 ### 11.3 Viewer experience
 
-| ID    | Priority | Requirement                                                                                                     |
-| ----- | -------- | --------------------------------------------------------------------------------------------------------------- |
-| VX-01 | P0       | The share page clearly identifies the deck or sender before asking for an email or sign-in.                     |
-| VX-02 | P0       | Access screens explain why information is requested and link to the privacy notice.                             |
-| VX-03 | P0       | The deck supports next/previous controls, keyboard navigation, slide count, mobile layout, and fullscreen.      |
-| VX-04 | P0       | Refreshing or reopening a valid viewer session does not repeat email entry or authentication unnecessarily.     |
-| VX-05 | P0       | Denied, pending, expired, and revoked states have distinct human-readable screens without leaking deck content. |
-| VX-06 | P0       | Viewer tracking never blocks slide navigation. Events queue locally and send asynchronously.                    |
-| VX-07 | P0       | The viewer meets WCAG 2.2 AA for the access gate and presentation controls.                                     |
-| VX-08 | P1       | The sender may add a short welcome message and contact information to a share link.                             |
+| ID    | Priority | Requirement                                                                                                                                                                                                                |
+| ----- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VX-01 | P0       | The share page clearly identifies the deck or sender before asking for an email or sign-in.                                                                                                                                |
+| VX-02 | P0       | Access screens explain why information is requested and link to the privacy notice.                                                                                                                                        |
+| VX-03 | P0       | HTML fills an isolated presentation frame with author-controlled layout and interactions; Pagent imposes no slide controls. Legacy slides retain next/previous, keyboard navigation, count, mobile layout, and fullscreen. |
+| VX-04 | P0       | Refreshing or reopening a valid viewer session does not repeat email entry or authentication unnecessarily.                                                                                                                |
+| VX-05 | P0       | Denied, pending, expired, and revoked states have distinct human-readable screens without leaking deck content.                                                                                                            |
+| VX-06 | P0       | Viewer tracking never blocks document interaction or legacy slide navigation. Events queue locally and send asynchronously.                                                                                                |
+| VX-07 | P0       | Pagent's access gate and viewer controls meet WCAG 2.2 AA; author-supplied HTML remains the author's accessibility responsibility.                                                                                         |
+| VX-08 | P1       | The sender may add a short welcome message and contact information to a share link.                                                                                                                                        |
 
 ### 11.4 Engagement capture
 
@@ -337,30 +352,30 @@ Allowed email is still an access rule, but it only proves that the viewer knows 
 | ----- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | EA-01 | P0       | Pagent creates a visit only after client-side code confirms a visible, interactive browser session. Link preview bots must not count as human visits.                                                                                                  |
 | EA-02 | P0       | Each visit records share link, deck revision, viewer identity when known, identity confidence (Anonymous, Unverified email, or Authenticated), start/end, device class, browser family, and coarse country when legally and operationally appropriate. |
-| EA-03 | P0       | Each slide records first seen, active duration, view count within the visit, and order of appearance.                                                                                                                                                  |
-| EA-04 | P0       | Slide time accumulates only while at least 50% of the slide is visible, the tab is visible, and recent user activity indicates the viewer is present.                                                                                                  |
+| EA-03 | P0       | HTML revisions record visit-level engagement only. Legacy slide revisions retain first seen, active duration, view count, and order of appearance per slide.                                                                                           |
+| EA-04 | P0       | Active time accumulates only while at least 50% of the document frame or legacy slide is visible, the tab is visible, and recent user activity indicates the viewer is present.                                                                        |
 | EA-05 | P0       | Tracking pauses when the tab is hidden and after 60 seconds without focus, navigation, pointer, touch, or keyboard activity. It resumes on activity.                                                                                                   |
 | EA-06 | P0       | The client sends a heartbeat at most every 10 seconds and flushes a final best-effort event on page hide. The server derives trusted durations and rejects impossible values.                                                                          |
 | EA-07 | P0       | Duplicate or retried events are idempotent. Events arriving out of order do not inflate duration.                                                                                                                                                      |
 | EA-08 | P0       | Internal preview sessions and authenticated owner/editor visits are excluded from client analytics by default.                                                                                                                                         |
 | EA-09 | P0       | A visit closes after 30 minutes of inactivity. A later return creates a new visit.                                                                                                                                                                     |
-| EA-10 | P1       | Track outbound link clicks and presentation CTA clicks with slide attribution.                                                                                                                                                                         |
+| EA-10 | P1       | Consider CTA telemetry and a separately reviewed outbound-link policy; slide attribution applies only to legacy slides.                                                                                                                                |
 | EA-11 | P1       | Let an owner remove a known bot/test visit from user-facing analytics while preserving an audit record.                                                                                                                                                |
 
 ### 11.5 Analytics dashboard
 
-| ID    | Priority | Requirement                                                                                                                                                                    |
-| ----- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| AD-01 | P0       | Deck overview shows total visits, unique viewers, last viewed, average active time, and average completion for a selected date range.                                          |
-| AD-02 | P0       | The dashboard shows the deck owner and the sender/link creator for attribution.                                                                                                |
-| AD-03 | P0       | The Slides view shows, per slide, unique viewers, view rate, average active time, total active time, and exits.                                                                |
-| AD-04 | P0       | The Visitors view lists viewer email or Anonymous, an Unverified/Authenticated identity label, first/last visit, visits, total active time, and maximum completion.            |
-| AD-05 | P0       | A visit detail shows slide sequence, active time by slide, furthest slide reached, last slide viewed, and completion.                                                          |
-| AD-06 | P0       | Users can filter analytics by share link, viewer, sender, revision, and date range.                                                                                            |
-| AD-07 | P0       | Allowed-email visits show the entered address as Unverified. Public visits remain Anonymous. Neither is relabeled Authenticated without an authentication event in that visit. |
-| AD-08 | P0       | Empty and low-data states explain what will appear after a real visit.                                                                                                         |
-| AD-09 | P1       | Export permitted analytics to CSV. Export obeys the same permissions as the dashboard and is audit logged.                                                                     |
-| AD-10 | P1       | Send an optional notification to the link creator after the first human visit, including the visitor's identity-confidence label.                                              |
+| ID    | Priority | Requirement                                                                                                                                                                                         |
+| ----- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AD-01 | P0       | Overview shows total visits, unique viewers, last viewed, and average active time, with content format and revision scope. Average completion is available only for known legacy slide visits.      |
+| AD-02 | P0       | The dashboard shows the deck owner and the sender/link creator for attribution.                                                                                                                     |
+| AD-03 | P0       | Legacy slide rollups show unique viewers, view rate, average/total active time, and exits. HTML revisions have no slide rollups or inferred top slide.                                              |
+| AD-04 | P0       | The Visitors view lists viewer email or Anonymous, identity confidence, first/last visit, visits, and total active time; maximum completion is null when no legacy slide completion is known.       |
+| AD-05 | P0       | Visit detail identifies revision and content format. HTML visits show active time with null viewed-slides/completion/furthest/last-slide metrics; legacy slide visits retain their existing detail. |
+| AD-06 | P0       | Users can filter analytics by share link, viewer, sender, revision, and date range.                                                                                                                 |
+| AD-07 | P0       | Allowed-email visits show the entered address as Unverified. Public visits remain Anonymous. Neither is relabeled Authenticated without an authentication event in that visit.                      |
+| AD-08 | P0       | Empty and low-data states explain what will appear after a real visit.                                                                                                                              |
+| AD-09 | P1       | Export permitted analytics to CSV. Export obeys the same permissions as the dashboard and is audit logged.                                                                                          |
+| AD-10 | P1       | Send an optional notification to the link creator after the first human visit, including the visitor's identity-confidence label.                                                                   |
 
 #### Metric definitions
 
@@ -369,14 +384,20 @@ Allowed email is still an access rule, but it only proves that the viewer knows 
 | **Visit**                  | A visible human browser session on one share link, closed after 30 minutes of inactivity.                                                                                               |
 | **Unique viewer**          | Distinct authenticated viewer ID, normalized self-declared email within a link, or privacy-preserving link-scoped anonymous browser identifier. Confidence groups are shown separately. |
 | **Active time**            | Deduplicated server-derived time while the deck or slide satisfies the visibility and activity rules.                                                                                   |
-| **Slide viewed**           | At least 50% visible continuously for at least 1 second.                                                                                                                                |
-| **Completion**             | Distinct slides viewed divided by total slides in the viewed revision.                                                                                                                  |
+| **Slide viewed**           | Legacy slides only: at least 50% visible continuously for at least 1 second. Unavailable for HTML.                                                                                      |
+| **Completion**             | Legacy slides only: distinct slides viewed divided by total slides in the viewed revision. HTML completion is null.                                                                     |
 | **Furthest slide reached** | Highest slide ordinal that qualified as viewed, even if intermediate slides were skipped.                                                                                               |
 | **Last slide viewed**      | Final qualifying slide before the visit ended.                                                                                                                                          |
 | **Top slide**              | Slide with the highest total active time for the selected scope and date range.                                                                                                         |
 | **Drop-off slide**         | Last slide viewed in a visit that did not reach 100% completion. The deck view shows the distribution of these exits.                                                                   |
 
-Furthest slide reached and completion must both be shown. A viewer who jumps directly to slide 10 did not necessarily view 100% of a 10-slide deck.
+Analytics expose `contentFormat: html | slides | mixed` and `revisionNumbers`.
+HTML visits have null `completion`, `viewedSlides`, `furthestSlide`, and
+`lastSlide`, an empty slide sequence, and no slide rollups. In mixed history,
+average and maximum completion use only known legacy slide completion, never
+HTML visits as zero. Top-slide and drop-off metrics also apply only to legacy
+slides. Their furthest-slide and completion metrics remain distinct: jumping
+directly to slide 10 is not 100% completion of a 10-slide deck.
 
 ### 11.6 Internal content and analytics permissions
 
@@ -425,12 +446,12 @@ Primary row actions: Preview, Analytics, Share, More.
 Acme proposal                                      [Preview] [Share]
 Owner: Ana   Latest revision: 4   Status: Active
 
-Overview | Visitors | Slides | Share links | Access & settings
+Overview | Visitors | Share links | Access & settings
 ```
 
-- **Overview:** headline metrics, visits chart, top slides, recent visits.
+- **Overview:** visits, active time, content/revision scope, and recent visits; slide metrics only where legacy slide history exists.
 - **Visitors:** known and anonymous viewer rollup, with visit drill-down.
-- **Slides:** slide thumbnails and engagement metrics.
+- **Slides (legacy revisions only):** slide thumbnails and engagement metrics.
 - **Share links:** client/link name, sender, access mode, expiry, status, views, actions.
 - **Access & settings:** internal collaborators, analytics visibility, retention, archive/delete.
 
@@ -448,23 +469,23 @@ This is a product-level model, not a final migration design. The `decks`,
 durable presentation pages; they do not add another MCP tool or public product
 primitive.
 
-| Entity                   | Key fields and purpose                                                                              |
-| ------------------------ | --------------------------------------------------------------------------------------------------- |
-| `workspaces`             | Name, verified domains, policy settings.                                                            |
-| `workspace_members`      | User, workspace, role, status.                                                                      |
-| `teams` / `team_members` | Internal audience groups.                                                                           |
-| `decks`                  | Workspace, owner, title, status, latest revision, timestamps.                                       |
-| `deck_revisions`         | Immutable revision number, content manifest, created by/at.                                         |
-| `deck_slides`            | Revision, stable slide ID, ordinal, title, sanitized content.                                       |
-| `share_links`            | Deck, sender, name/client, token hash, access mode, expiry, revoked state.                          |
-| `share_link_audience`    | Allowed email, domain, Pagent user, or workspace membership rule.                                   |
-| `access_requests`        | Link, requested email/user, state, approver, timestamps.                                            |
-| `viewer_sessions`        | Link, entered or authenticated viewer identity, identity confidence, token hash, expiry/revocation. |
-| `deck_collaborators`     | User/team/workspace subject and explicit internal permissions.                                      |
-| `visits`                 | Link, revision, viewer or anonymous ID, timestamps, client metadata.                                |
-| `slide_engagement`       | Visit, slide, first seen, active milliseconds, view count, last sequence.                           |
-| `engagement_events`      | Append-only raw event stream used to derive visit and slide aggregates.                             |
-| `audit_log`              | Permission, access, export, and link-management actions.                                            |
+| Entity                   | Key fields and purpose                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `workspaces`             | Name, verified domains, policy settings.                                                                           |
+| `workspace_members`      | User, workspace, role, status.                                                                                     |
+| `teams` / `team_members` | Internal audience groups.                                                                                          |
+| `decks`                  | Workspace, owner, title, status, latest revision, timestamps.                                                      |
+| `deck_revisions`         | Immutable revision number, exact submitted UTF-8 `html` (null for legacy slides), content manifest, created by/at. |
+| `deck_slides`            | Legacy revisions only: stable slide ID, ordinal, title, sanitized content; no synthetic slide for HTML.            |
+| `share_links`            | Deck, sender, name/client, token hash, access mode, expiry, revoked state.                                         |
+| `share_link_audience`    | Allowed email, domain, Pagent user, or workspace membership rule.                                                  |
+| `access_requests`        | Link, requested email/user, state, approver, timestamps.                                                           |
+| `viewer_sessions`        | Link, entered or authenticated viewer identity, identity confidence, token hash, expiry/revocation.                |
+| `deck_collaborators`     | User/team/workspace subject and explicit internal permissions.                                                     |
+| `visits`                 | Link, revision, viewer or anonymous ID, timestamps, client metadata.                                               |
+| `slide_engagement`       | Visit, slide, first seen, active milliseconds, view count, last sequence.                                          |
+| `engagement_events`      | Append-only raw event stream used to derive visit and slide aggregates.                                            |
+| `audit_log`              | Permission, access, export, and link-management actions.                                                           |
 
 Sensitive bearer values are stored as hashes. Deck and analytics queries enforce authorization server-side, not only by hiding UI controls.
 
@@ -479,7 +500,40 @@ Sensitive bearer values are stored as hashes. Deck and analytics queries enforce
 - Return generic responses for unknown, denied, and non-allowed emails to reduce address and policy enumeration.
 - Revoke cached viewer sessions when a link or individual access rule is revoked.
 - Apply authorization checks to deck content, thumbnails, analytics, and exports.
-- Preserve the existing HTML no-script and sanitization constraints.
+- Preserve no-script sanitization for temporary document pages and legacy slide content. Durable HTML is retained unchanged and rendered only in the isolated document frame described below.
+
+#### Durable HTML delivery and sandbox
+
+- The frame uses `sandbox="allow-scripts"`, never `allow-same-origin`. Author
+  JavaScript has an opaque origin, no Pagent account-cookie/storage access, and
+  no parent DOM access. No login or viewer credential is embedded in the HTML.
+- Self-contained HTML/CSS/inline JavaScript is the supported contract. CSP and
+  sandbox policy restrict external assets, network APIs, form submissions,
+  nested frames, popups, top navigation, `eval`, and workers. The parent frame
+  policy blocks external navigation. This is not an absolute guarantee that
+  arbitrary HTML can never attempt a network request.
+- `POST /v1/viewer/document` accepts form-encoded `session_token` and
+  `revision_id`. It reuses the live viewer session and all existing link rules.
+- `POST /v1/owner/document` accepts form-encoded `deck_id` and `revision_id`
+  with the existing auth cookie or a Bearer token with `page:read`. It checks
+  content access and does not create a client visit.
+- Both routes require an exact allowlisted `Origin` header. A body-supplied
+  `allowed_origin` is not accepted; no new frame token is issued. Credentials
+  remain in POST bodies or existing auth channels, never URLs.
+- Requested revisions must still be latest (`409` otherwise); legacy slide
+  revisions return `415`. Expired/revoked authorization and deleted content
+  fail closed. Responses carry `Cache-Control: no-store`,
+  `Referrer-Policy: no-referrer`, and a restrictive CSP.
+- Delivery appends an invisible activity bridge without rewriting the stored
+  source or wrapping it in slides. Its activity messages are best-effort
+  telemetry, not authenticated proof of a human visit. The viewer reveals HTML
+  on iframe load, independently of that bridge. An author's CSP may block the
+  bridge and prevent metrics, but must not leave the document hidden.
+- For an allowlisted Origin, document POST errors requested with
+  `Accept: text/html` return a generic sandboxed HTML error page that posts
+  `pagent:error` to the parent, preserving the HTTP status and no-store policy.
+  JSON clients keep existing error bodies; rejected Origins do not receive the
+  HTML error page.
 
 ### 14.2 Privacy
 
@@ -511,7 +565,7 @@ Research was performed against first-party product and help documentation availa
 
 ### 15.1 Product opportunities for Pagent
 
-- **Agent-native publishing:** the agent can publish a structured deck and create a controlled link in the same workflow.
+- **Agent-native publishing:** the agent publishes the HTML artifact itself; the owner configures controlled links in Pagent's authenticated web app.
 - **Creator-controlled friction:** the creator can choose a simple allowed-email gate or require authentication, with explicit identity-confidence labels in analytics.
 - **Permission clarity:** external viewer access and internal analytics access are separate, visible policies.
 - **Portable automation later:** Pagent's MCP/API foundation can eventually let agents summarize engagement and prepare follow-ups with explicit user authorization.
@@ -540,7 +594,7 @@ Research was performed against first-party product and help documentation availa
 
 ### 16.2 Viewer experience
 
-- At least 95% of valid public-link opens render the first slide within 2 seconds at p75 on a broadband connection.
+- At least 95% of valid public-link opens render presentation content within 2 seconds at p75 on a broadband connection.
 - At least 95% of viewers entering a matching email on an Allowed email link reach the deck within 15 seconds.
 - At least 90% of pre-approved viewers on an Authenticated viewer link complete authentication and reach the deck within 90 seconds.
 - Fewer than 2% of eligible access attempts produce unrecoverable errors.
@@ -550,7 +604,8 @@ Research was performed against first-party product and help documentation availa
 - At least 99% of accepted heartbeats are processed idempotently.
 - Dashboard totals reconcile with raw eligible visits within 1%.
 - Owner previews and recognized link scanners contribute zero human visits.
-- At least 95% of normally closed or backgrounded visits flush slide engagement within 60 seconds.
+- At least 95% of normally closed or backgrounded visits flush engagement within 60 seconds.
+- HTML visits never produce fabricated slide completion or slide rollups.
 
 ### 16.4 Trust and control
 
@@ -562,8 +617,9 @@ Research was performed against first-party product and help documentation availa
 
 ### Phase A: Durable presentation-page foundation
 
-- Durable presentation-page, revision, and slide model.
-- `write` publishing contract with explicit slide boundaries and `read` analytics contract.
+- Durable presentation-page and exact-HTML revision model, retaining legacy slide compatibility.
+- `write` with title/full HTML and `read` analytics, with no additional MCP tools.
+- Protected POST delivery into an opaque-origin sandbox for author interactions.
 - Page library, preview, ownership, and archive/delete.
 - Workspace and minimal team membership required for internal permissions.
 
@@ -576,8 +632,8 @@ Research was performed against first-party product and help documentation availa
 
 ### Phase C: Analytics
 
-- Human-visit detection, activity heartbeats, slide engagement, and aggregation.
-- Presentation-page overview, Visitors, Slides, and visit detail.
+- Visit qualification, activity heartbeats, page-level engagement, and aggregation; legacy slide engagement unchanged.
+- Presentation-page overview, Visitors, visit detail, and legacy slide rollups where available.
 - Filters and sender attribution.
 
 ### Phase D: Internal collaboration
@@ -607,16 +663,16 @@ The release is ready when all of the following are observable in production or a
 
 1. Both MCP transports advertise exactly `write` and `read`; none of the former tool names are registered as aliases.
 2. During grace mode, an anonymous caller can write and read a temporary interactive page; durable presentation writes and analytics reads still reject unauthenticated callers.
-3. An authenticated owner can use `write` to publish a 10-slide presentation page, find it in Pages, and preview it without generating a client visit.
+3. An authenticated owner can use `write` with title/full HTML to publish a self-contained interactive presentation, find it in Pages, and preview it without generating a client visit. The exact submitted source is retained in an immutable revision without fabricated slides.
 4. The owner can create separate Anyone, Allowed email, and Authenticated viewer links for the same presentation page.
 5. A viewer entering a matching address on an Allowed email link reaches the page without a verification code, magic link, or sign-in and is labeled Unverified in analytics.
 6. A viewer entering a non-allowed address cannot receive presentation content.
 7. A viewer on an Authenticated viewer link cannot receive presentation content before authenticating as an allowed email/user.
 8. A non-allowed viewer can request access, and an approved request continues under the link creator's selected authentication setting.
 9. Revoking a link prevents an already-open browser from fetching additional protected presentation content after its next authorization check.
-10. A client can navigate the full presentation on desktop and mobile using mouse/touch and keyboard controls.
-11. After a real visit, the sender can use the page analytics UI or authorized `read` to see identity confidence, active time, viewed slides, top slide, furthest slide, last slide, and completion.
-12. Skipping from slide 1 to slide 10 reports furthest slide 10 without reporting 100% completion.
+10. A client can use author-defined HTML controls, including inline JavaScript, on desktop and mobile within the isolated frame. Pagent does not impose slide navigation.
+11. After a real HTML visit, the analytics UI and authorized `read` show identity confidence, visits, active time, `contentFormat`, and `revisionNumbers`. HTML completion/viewed-slides/furthest/last-slide metrics are null, with no slide rollups; mixed completion includes only known legacy slide visits.
+12. Existing legacy REST slide publishing, stored-slide preview, navigation, and analytics still work. Skipping from slide 1 to slide 10 reports furthest slide 10 without reporting 100% completion.
 13. Leaving a presentation page open in a background tab does not continue increasing active time.
 14. Link preview bots and owner preview sessions do not appear as client visits.
 15. A private presentation page's viewer analytics are denied to an ungranted workspace member at both UI and API layers.
@@ -625,19 +681,24 @@ The release is ready when all of the following are observable in production or a
 18. Permission changes, access decisions, link revocation, and analytics exports are present in the audit log.
 19. `/admin` exposes workspace membership, policy, audit, and page metadata without silently exposing private content or viewer-level analytics.
 20. Deleting a presentation page revokes every share link and removes future access to content and analytics according to the retention/deletion policy.
+21. Protected document POSTs require an exact allowlisted Origin and existing authorization, reject stale revisions with `409` and legacy slides with `415`, and send no-store/no-referrer/CSP headers without credentials in URLs or HTML. Allowlisted browser HTML errors preserve the HTTP status and signal `pagent:error`; JSON behavior is unchanged.
+22. Sandbox checks verify account cookies/storage and parent DOM are inaccessible, and unsupported network APIs/assets, forms, nested frames, popups, top navigation, `eval`, and workers are restricted; parent frame policy blocks external navigation.
+23. Temporary document HTML remains sanitized and script-free. Retained immutable snapshots do not imply P1 historical preview/restore is shipped.
+24. HTML is revealed on iframe load even when author CSP blocks the appended activity bridge; missing telemetry does not keep the document hidden or imply zero engagement.
 
 ## 19. Risks and mitigations
 
-| Risk                                              | Impact                                                    | Mitigation                                                                                                      |
-| ------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Arbitrary HTML has no stable slide boundaries.    | Per-slide analytics are inaccurate or impossible.         | Require structured presentation slides and keep temporary document HTML outside slide analytics.                |
-| Email entry is mistaken for authentication.       | A viewer who knows an allowed address may impersonate it. | Label Allowed email as Unverified, warn the creator, and recommend Authenticated viewer for confidential decks. |
-| Background tabs inflate engagement.               | Senders make decisions from misleading data.              | Visibility, activity, heartbeat, and idle rules; server-side duration validation.                               |
-| Link scanners create false views.                 | Noisy notifications and inflated metrics.                 | Create visits only after visible client execution and human-like interaction/heartbeat.                         |
-| Workspace admins conflict with private analytics. | Loss of sender/client trust.                              | Metadata-only admin visibility by default; require explicit analytics grant.                                    |
-| Presentation updates corrupt historical metrics.  | Old visits become uninterpretable.                        | Immutable revisions and stable slide IDs in every event.                                                        |
-| Client analytics contain personal data.           | Regulatory and trust exposure.                            | Clear notice/consent control, minimal collection, retention, deletion, audit, and legal review.                 |
-| The release attempts to build a full data room.   | Delayed delivery and unclear product.                     | Limit v0.1.0 to one deck per share link and defer multi-document rooms.                                         |
+| Risk                                              | Impact                                                    | Mitigation                                                                                                                 |
+| ------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Arbitrary HTML has no stable slide boundaries.    | Inferred slide analytics would mislead users.             | Report visits/active time only for HTML, null unsupported metrics, and preserve slide analytics only for legacy revisions. |
+| Author JavaScript executes untrusted content.     | Parent data or browser capabilities could be exposed.     | Opaque-origin sandbox, restrictive CSP, protected POST delivery, exact Origin checks, and no embedded credentials.         |
+| Email entry is mistaken for authentication.       | A viewer who knows an allowed address may impersonate it. | Label Allowed email as Unverified, warn the creator, and recommend Authenticated viewer for confidential decks.            |
+| Background tabs inflate engagement.               | Senders make decisions from misleading data.              | Visibility, activity, heartbeat, and idle rules; server-side duration validation.                                          |
+| Link scanners create false views.                 | Noisy notifications and inflated metrics.                 | Create visits only after visible client execution and human-like interaction/heartbeat.                                    |
+| Workspace admins conflict with private analytics. | Loss of sender/client trust.                              | Metadata-only admin visibility by default; require explicit analytics grant.                                               |
+| Presentation updates corrupt historical metrics.  | Old visits become uninterpretable.                        | Immutable revision-bound visits and content formats; stable slide IDs only for legacy slide events.                        |
+| Client analytics contain personal data.           | Regulatory and trust exposure.                            | Clear notice/consent control, minimal collection, retention, deletion, audit, and legal review.                            |
+| The release attempts to build a full data room.   | Delayed delivery and unclear product.                     | Limit v0.1.0 to one deck per share link and defer multi-document rooms.                                                    |
 
 ## 20. Open product decisions
 
@@ -647,7 +708,7 @@ These questions do not block the draft, but should be resolved before engineerin
 2. **Access request notifications:** email only for v0.1.0, or in-app inbox plus email? Recommendation: in-app state with email notification.
 3. **Consent default:** always show analytics consent, or make it a workspace policy? Recommendation: workspace policy with regionally appropriate defaults, finalized after legal review.
 4. **Retention:** is 12 months appropriate for viewer-level data? Recommendation: 12 months, configurable downward, with deletion on request.
-5. **Link revision behavior:** version history and non-destructive restore are required. Should links always follow the latest revision or optionally stay pinned to the version originally sent? Recommendation: follow latest by default and add explicit pinning after the core history flow.
+5. **Link revision behavior:** snapshots are retained; historical preview and non-destructive restore are P1. Links follow latest by default. Consider explicit pinning after the history flow.
 6. **Authenticated audience:** should v0.1.0 support only Pagent Google/magic-link accounts, or include enterprise SSO? Recommendation: reuse Pagent auth now and defer SSO.
 
 ## 21. Future extensions

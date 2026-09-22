@@ -20,3 +20,18 @@ export async function toggleFullscreen(element: HTMLElement): Promise<void> {
   if (document.fullscreenElement === null) await element.requestFullscreen();
   else await document.exitFullscreen();
 }
+
+export function deviceClass(): 'mobile' | 'tablet' | 'desktop' {
+  if (innerWidth < 640) return 'mobile';
+  if (innerWidth < 1024) return 'tablet';
+  return 'desktop';
+}
+
+export function browserFamily(): string {
+  const agent = navigator.userAgent;
+  if (agent.includes('Firefox/')) return 'Firefox';
+  if (agent.includes('Edg/')) return 'Edge';
+  if (agent.includes('Chrome/')) return 'Chromium';
+  if (agent.includes('Safari/')) return 'Safari';
+  return 'Other';
+}

@@ -1,5 +1,12 @@
 import type { IdentityConfidence } from './domain.ts';
 
+export type DeckContentFormat = 'html' | 'slides';
+
+export type AnalyticsRevisionRow = {
+  readonly revisionNumber: number;
+  readonly contentFormat: DeckContentFormat;
+};
+
 export type AnalyticsVisitRow = {
   readonly id: string;
   readonly viewerSessionId: string;
@@ -14,6 +21,7 @@ export type AnalyticsVisitRow = {
   readonly senderId: string;
   readonly senderEmail: string;
   readonly totalSlides: number;
+  readonly contentFormat?: DeckContentFormat;
 };
 
 export type AnalyticsSlideRow = {
@@ -54,8 +62,9 @@ export type VisitDetail = {
   readonly senderEmail: string;
   readonly revisionNumber: number;
   readonly totalActiveTimeMs: number;
-  readonly viewedSlides: number;
-  readonly completion: number;
+  readonly contentFormat: DeckContentFormat;
+  readonly viewedSlides: number | null;
+  readonly completion: number | null;
   readonly furthestSlide: number | null;
   readonly lastSlide: number | null;
   readonly sequenceComplete: boolean;
@@ -75,7 +84,7 @@ type VisitorRollup = {
   readonly lastVisit: Date;
   readonly visits: number;
   readonly totalActiveTimeMs: number;
-  readonly maximumCompletion: number;
+  readonly maximumCompletion: number | null;
 };
 
 export type SlideRollup = {
@@ -93,12 +102,14 @@ export type SlideRollup = {
 
 export type DeckAnalytics = {
   readonly owner: { readonly id: string; readonly email: string };
+  readonly contentFormat: DeckContentFormat | 'mixed';
+  readonly revisionNumbers: readonly number[];
   readonly overview: {
     readonly totalVisits: number;
     readonly uniqueViewers: number;
     readonly lastViewed: Date | null;
     readonly averageActiveTimeMs: number;
-    readonly averageCompletion: number;
+    readonly averageCompletion: number | null;
     readonly topSlide: SlideRollup | null;
   };
   readonly visitors: readonly VisitorRollup[];
@@ -113,7 +124,7 @@ export type MutableVisitor = {
   lastVisit: Date;
   visits: number;
   totalActiveTimeMs: number;
-  maximumCompletion: number;
+  maximumCompletion: number | null;
 };
 
 export type SlideAccumulator = {
@@ -126,6 +137,7 @@ export type SlideAccumulator = {
 
 export type AnalyticsAggregationInput = {
   readonly owner: { readonly id: string; readonly email: string };
+  readonly revisionRows?: readonly AnalyticsRevisionRow[];
   readonly visitRows: readonly AnalyticsVisitRow[];
   readonly slideRows: readonly AnalyticsSlideRow[];
   readonly engagementRows: readonly AnalyticsEngagementRow[];

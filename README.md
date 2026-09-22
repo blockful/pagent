@@ -55,18 +55,25 @@ the authenticated owner manages sharing and reads engagement analytics.
 | `document`     | Temporary                      | No response; view-only  | Optional only while anonymous grace mode is enabled |
 | `presentation` | Durable, revisioned, shareable | Engagement analytics    | Required                                            |
 
-Presentation pages have explicit slide boundaries so Pagent can calculate
-active time, completion, furthest slide, and drop-off reliably. The web app
-provides the authenticated page library, page detail, sharing controls, and an
-`/admin` workspace-governance surface. Internal `/v1/decks` REST routes and
-`deck_*` tables retain established implementation names; they are not separate
-product primitives or MCP tools.
+The submitted HTML document is the presentation: Pagent does not impose slide
+boundaries, navigation, or a template. Its exact UTF-8 source is retained in an
+immutable revision. Self-contained HTML, CSS, and inline JavaScript run in an
+isolated, opaque-origin sandbox; temporary `document` pages remain sanitized
+and script-free. HTML presentation analytics report visits and active time,
+not inferred slide completion.
+
+The web app provides the authenticated page library, page detail, sharing
+controls, and an `/admin` workspace-governance surface. Internal `/v1/decks`
+REST routes and `deck_*` tables retain established implementation names; they
+are not separate product primitives or MCP tools. Existing REST slide payloads
+and stored slide revisions remain supported for compatibility, including their
+slide navigation and analytics.
 
 ### The two MCP tools
 
 - `write` accepts one discriminated page type: `interactive` with an A2UI
-  `spec`, `document` with sanitized `html`, or `presentation` with a title and
-  ordered slides. Supplying a presentation `page_id` creates a new immutable
+  `spec`, `document` with sanitized `html`, or `presentation` with `title` and
+  the full `html` document. Supplying a presentation `page_id` creates a new immutable
   revision of that durable page.
 - `read` accepts a `page_id`. Temporary interactive pages return a response
   state immediately; durable presentation pages return authorized analytics.
@@ -76,16 +83,48 @@ product primitives or MCP tools.
 There are no extra management tools. Sharing, access policy, membership,
 retention, and audit operations live in the authenticated web app and REST API.
 
+### Durable HTML presentations
+
+```json
+{
+  "type": "presentation",
+  "title": "Acme proposal",
+  "html": "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Acme proposal</title><style>body{font-family:system-ui;padding:2rem}</style></head><body><h1>Acme proposal</h1><button id=\"details\">Show next step</button><p id=\"next\" hidden>Schedule a review.</p><script>document.getElementById('details').onclick=()=>{document.getElementById('next').hidden=false}</script></body></html>"
+}
+```
+
+Keep the document self-contained. The sandbox uses `allow-scripts` without
+`allow-same-origin`: author code cannot access Pagent account cookies, storage,
+or the parent DOM. External assets, network APIs, forms, nested frames, popups,
+top navigation, `eval`, and workers are outside the supported contract and are
+restricted by the sandbox and CSP. The parent frame policy blocks external
+navigation. These controls are not a promise that arbitrary HTML can never
+attempt a network request.
+
+Protected HTML delivery uses POST forms, never credentials in URLs. The served
+document adds an invisible activity bridge; stored source stays unchanged.
+The viewer reveals the document on iframe load without waiting for that bridge.
+An author's CSP can block the bridge and prevent metrics without hiding the
+document. For an allowlisted Origin, document errors requested with
+`Accept: text/html` return a generic sandboxed error page that signals
+`pagent:error`, preserving the HTTP status and no-store policy; JSON clients
+keep their existing error responses.
+HTML visits have no slide rollups: completion, viewed-slides, furthest-slide,
+and last-slide values are null. Analytics identify `contentFormat` as `html`,
+`slides`, or `mixed` and include `revisionNumbers`; mixed completion uses only
+visits with known legacy slide completion. Retained immutable snapshots are
+available now; browsing, previewing, and restoring earlier revisions remain P1.
+
 ### Breaking migration
 
 The two-tool contract is intentionally breaking. There are no legacy aliases:
 
-| Removed tool   | Replacement                                           |
-| -------------- | ----------------------------------------------------- |
-| `show_ui`      | `write({ type: "interactive", spec })`                |
-| `show_html`    | `write({ type: "document", html })`                   |
-| `publish_deck` | `write({ type: "presentation", title, slides, ... })` |
-| `check_result` | `read({ page_id, include: "response" })`              |
+| Removed tool   | Replacement                                         |
+| -------------- | --------------------------------------------------- |
+| `show_ui`      | `write({ type: "interactive", spec })`              |
+| `show_html`    | `write({ type: "document", html })`                 |
+| `publish_deck` | `write({ type: "presentation", title, html, ... })` |
+| `check_result` | `read({ page_id, include: "response" })`            |
 
 Restart the MCP client after upgrading so it refreshes the advertised tool
 list. Clients should see exactly `write` and `read`.

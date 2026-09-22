@@ -101,7 +101,9 @@ submission. Use `interactive` when a user must send anything back.
 
 ### Presentation
 
-Call `write` with stable slide IDs and explicit slide boundaries:
+Call `write` with a title and the complete HTML document. The submitted file
+is the presentation; do not convert it into Pagent slides or add a Pagent
+template/navigation layer:
 
 ```json
 {
@@ -109,17 +111,27 @@ Call `write` with stable slide IDs and explicit slide boundaries:
   "title": "Acme proposal",
   "description": "September review",
   "client_label": "Acme",
-  "slides": [
-    { "id": "intro", "title": "Introduction", "html": "<h1>Acme</h1>" },
-    { "id": "plan", "title": "Plan", "html": "<h2>Next steps</h2>" }
-  ]
+  "html": "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Acme proposal</title><style>body{font-family:system-ui;padding:2rem}</style></head><body><h1>Acme proposal</h1><button id=\"details\">Show next step</button><p id=\"next\" hidden>Schedule a review.</p><script>document.getElementById('details').onclick=()=>{document.getElementById('next').hidden=false}</script></body></html>"
 }
 ```
 
 The result includes `page_id`, `manage_url`, and `preview_url`. To publish a
 new immutable revision, call `write` again with the same presentation fields
-plus that `page_id`. Keep slide IDs stable across revisions when the logical
-slide is unchanged; analytics use them to preserve meaning.
+plus that `page_id`. The exact UTF-8 HTML source is retained; the served copy
+adds only invisible activity instrumentation. Retained snapshots do not yet
+provide a version-history preview or restore UI; those are P1.
+
+The viewer displays the HTML on iframe load, independently of the optional
+activity bridge. Author CSP can block that bridge and prevent metrics without
+hiding the document; do not promise complete engagement data for every HTML file.
+
+Use self-contained HTML, CSS, and inline JavaScript. Author code runs in an
+opaque-origin `allow-scripts` sandbox without access to Pagent cookies, storage,
+or the parent DOM. Do not rely on external assets, network APIs, forms, nested
+frames, popups, top navigation, `eval`, or workers. The sandbox and CSP restrict
+these capabilities, and the parent frame policy blocks external navigation.
+This is distinct from temporary `document` HTML, which remains sanitized and
+script-free. Use `interactive` if a structured response must return to the agent.
 
 Presentation creation does not implicitly create or configure a share link.
 Open `manage_url` to set Anyone, Allowed email, or Authenticated viewer access.
@@ -147,6 +159,14 @@ Do not poll a document page.
 If a temporary page is missing or expired, write a new page instead of retrying
 the same ID forever. Presentation analytics require authentication and the
 owner, sender, or an explicitly granted workspace permission.
+
+For HTML presentations, report visits and active time only. Completion,
+viewed-slides, furthest-slide, and last-slide metrics are null, with no slide
+rollups. `contentFormat` (`html`, `slides`, or `mixed`) and `revisionNumbers`
+describe the analytics scope. In mixed history, completion excludes HTML
+visits and uses only known legacy slide completion; do not treat null as zero.
+Existing slide revisions and legacy REST publishing remain compatible, but
+the advertised `write` presentation input is HTML.
 
 ## Access and identity
 

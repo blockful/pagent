@@ -18,6 +18,7 @@ type DeckDetail = {
   readonly revisions: readonly {
     readonly id: string;
     readonly revisionNumber: number;
+    readonly contentFormat: 'html' | 'slides';
     readonly slideCount: number;
     readonly createdByEmail: string;
     readonly createdAt: Date;
@@ -72,12 +73,14 @@ export async function getDeckDetail(userId: string, deckId: string): Promise<Dec
       {
         id: string;
         revision_number: number;
+        content_format: 'html' | 'slides';
         slide_count: string;
         created_by_email: string;
         created_at: Date;
       }[]
     >`
       select r.id, r.revision_number, count(s.id)::text as slide_count,
+        case when r.html is null then 'slides' else 'html' end as content_format,
         creator.email as created_by_email, r.created_at
       from deck_revisions r
       join users creator on creator.id = r.created_by
@@ -107,6 +110,7 @@ export async function getDeckDetail(userId: string, deckId: string): Promise<Dec
     revisions: revisionRows.map((revision) => ({
       id: revision.id,
       revisionNumber: revision.revision_number,
+      contentFormat: revision.content_format,
       slideCount: Number(revision.slide_count),
       createdByEmail: revision.created_by_email,
       createdAt: revision.created_at,

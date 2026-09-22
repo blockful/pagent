@@ -228,7 +228,7 @@ integration('engagement readiness regressions', () => {
       // Given
       await ingestEngagement(token, visitId, [event(1, 3_000)]);
       await db.database()`alter table engagement_events drop column qualified`;
-      await db.database()`delete from deck_schema_migrations where version = 3`;
+      await db.database()`delete from deck_schema_migrations where version >= 3`;
       // When
       await initDeckSchema(db.database());
       if (mixed) await ingestEngagement(token, visitId, [event(2, 7_000)]);

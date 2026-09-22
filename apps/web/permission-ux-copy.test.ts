@@ -111,5 +111,6 @@ describe('permission UX copy', () => {
 
     expect(container.querySelectorAll('button')).toHaveLength(1);
     expect(container.querySelector('a')?.getAttribute('href')).toBe('/privacy');
+    expect(container.textContent).not.toContain('records slide engagement');
   });
 });

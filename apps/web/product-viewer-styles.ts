@@ -1,6 +1,11 @@
 import { css } from 'lit';
 
 export const productViewerStyles = css`
+  .viewer-stage.document-stage {
+    display: block;
+    height: 100dvh;
+    padding: 0;
+  }
   .viewer-shell {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;

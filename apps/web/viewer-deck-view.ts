@@ -2,11 +2,13 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { renderViewerGate, type ViewerState } from './viewer-gate.ts';
 import { confidenceLabel, type ShareMetadata, type ViewerDeck } from './viewer-types.ts';
+import './document-frame.ts';
 
 type DeckViewerViewInput = {
   readonly state: ViewerState;
   readonly metadata: ShareMetadata | null;
   readonly deck: ViewerDeck | null;
+  readonly sessionToken?: string;
   readonly message: string | null;
   readonly slideIndex: number;
   readonly consent: boolean;
@@ -43,6 +45,15 @@ export function renderDeckViewer(input: DeckViewerViewInput): TemplateResult {
         </section>
       </main>
     </div>`;
+  if (input.deck?.html != null)
+    return html`<main class="viewer-stage document-stage">
+      <document-frame
+        .sessionToken=${input.sessionToken ?? ''}
+        .revisionId=${input.deck.revisionId}
+        .documentTitle=${input.deck.deckTitle}
+        @document-activity=${input.onActivity}
+      ></document-frame>
+    </main>`;
   const slide = input.deck?.slides[input.slideIndex];
   return html`<div
     class="viewer-shell"

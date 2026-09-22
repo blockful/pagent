@@ -1,6 +1,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import type { DeckDetail, DeckPreview } from './deck-types.ts';
+import './document-frame.ts';
 
 export type DeckPreviewInput = {
   readonly preview: DeckPreview | null;
@@ -18,30 +19,40 @@ export function renderDeckPreview(input: DeckPreviewInput): TemplateResult {
   const slideCount = input.preview?.slides.length ?? 0;
   return html`<div class="detail-grid">
     <div class="stack">
-      <div class="slide-stage">
-        <div class="slide-canvas">${slide === undefined ? nothing : unsafeHTML(slide.html)}</div>
-      </div>
-      <div class="actions" aria-label="Preview navigation">
-        <button
-          class="button secondary"
-          type="button"
-          ?disabled=${input.slideIndex === 0}
-          @click=${() => input.onMove(-1)}
-        >
-          Previous
-        </button>
-        <span class="caption"
-          >Slide ${slideCount === 0 ? 0 : input.slideIndex + 1} of ${slideCount}</span
-        >
-        <button
-          class="button secondary"
-          type="button"
-          ?disabled=${input.slideIndex >= slideCount - 1}
-          @click=${() => input.onMove(1)}
-        >
-          Next
-        </button>
-      </div>
+      ${input.preview?.html != null
+        ? html`<div class="document-preview">
+            <document-frame
+              .deckId=${input.detail.id}
+              .revisionId=${input.preview.revisionId}
+              .documentTitle=${input.detail.title}
+            ></document-frame>
+          </div>`
+        : html`<div class="slide-stage">
+              <div class="slide-canvas">
+                ${slide === undefined ? nothing : unsafeHTML(slide.html)}
+              </div>
+            </div>
+            <div class="actions" aria-label="Preview navigation">
+              <button
+                class="button secondary"
+                type="button"
+                ?disabled=${input.slideIndex === 0}
+                @click=${() => input.onMove(-1)}
+              >
+                Previous
+              </button>
+              <span class="caption"
+                >Slide ${slideCount === 0 ? 0 : input.slideIndex + 1} of ${slideCount}</span
+              >
+              <button
+                class="button secondary"
+                type="button"
+                ?disabled=${input.slideIndex >= slideCount - 1}
+                @click=${() => input.onMove(1)}
+              >
+                Next
+              </button>
+            </div>`}
     </div>
     <aside class="stack">
       ${input.canManage
@@ -80,8 +91,10 @@ export function renderDeckPreview(input: DeckPreviewInput): TemplateResult {
           (revision) =>
             html`<div>
               <strong>Revision ${revision.revisionNumber}</strong><br /><span class="caption"
-                >${revision.slideCount} slides · ${revision.createdByEmail} ·
-                ${formatDate(revision.createdAt)}</span
+                >${revision.contentFormat === 'html'
+                  ? 'HTML document'
+                  : `${revision.slideCount} slides`}
+                · ${revision.createdByEmail} · ${formatDate(revision.createdAt)}</span
               >
             </div>`,
         )}

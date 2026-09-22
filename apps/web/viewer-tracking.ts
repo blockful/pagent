@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ApiError, apiJson } from './deck-api.ts';
+import { deviceClass, browserFamily } from './viewer-interaction.ts';
 import {
   EngagementDelivery,
   isExpectedTrackingError,
@@ -14,6 +15,7 @@ const startVisitSchema = z.discriminatedUnion('kind', [
 
 type TrackerInput = {
   readonly sessionToken: string;
+  readonly revisionId?: string;
   readonly currentSlideId: () => string | null;
   readonly analyticsConsent: boolean;
 };
@@ -28,6 +30,7 @@ type QueuedEvent = {
 
 export class EngagementTracker {
   private readonly sessionToken: string;
+  private readonly revisionId: string | undefined;
   private readonly currentSlideId: () => string | null;
   private analyticsConsent: boolean;
   private visitId: string | null = null;
@@ -48,6 +51,7 @@ export class EngagementTracker {
 
   constructor(input: TrackerInput) {
     this.sessionToken = input.sessionToken;
+    this.revisionId = input.revisionId;
     this.currentSlideId = input.currentSlideId;
     this.analyticsConsent = input.analyticsConsent;
     this.delivery = new EngagementDelivery(input.sessionToken, (error) => {
@@ -200,6 +204,7 @@ export class EngagementTracker {
         method: 'POST',
         headers: { 'x-viewer-session': this.sessionToken },
         body: JSON.stringify({
+          revisionId: this.revisionId,
           visible: this.visibleRatio >= 0.5,
           interacted: true,
           analyticsConsent: this.analyticsConsent,
@@ -255,19 +260,4 @@ export class EngagementTracker {
     if (event.tabVisible && event.recentlyActive) this.lastActiveEventAt = Date.now();
     await this.delivery.enqueue(event, input.keepalive === true);
   }
-}
-
-function deviceClass(): 'mobile' | 'tablet' | 'desktop' {
-  if (innerWidth < 640) return 'mobile';
-  if (innerWidth < 1024) return 'tablet';
-  return 'desktop';
-}
-
-function browserFamily(): string {
-  const agent = navigator.userAgent;
-  if (agent.includes('Firefox/')) return 'Firefox';
-  if (agent.includes('Edg/')) return 'Edge';
-  if (agent.includes('Chrome/')) return 'Chromium';
-  if (agent.includes('Safari/')) return 'Safari';
-  return 'Other';
 }

@@ -21415,17 +21415,27 @@ var StdioServerTransport = class {
 // apps/mcp/server.ts
 import { pathToFileURL } from "node:url";
 
+// apps/api/limits.ts
+var HTML_MAX_BYTES = 1e6;
+
 // apps/api/decks/domain.ts
 var stableSlideIdSchema = external_exports.string().min(1).max(120).regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/);
 var deckIdSchema = external_exports.string().uuid().brand("DeckId");
 var shareLinkIdSchema = external_exports.string().uuid().brand("ShareLinkId");
 var identityConfidenceSchema = external_exports.enum(["anonymous", "unverified", "authenticated"]);
 var analyticsVisibilitySchema = external_exports.enum(["private", "selected", "team", "workspace"]);
-var publishDeckBodySchema = external_exports.object({
+var deckMetadataSchema = external_exports.object({
   title: external_exports.string().trim().min(1).max(160),
   description: external_exports.string().trim().max(2e3).optional(),
   client_label: external_exports.string().trim().max(160).optional(),
-  update_deck_id: deckIdSchema.optional(),
+  update_deck_id: deckIdSchema.optional()
+});
+var htmlPublishDeckBodySchema = deckMetadataSchema.extend({
+  html: external_exports.string().min(1).refine((html) => Buffer.byteLength(html, "utf8") <= HTML_MAX_BYTES, {
+    message: `HTML must not exceed ${HTML_MAX_BYTES} UTF-8 bytes`
+  })
+}).strict();
+var slidesPublishDeckBodySchema = deckMetadataSchema.extend({
   slides: external_exports.array(
     external_exports.object({
       id: stableSlideIdSchema,
@@ -21436,6 +21446,10 @@ var publishDeckBodySchema = external_exports.object({
     message: "slide ids must be unique within a revision"
   })
 }).strict();
+var publishDeckBodySchema = external_exports.union([
+  htmlPublishDeckBodySchema,
+  slidesPublishDeckBodySchema
+]);
 var shareLinkBaseSchema = external_exports.object({
   name: external_exports.string().trim().min(1).max(160),
   expires_at: external_exports.string().datetime().optional()
@@ -21484,9 +21498,6 @@ function mapAnalyticsFilters(value) {
 var analyticsQuerySchema = analyticsFilterInputSchema.transform(mapAnalyticsFilters);
 var analyticsUrlQuerySchema = analyticsFilterInputSchema.omit({ viewer: true }).transform(mapAnalyticsFilters);
 
-// apps/api/limits.ts
-var HTML_MAX_BYTES = 1e6;
-
 // apps/api/mcp/tools.ts
 var InsufficientScopeError = class extends Error {
   requiredScope;
@@ -21518,7 +21529,7 @@ var documentWriteSchema = external_exports.object({
   type: external_exports.literal("document"),
   html: external_exports.string().min(1).max(HTML_MAX_BYTES)
 }).strict();
-var presentationWriteSchema = publishDeckBodySchema.omit({ update_deck_id: true }).extend({
+var presentationWriteSchema = htmlPublishDeckBodySchema.omit({ update_deck_id: true }).extend({
   type: external_exports.literal("presentation"),
   page_id: deckIdSchema.optional()
 }).strict();
@@ -21532,7 +21543,7 @@ var readInputSchema = external_exports.object({
   page_id: external_exports.union([ephemeralPageIdSchema, deckIdSchema]),
   include: external_exports.enum(["response", "analytics"]).optional()
 }).strict();
-var WRITE_DESCRIPTION = "Write one Pagent page. Interactive and document pages are temporary. Presentation pages are durable, revisioned, shareable, and analyzable. Return the page URL to the user.";
+var WRITE_DESCRIPTION = "Write one Pagent page. Interactive and document pages are temporary. A durable presentation is one complete HTML document, with its own layout and inline JavaScript in an isolated sandbox. No slide schema is required. Presentation pages are revisioned, shareable, and analyzable. Use self-contained assets; network access is blocked. Return the page URL to the user.";
 var READ_DESCRIPTION = "Read a page response or durable presentation analytics. The page id selects the sensible default; use include only to be explicit. This call returns immediately and never waits.";
 function registerPagentTools(server2, ops) {
   server2.registerTool(
@@ -21553,7 +21564,7 @@ function registerPagentTools(server2, ops) {
         title: input.title,
         description: input.description,
         client_label: input.client_label,
-        slides: input.slides
+        html: input.html
       };
       const publishInput = input.page_id === void 0 ? base : { ...base, update_deck_id: input.page_id };
       const written = await ops.writePresentation(publishInput, publisher);

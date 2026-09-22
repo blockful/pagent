@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { HTML_MAX_BYTES } from '../limits.ts';
 
 const stableSlideIdSchema = z
   .string()
@@ -18,12 +19,26 @@ export type IdentityConfidence = z.infer<typeof identityConfidenceSchema>;
 export const analyticsVisibilitySchema = z.enum(['private', 'selected', 'team', 'workspace']);
 export type AnalyticsVisibility = z.infer<typeof analyticsVisibilitySchema>;
 
-export const publishDeckBodySchema = z
-  .object({
-    title: z.string().trim().min(1).max(160),
-    description: z.string().trim().max(2_000).optional(),
-    client_label: z.string().trim().max(160).optional(),
-    update_deck_id: deckIdSchema.optional(),
+const deckMetadataSchema = z.object({
+  title: z.string().trim().min(1).max(160),
+  description: z.string().trim().max(2_000).optional(),
+  client_label: z.string().trim().max(160).optional(),
+  update_deck_id: deckIdSchema.optional(),
+});
+
+export const htmlPublishDeckBodySchema = deckMetadataSchema
+  .extend({
+    html: z
+      .string()
+      .min(1)
+      .refine((html) => Buffer.byteLength(html, 'utf8') <= HTML_MAX_BYTES, {
+        message: `HTML must not exceed ${HTML_MAX_BYTES} UTF-8 bytes`,
+      }),
+  })
+  .strict();
+
+const slidesPublishDeckBodySchema = deckMetadataSchema
+  .extend({
     slides: z
       .array(
         z
@@ -41,7 +56,12 @@ export const publishDeckBodySchema = z
       }),
   })
   .strict();
+export const publishDeckBodySchema = z.union([
+  htmlPublishDeckBodySchema,
+  slidesPublishDeckBodySchema,
+]);
 export type PublishDeckBody = z.infer<typeof publishDeckBodySchema>;
+export type SlidesPublishDeckBody = z.infer<typeof slidesPublishDeckBodySchema>;
 
 const shareLinkBaseSchema = z.object({
   name: z.string().trim().min(1).max(160),

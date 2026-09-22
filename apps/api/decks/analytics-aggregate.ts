@@ -4,6 +4,7 @@ import type {
   AnalyticsEventRow,
   AnalyticsVisitRow,
   DeckAnalytics,
+  DeckContentFormat,
   MutableVisitor,
   SlideAccumulator,
   SlideRollup,
@@ -20,6 +21,14 @@ function viewerKey(visit: AnalyticsVisitRow): string {
 
 export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAnalytics {
   const { owner, visitRows, slideRows, engagementRows, eventRows } = input;
+  const revisionFormats = new Map<number, DeckContentFormat>(
+    input.revisionRows?.map((revision) => [revision.revisionNumber, revision.contentFormat]) ?? [
+      ...slideRows.map((slide) => [slide.revisionNumber, 'slides'] as const),
+      ...visitRows.map((visit) => [visit.revisionNumber, visit.contentFormat ?? 'slides'] as const),
+    ],
+  );
+  const formats = new Set(revisionFormats.values());
+  const contentFormat = formats.size > 1 ? 'mixed' : (formats.values().next().value ?? 'slides');
   const slidesById = new Map(slideRows.map((slide) => [slide.id, slide]));
   const eventsByVisit = new Map<string, AnalyticsEventRow[]>();
   for (const event of eventRows) {
@@ -46,10 +55,33 @@ export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAn
       (events.length > 0 || engagements.length === 0);
     const slideSequence = sequenceComplete ? qualifyingSlideSequence(events, slidesById) : [];
     const distinct = new Set(qualified.map((engagement) => engagement.id));
-    const totalActiveTimeMs = engagements.reduce(
-      (total, engagement) => total + engagement.activeDurationMs,
-      0,
-    );
+    const metricsByFormat = {
+      html: {
+        totalActiveTimeMs: events.reduce((total, event) => total + event.activeDurationMs, 0),
+        viewedSlides: null,
+        completion: null,
+        furthestSlide: null,
+        lastSlide: null,
+        sequenceComplete: false,
+        slideSequence: [],
+      },
+      slides: {
+        totalActiveTimeMs: engagements.reduce(
+          (total, engagement) => total + engagement.activeDurationMs,
+          0,
+        ),
+        viewedSlides: distinct.size,
+        completion: visit.totalSlides === 0 ? 0 : distinct.size / visit.totalSlides,
+        furthestSlide:
+          qualified.length === 0
+            ? null
+            : Math.max(...qualified.map((engagement) => engagement.ordinal)),
+        lastSlide: slideSequence.at(-1)?.ordinal ?? null,
+        sequenceComplete,
+        slideSequence,
+      },
+    };
+    const visitFormat = visit.contentFormat ?? 'slides';
     return {
       id: visit.id,
       viewer: visit.viewerEmail ?? 'Anonymous',
@@ -61,16 +93,8 @@ export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAn
       senderId: visit.senderId,
       senderEmail: visit.senderEmail,
       revisionNumber: visit.revisionNumber,
-      totalActiveTimeMs,
-      viewedSlides: distinct.size,
-      completion: visit.totalSlides === 0 ? 0 : distinct.size / visit.totalSlides,
-      furthestSlide:
-        qualified.length === 0
-          ? null
-          : Math.max(...qualified.map((engagement) => engagement.ordinal)),
-      lastSlide: slideSequence.at(-1)?.ordinal ?? null,
-      sequenceComplete,
-      slideSequence,
+      contentFormat: visitFormat,
+      ...metricsByFormat[visitFormat],
     };
   });
   const visitDetailsById = new Map<string, VisitDetail>();
@@ -101,7 +125,9 @@ export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAn
       current.lastVisit > detail.lastActivityAt ? current.lastVisit : detail.lastActivityAt;
     current.visits += 1;
     current.totalActiveTimeMs += detail.totalActiveTimeMs;
-    current.maximumCompletion = Math.max(current.maximumCompletion, detail.completion);
+    if (detail.completion !== null) {
+      current.maximumCompletion = Math.max(current.maximumCompletion ?? 0, detail.completion);
+    }
   }
   const slideAccumulators = new Map<string, SlideAccumulator>();
   for (const slide of slideRows) {
@@ -143,7 +169,16 @@ export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAn
     exits: accumulator.exits,
   }));
   const totalActive = visits.reduce((total, visit) => total + visit.totalActiveTimeMs, 0);
-  const totalCompletion = visits.reduce((total, visit) => total + visit.completion, 0);
+  const knownCompletions = visits.flatMap((visit) =>
+    visit.completion === null ? [] : [visit.completion],
+  );
+  const averageCompletion =
+    knownCompletions.length === 0
+      ? contentFormat === 'slides'
+        ? 0
+        : null
+      : knownCompletions.reduce((total, completion) => total + completion, 0) /
+        knownCompletions.length;
   const lastViewed = visitRows.reduce<Date | null>(
     (latest, visit) =>
       latest === null || visit.lastActivityAt > latest ? visit.lastActivityAt : latest,
@@ -153,12 +188,14 @@ export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAn
     [...slides].sort((left, right) => right.totalActiveTimeMs - left.totalActiveTimeMs)[0] ?? null;
   return {
     owner,
+    contentFormat,
+    revisionNumbers: [...revisionFormats.keys()].sort((left, right) => right - left),
     overview: {
       totalVisits: visitRows.length,
       uniqueViewers: uniqueViewerCount,
       lastViewed,
       averageActiveTimeMs: visits.length === 0 ? 0 : totalActive / visits.length,
-      averageCompletion: visits.length === 0 ? 0 : totalCompletion / visits.length,
+      averageCompletion,
       topSlide,
     },
     visitors: [...visitors.values()],

@@ -1,7 +1,7 @@
 import * as db from '../db.ts';
 import { sanitize } from '../sanitize.ts';
 import type postgres from 'postgres';
-import type { PublishDeckBody } from './domain.ts';
+import type { PublishDeckBody, SlidesPublishDeckBody } from './domain.ts';
 import { DeckDataInvariantError } from './errors.ts';
 
 type Transaction = postgres.TransactionSql<Record<string, never>>;
@@ -44,7 +44,7 @@ type SanitizedSlide = {
   readonly ordinal: number;
 };
 
-function sanitizedSlides(body: PublishDeckBody): readonly SanitizedSlide[] {
+function sanitizedSlides(body: SlidesPublishDeckBody): readonly SanitizedSlide[] {
   return body.slides.map((slide, index) => {
     const html = sanitize(slide.html).output.trim();
     if (html.length === 0) throw new InvalidDeckContentError(slide.id);
@@ -85,7 +85,8 @@ export async function publishDeck(
   user: PublishingUser,
   body: PublishDeckBody,
 ): Promise<PublishedDeck> {
-  const slides = sanitizedSlides(body);
+  const slides = 'slides' in body ? sanitizedSlides(body) : [];
+  const html = 'html' in body ? body.html : null;
   return db.database().begin(async (tx) => {
     const workspaceId = await ensurePersonalWorkspace(tx, user);
     const requestedDeckId = body.update_deck_id;
@@ -123,8 +124,8 @@ export async function publishDeck(
       throw new DeckDataInvariantError('revision counter returned no value');
     }
     const revisions = await tx<{ id: string }[]>`
-      insert into deck_revisions (deck_id, revision_number, created_by)
-      values (${deckId}, ${revisionNumber}, ${user.id})
+      insert into deck_revisions (deck_id, revision_number, created_by, html)
+      values (${deckId}, ${revisionNumber}, ${user.id}, ${html})
       returning id
     `;
     const revisionId = revisions[0]?.id;
@@ -141,7 +142,7 @@ export async function publishDeck(
       insert into audit_log (workspace_id, deck_id, actor_user_id, action, details)
       values (
         ${workspaceId}, ${deckId}, ${user.id}, 'deck.published',
-        ${JSON.stringify({ revisionNumber, slideCount: slides.length })}::jsonb
+        ${JSON.stringify({ revisionNumber, contentFormat: html === null ? 'slides' : 'html', slideCount: slides.length })}::jsonb
       )
     `;
     return { deckId, revisionId, revisionNumber };
@@ -153,6 +154,7 @@ export type DeckPreview = {
   readonly title: string;
   readonly revisionId: string;
   readonly revisionNumber: number;
+  readonly html: string | null;
   readonly slides: readonly {
     readonly id: string;
     readonly stableSlideId: string;
@@ -170,9 +172,10 @@ export async function getDeckPreview(userId: string, deckId: string): Promise<De
       deck_title: string;
       revision_id: string;
       revision_number: number;
+      html: string | null;
     }[]
   >`
-    select d.id as deck_id, d.title as deck_title, r.id as revision_id, r.revision_number
+    select d.id as deck_id, d.title as deck_title, r.id as revision_id, r.revision_number, r.html
     from decks d
     join deck_revisions r
       on r.deck_id = d.id and r.revision_number = d.latest_revision_number
@@ -207,6 +210,7 @@ export async function getDeckPreview(userId: string, deckId: string): Promise<De
     title: revision.deck_title,
     revisionId: revision.revision_id,
     revisionNumber: revision.revision_number,
+    html: revision.html,
     slides: slides.map((slide) => ({
       id: slide.id,
       stableSlideId: slide.stable_slide_id,

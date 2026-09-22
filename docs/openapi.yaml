@@ -3,23 +3,30 @@ info:
   title: Pagent API
   version: 0.1.0
   description: |
-    Hosted UI rendering for terminal-bound AI agents. The agent emits an
-    A2UI surface to this service, prints a short URL, and reads the user's
-    interactions back via this API.
+    Page publishing for AI agents. MCP exposes exactly `write` and `read`:
+    temporary interactive/document pages and durable HTML presentation pages.
+    Sharing, permissions, and management use the authenticated web app and
+    REST API. Internal deck route names are not another product primitive.
 
-    Spec contents are opaque to the service. The `format` field on `POST /new`
-    selects how the spec is interpreted:
+    The `format` field on temporary-page `POST /new` selects the renderer:
     - `a2ui` (default) — `spec` is an A2UI v0.9 message array. Pages take user
       input and produce a result.
-    - `html` — `spec` is a UTF-8 HTML string (up to 1,000,000 bytes).
-      Pages are view-only: they never transition past `open`, and
+    - `html` — `spec` is a sanitized, script-free UTF-8 HTML string
+      (up to 1,000,000 bytes). Pages are view-only: they never transition past `open`, and
       `POST /{id}/result` returns 400 `invalid_for_format`.
+
+    Durable `POST /v1/decks` accepts `title` and the complete `html` document,
+    preserving the exact source in an immutable revision. Optional
+    `update_deck_id` corresponds to MCP `write`'s `page_id`. Legacy `slides`
+    remain accepted only for shipped clients and records. HTML runs in an
+    opaque-origin sandbox with inline scripts, not the temporary sanitizer.
+    HTML analytics report visits/active time, not inferred slide completion.
 
     See https://github.com/blockful/pagent for the source.
 
-    ## Page lifecycle
+    ## Temporary page lifecycle
 
-    A page walks a 3-state machine: `open → submitted → received`.
+    An interactive page walks a 3-state machine: `open → submitted → received`.
 
     - **open** — created, waiting for a browser submission.
     - **submitted** — the browser has called `POST /{id}/result`. The agent
@@ -812,6 +819,14 @@ paths:
       operationId: publishDeck
       tags: [Decks]
       summary: Publish a durable deck or immutable revision
+      description: |
+        Publish the submitted HTML document itself, without a Pagent slide
+        structure. HTML source is retained exactly; CSS and inline JavaScript
+        execute only in the protected document sandbox. The `slides` variant
+        is a legacy REST compatibility path and retains sanitization.
+        Exactly one of `html` or `slides` is required. The HTML value is capped
+        at 1,000,000 UTF-8 bytes; the overall HTTP body is also capped at
+        1,000,000 bytes, so JSON escaping and metadata reduce the usable payload.
       security: [{ CookieAuth: [] }, { BearerAuth: [] }]
       requestBody:
         required: true
@@ -819,10 +834,15 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/PublishDeckRequest' }
       responses:
-        '200': { description: Existing deck updated with a new revision. }
-        '201': { description: Deck and first revision created. }
-        '400': { description: Invalid or fully sanitized content. }
+        '200':
+          description: Existing deck updated with a new immutable revision.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PublishedDeck' } } }
+        '201':
+          description: Deck and first revision created.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PublishedDeck' } } }
+        '400': { description: Invalid input or legacy slide content empty after sanitization. }
         '401': { description: Authentication required. }
+        '413': { description: Overall HTTP body exceeds 1, 000, 000 bytes. }
 
   /v1/decks/{deckId}:
     parameters: [{ $ref: '#/components/parameters/DeckId' }]
@@ -832,7 +852,9 @@ paths:
       summary: Get deck metadata, revision history, and recent activity
       security: [{ CookieAuth: [] }, { BearerAuth: [] }]
       responses:
-        '200': { description: Deck detail. }
+        '200':
+          description: Deck detail and retained revision metadata; historical preview/restore is P1.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DeckDetail' } } }
         '403': { description: Content access denied. }
     patch:
       operationId: renameDeck
@@ -870,10 +892,17 @@ paths:
     get:
       operationId: previewDeck
       tags: [Decks]
-      summary: Get the latest sanitized revision without recording analytics
+      summary: Get the latest revision without recording analytics
+      description: |
+        HTML revisions return the exact source in `html` and an empty `slides`
+        array. Legacy revisions return `html: null` and their sanitized slides.
+        Render HTML only through the protected owner document route, never in
+        the application's DOM. Earlier revision preview/restore remains P1.
       security: [{ CookieAuth: [] }, { BearerAuth: [] }]
       responses:
-        '200': { description: Latest revision and ordered slides. }
+        '200':
+          description: Latest HTML or legacy slide revision.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DeckPreview' } } }
         '403': { description: Content access denied. }
 
   /v1/decks/{deckId}/archive:
@@ -902,7 +931,12 @@ paths:
       operationId: getDeckAnalytics
       tags: [Analytics]
       summary: Get authorized deck engagement analytics
-      description: Viewer email filters are deliberately unavailable in URL query parameters; use the JSON query endpoint so raw emails do not enter analytics URLs or access logs.
+      description: |
+        Viewer email filters are deliberately unavailable in URL query
+        parameters; use the JSON query endpoint to keep emails out of URLs and
+        access logs. HTML visits have page-level time only, null slide metrics,
+        and no slide rollups. Mixed-history completion uses only known legacy
+        slide completion, never HTML visits as zero.
       security: [{ CookieAuth: [] }, { BearerAuth: [] }]
       parameters:
         - { name: link_id, in: query, schema: { type: string, format: uuid } }
@@ -911,10 +945,10 @@ paths:
         - { name: from, in: query, schema: { type: string, format: date-time } }
         - { name: to, in: query, schema: { type: string, format: date-time } }
       responses:
-        {
-          '200': { description: Overview, visitor, slide, and visit-detail analytics. },
-          '403': { description: Analytics access denied. },
-        }
+        '200':
+          description: Format-aware overview, visitor, legacy slide, and visit analytics.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DeckAnalytics' } } }
+        '403': { description: Analytics access denied. }
 
   /v1/decks/{deckId}/analytics/query:
     parameters: [{ $ref: '#/components/parameters/DeckId' }]
@@ -927,10 +961,10 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/AnalyticsFilters' } } }
       responses:
-        {
-          '200': { description: Filtered analytics. },
-          '403': { description: Analytics access denied. },
-        }
+        '200':
+          description: Filtered analytics with the same format-aware metric semantics as GET.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DeckAnalytics' } } }
+        '403': { description: Analytics access denied. }
 
   /v1/decks/{deckId}/analytics.csv:
     parameters: [{ $ref: '#/components/parameters/DeckId' }]
@@ -1358,19 +1392,156 @@ paths:
     get:
       operationId: getViewerDeck
       tags: [Viewer]
-      summary: Fetch sanitized deck content for a live viewer session
+      summary: Fetch the latest revision for a live viewer session
+      description: |
+        HTML revisions return exact `html` and an empty `slides` array; legacy
+        revisions return `html: null` and their existing slides. Render HTML
+        only through `POST /v1/viewer/document`, not the parent application's DOM.
       parameters: [{ $ref: '#/components/parameters/ViewerSession' }]
       responses:
-        {
-          '200': { description: Ordered slides and identity confidence. },
-          '410': { description: Session expired, revoked, or deck deleted. },
-        }
+        '200':
+          description: HTML or legacy slide content and identity confidence.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ViewerDeck' } } }
+        '410': { description: Session expired, revoked, or deck deleted. }
+
+  /v1/viewer/document:
+    post:
+      operationId: getViewerDocument
+      tags: [Viewer]
+      summary: Deliver protected HTML into the viewer's isolated frame
+      description: |
+        Submit a form to the document frame using the existing viewer session.
+        The exact Origin header must match an allowlisted renderer origin.
+        No `allowed_origin` body field or new frame token is accepted. All
+        existing Anyone, Allowed email (Unverified), and Authenticated access
+        rules still apply. Credentials must not appear in URLs or served HTML.
+        The requested revision must still be latest; reload revision metadata
+        after 409. The served copy appends a nonvisual activity bridge without
+        changing stored source. Activity messages are best-effort telemetry,
+        not authenticated proof of a human visit. The viewer reveals HTML on
+        iframe load independently of the bridge; author CSP may prevent metrics
+        without hiding the document. For an allowlisted Origin and
+        `Accept: text/html`, errors return generic sandboxed HTML posting
+        `pagent:error`, preserving the HTTP status and no-store policy. JSON
+        clients and rejected-Origin responses keep their existing error bodies.
+      parameters:
+        - { $ref: '#/components/parameters/RendererOrigin' }
+        - { $ref: '#/components/parameters/DocumentAccept' }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [session_token, revision_id]
+              properties:
+                session_token: { type: string, minLength: 20, maxLength: 200 }
+                revision_id: { type: string, format: uuid }
+      responses:
+        '200': { $ref: '#/components/responses/HtmlDocument' }
+        '400':
+          { $ref: '#/components/responses/DocumentFrameError', description: Invalid form fields. }
+        '403':
+          description: Missing or non-allowlisted Origin header; remains JSON regardless of Accept.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DocumentError' } } }
+        '404':
+          {
+            $ref: '#/components/responses/DocumentFrameError',
+            description: Viewer session unavailable.,
+          }
+        '409':
+          {
+            $ref: '#/components/responses/DocumentFrameError',
+            description: Requested revision is no longer latest; revision_changed in JSON.,
+          }
+        '410':
+          {
+            $ref: '#/components/responses/DocumentFrameError',
+            description: 'Session or link expired/revoked, or deck deleted.',
+          }
+        '415':
+          {
+            $ref: '#/components/responses/DocumentFrameError',
+            description: Legacy slide revision; unsupported_format in JSON.,
+          }
+        '429':
+          {
+            $ref: '#/components/responses/DocumentFrameError',
+            description: Document delivery rate limit exceeded.,
+          }
+
+  /v1/owner/document:
+    post:
+      operationId: getOwnerDocument
+      tags: [Decks]
+      summary: Deliver protected HTML for an authorized preview without a visit
+      description: |
+        Requires the existing auth cookie or a Bearer token with `page:read`,
+        plus permission to view deck content. No separate frame token is
+        issued. The exact Origin header must match an allowlisted renderer
+        origin; body `allowed_origin` is not accepted. The requested revision
+        must still be latest, and expired/revoked auth or deleted content fails
+        closed. Credentials never appear in URLs or the served document.
+        Immutable snapshots are retained, but historical preview/restore is P1.
+        An allowlisted request accepting `text/html` receives a generic
+        sandboxed HTML error that posts `pagent:error` to the parent, retaining
+        the HTTP status and no-store policy. JSON clients and rejected Origins
+        keep their existing error bodies.
+      security: [{ CookieAuth: [] }, { BearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/RendererOrigin' }
+        - { $ref: '#/components/parameters/DocumentAccept' }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [deck_id, revision_id]
+              properties:
+                deck_id: { type: string, format: uuid }
+                revision_id: { type: string, format: uuid }
+      responses:
+        '200': { $ref: '#/components/responses/HtmlDocument' }
+        '400':
+          { $ref: '#/components/responses/DocumentFrameError', description: Invalid form fields. }
+        '401':
+          {
+            $ref: '#/components/responses/DocumentFrameError',
+            description: 'Authentication missing, expired, or invalid.',
+          }
+        '403':
+          {
+            $ref: '#/components/responses/DocumentFrameError',
+            description: 'Origin, scope, or content denied; includes deleted content. Rejected Origins remain JSON regardless of Accept.',
+          }
+        '409':
+          {
+            $ref: '#/components/responses/DocumentFrameError',
+            description: Requested revision is no longer latest; revision_changed in JSON.,
+          }
+        '415':
+          {
+            $ref: '#/components/responses/DocumentFrameError',
+            description: Legacy slide revision; unsupported_format in JSON.,
+          }
+        '429':
+          {
+            $ref: '#/components/responses/DocumentFrameError',
+            description: Document delivery rate limit exceeded.,
+          }
 
   /v1/viewer/visits:
     post:
       operationId: startViewerVisit
       tags: [Engagement]
       summary: Start a human visit only after visibility and interaction qualification
+      description: |
+        Send `revisionId` to bind a visit to the revision actually displayed,
+        including when a new revision is published while the frame is open.
+        Omission retains the legacy behavior of using the latest revision.
       parameters: [{ $ref: '#/components/parameters/ViewerSession' }]
       requestBody:
         required: true
@@ -1380,9 +1551,7 @@ paths:
         {
           '200':
             {
-              description: Visit started,
-              excluded as preview or automation,
-              or disabled by consent.,
+              description: 'Visit started, excluded as preview or automation, or disabled by consent.',
             },
           '429': { description: Per-client-IP viewer write limit exceeded. },
         }
@@ -1636,6 +1805,17 @@ components:
       description: HttpOnly browser session cookie issued after interactive login.
 
   parameters:
+    DocumentAccept:
+      name: Accept
+      in: header
+      description: Including text/html selects a sandboxed HTML error for allowlisted Origins; other clients retain JSON errors.
+      schema: { type: string, example: text/html }
+    RendererOrigin:
+      name: Origin
+      in: header
+      required: true
+      description: Exact allowlisted renderer origin; never derived from a form field.
+      schema: { type: string, format: uri, example: 'https://pagent.link' }
     PageId:
       name: id
       in: path
@@ -1666,6 +1846,50 @@ components:
       description: Opaque viewer or owner-preview session token with a maximum seven-day lifetime.
       schema: { type: string, minLength: 20 }
 
+  responses:
+    DocumentFrameError:
+      description: |
+        The HTTP error status is preserved. With an allowlisted Origin and
+        Accept containing text/html, returns generic sandboxed HTML with
+        no-referrer/CSP headers and a pagent:error message to the parent.
+        Otherwise the existing JSON error body is unchanged. An HTML error
+        never includes deck content or credentials.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: 'private, no-store' }
+      content:
+        text/html:
+          schema:
+            { type: string, description: Generic sandboxed error document posting pagent:error. }
+        application/json:
+          schema: { $ref: '#/components/schemas/DocumentError' }
+    HtmlDocument:
+      description: |
+        Full HTML plus an invisible telemetry bridge. Stored UTF-8 source is
+        unchanged. Display is triggered by iframe load, not bridge readiness;
+        author CSP can block the bridge and prevent metrics without hiding
+        content. Serve only in a sandboxed document frame. CSP uses
+        `sandbox allow-scripts` without `allow-same-origin`; author code has no
+        Pagent account-cookie/storage or parent-DOM access. The supported
+        document is self-contained HTML/CSS/inline JavaScript. CSP and sandbox
+        restrict external assets, network APIs, forms, nested frames, popups,
+        top navigation, eval, and workers. Parent frame policy blocks external
+        navigation; this is not a blanket guarantee against any attempted
+        browser network request.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: 'private, no-store' }
+        Referrer-Policy:
+          schema: { type: string, const: no-referrer }
+        Content-Security-Policy:
+          description: Restrictive document CSP including sandbox and allowlisted frame ancestors.
+          schema: { type: string }
+        X-Content-Type-Options:
+          schema: { type: string, const: nosniff }
+      content:
+        text/html:
+          schema: { type: string }
+
   headers:
     XRequestId:
       description: >
@@ -1682,6 +1906,12 @@ components:
         minimum: 1
 
   schemas:
+    DocumentError:
+      type: object
+      required: [error]
+      description: Existing JSON error shape; extra fields depend on the error, such as retry_after_seconds.
+      properties:
+        error: { type: string }
     WorkspaceMember:
       type: object
       additionalProperties: false
@@ -1781,6 +2011,33 @@ components:
         retentionDays: { type: integer, minimum: 30, maximum: 2555 }
 
     PublishDeckRequest:
+      description: Publish full HTML; legacy slides remain a REST-only compatibility form.
+      oneOf:
+        - $ref: '#/components/schemas/HtmlPublishDeckRequest'
+        - $ref: '#/components/schemas/LegacySlidesPublishDeckRequest'
+
+    HtmlPublishDeckRequest:
+      type: object
+      additionalProperties: false
+      required: [title, html]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 160 }
+        description: { type: string, maxLength: 2000 }
+        client_label: { type: string, maxLength: 160 }
+        update_deck_id: { type: string, format: uuid }
+        html:
+          type: string
+          minLength: 1
+          maxLength: 1000000
+          description: |
+            Exact full HTML source, capped at 1,000,000 UTF-8 bytes without
+            trimming or sanitization. The overall HTTP body has the same byte
+            cap, so JSON escaping and metadata can lower the effective limit.
+            Use self-contained CSS/inline JavaScript; see protected document
+            delivery for sandbox restrictions. No slide structure is inferred.
+
+    LegacySlidesPublishDeckRequest:
+      description: Compatibility with shipped REST clients; not the advertised MCP write contract.
       type: object
       additionalProperties: false
       required: [title, slides]
@@ -1798,9 +2055,295 @@ components:
             additionalProperties: false
             required: [id, html]
             properties:
-              id: { type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$' }
+              id: { type: string, maxLength: 120, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$' }
               title: { type: string, maxLength: 200 }
               html: { type: string, minLength: 1, maxLength: 1000000 }
+
+    PublishedDeck:
+      type: object
+      required: [deckId, revisionId, revisionNumber]
+      properties:
+        deckId: { type: string, format: uuid }
+        revisionId: { type: string, format: uuid }
+        revisionNumber: { type: integer, minimum: 1 }
+
+    DeckDetail:
+      type: object
+      required:
+        [
+          id,
+          title,
+          description,
+          clientLabel,
+          status,
+          ownerId,
+          ownerEmail,
+          analyticsVisibility,
+          latestRevisionNumber,
+          createdAt,
+          updatedAt,
+          lastPublishedAt,
+          revisions,
+          recentActivity,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: [string, 'null'] }
+        clientLabel: { type: [string, 'null'] }
+        status: { type: string, enum: [active, archived] }
+        ownerId: { type: string, format: uuid }
+        ownerEmail: { type: string, format: email }
+        analyticsVisibility: { type: string, enum: [private, selected, team, workspace] }
+        latestRevisionNumber: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        lastPublishedAt: { type: string, format: date-time }
+        revisions:
+          type: array
+          description: Retained immutable revision metadata, newest first; not a historical preview/restore endpoint.
+          items:
+            type: object
+            required: [id, revisionNumber, contentFormat, slideCount, createdByEmail, createdAt]
+            properties:
+              id: { type: string, format: uuid }
+              revisionNumber: { type: integer, minimum: 1 }
+              contentFormat: { type: string, enum: [html, slides] }
+              slideCount:
+                {
+                  type: integer,
+                  minimum: 0,
+                  description: Zero for HTML revisions; no slides are inferred.,
+                }
+              createdByEmail: { type: string, format: email }
+              createdAt: { type: string, format: date-time }
+        recentActivity:
+          type: array
+          items:
+            type: object
+            required: [id, action, actorEmail, createdAt]
+            properties:
+              id: { type: string, format: uuid }
+              action: { type: string }
+              actorEmail: { type: [string, 'null'], format: email }
+              createdAt: { type: string, format: date-time }
+
+    DeckSlide:
+      type: object
+      description: Existing sanitized legacy slide; HTML revisions never fabricate these records.
+      required: [id, stableSlideId, ordinal, title, html]
+      properties:
+        id: { type: string, format: uuid }
+        stableSlideId: { type: string }
+        ordinal: { type: integer, minimum: 1 }
+        title: { type: [string, 'null'] }
+        html: { type: string }
+
+    DeckPreview:
+      type: object
+      required: [deckId, title, revisionId, revisionNumber, html, slides]
+      properties:
+        deckId: { type: string, format: uuid }
+        title: { type: string }
+        revisionId: { type: string, format: uuid }
+        revisionNumber: { type: integer, minimum: 1 }
+        html:
+          type: [string, 'null']
+          description: Exact source for HTML revisions; null for legacy slides.
+        slides:
+          type: array
+          description: Empty for HTML revisions.
+          items: { $ref: '#/components/schemas/DeckSlide' }
+
+    ViewerDeck:
+      type: object
+      required:
+        [
+          deckId,
+          deckTitle,
+          revisionId,
+          revisionNumber,
+          html,
+          shareLinkId,
+          viewerSessionId,
+          identityConfidence,
+          preview,
+          slides,
+        ]
+      properties:
+        deckId: { type: string, format: uuid }
+        deckTitle: { type: string }
+        revisionId: { type: string, format: uuid }
+        revisionNumber: { type: integer, minimum: 1 }
+        html:
+          type: [string, 'null']
+          description: Exact source for HTML revisions; null for legacy slides.
+        shareLinkId: { type: string, format: uuid }
+        viewerSessionId: { type: string, format: uuid }
+        identityConfidence: { type: string, enum: [anonymous, unverified, authenticated] }
+        preview: { type: boolean }
+        slides:
+          type: array
+          description: Empty for HTML revisions.
+          items: { $ref: '#/components/schemas/DeckSlide' }
+
+    DeckAnalytics:
+      type: object
+      required: [owner, contentFormat, revisionNumbers, overview, visitors, slides, visits]
+      properties:
+        owner:
+          type: object
+          required: [id, email]
+          properties:
+            id: { type: string, format: uuid }
+            email: { type: string, format: email }
+        contentFormat:
+          type: string
+          enum: [html, slides, mixed]
+          description: Formats among retained revisions matching the revision filter, including revisions without matching visits.
+        revisionNumbers:
+          type: array
+          description: Retained revisions matching the revision filter, newest first; includes revisions without matching visits.
+          items: { type: integer, minimum: 1 }
+        overview:
+          type: object
+          required:
+            [
+              totalVisits,
+              uniqueViewers,
+              lastViewed,
+              averageActiveTimeMs,
+              averageCompletion,
+              topSlide,
+            ]
+          properties:
+            totalVisits: { type: integer, minimum: 0 }
+            uniqueViewers: { type: integer, minimum: 0 }
+            lastViewed: { type: [string, 'null'], format: date-time }
+            averageActiveTimeMs: { type: number, minimum: 0 }
+            averageCompletion:
+              type: [number, 'null']
+              minimum: 0
+              maximum: 1
+              description: Known legacy slide completions only; HTML visits are excluded, not zero. Null for HTML-only scope.
+            topSlide:
+              oneOf:
+                - $ref: '#/components/schemas/SlideRollup'
+                - type: 'null'
+        visitors:
+          type: array
+          items:
+            type: object
+            required:
+              [
+                viewer,
+                identityConfidence,
+                firstVisit,
+                lastVisit,
+                visits,
+                totalActiveTimeMs,
+                maximumCompletion,
+              ]
+            properties:
+              viewer: { type: string }
+              identityConfidence: { type: string, enum: [anonymous, unverified, authenticated] }
+              firstVisit: { type: string, format: date-time }
+              lastVisit: { type: string, format: date-time }
+              visits: { type: integer, minimum: 1 }
+              totalActiveTimeMs: { type: number, minimum: 0 }
+              maximumCompletion:
+                type: [number, 'null']
+                minimum: 0
+                maximum: 1
+                description: Null when no legacy slide completion is known.
+        slides:
+          type: array
+          description: Legacy slide rollups only; empty for HTML-only scope.
+          items: { $ref: '#/components/schemas/SlideRollup' }
+        visits:
+          type: array
+          items: { $ref: '#/components/schemas/AnalyticsVisit' }
+
+    SlideRollup:
+      type: object
+      required:
+        [
+          slideId,
+          stableSlideId,
+          revisionNumber,
+          ordinal,
+          title,
+          uniqueViewers,
+          viewRate,
+          averageActiveTimeMs,
+          totalActiveTimeMs,
+          exits,
+        ]
+      properties:
+        slideId: { type: string, format: uuid }
+        stableSlideId: { type: string }
+        revisionNumber: { type: integer, minimum: 1 }
+        ordinal: { type: integer, minimum: 1 }
+        title: { type: [string, 'null'] }
+        uniqueViewers: { type: integer, minimum: 0 }
+        viewRate: { type: number, minimum: 0, maximum: 1 }
+        averageActiveTimeMs: { type: number, minimum: 0 }
+        totalActiveTimeMs: { type: number, minimum: 0 }
+        exits: { type: integer, minimum: 0 }
+
+    AnalyticsVisit:
+      type: object
+      required:
+        [
+          id,
+          viewer,
+          identityConfidence,
+          startedAt,
+          lastActivityAt,
+          linkId,
+          linkName,
+          senderId,
+          senderEmail,
+          revisionNumber,
+          totalActiveTimeMs,
+          contentFormat,
+          viewedSlides,
+          completion,
+          furthestSlide,
+          lastSlide,
+          sequenceComplete,
+          slideSequence,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        viewer: { type: string }
+        identityConfidence: { type: string, enum: [anonymous, unverified, authenticated] }
+        startedAt: { type: string, format: date-time }
+        lastActivityAt: { type: string, format: date-time }
+        linkId: { type: string, format: uuid }
+        linkName: { type: string }
+        senderId: { type: string, format: uuid }
+        senderEmail: { type: string, format: email }
+        revisionNumber: { type: integer, minimum: 1 }
+        totalActiveTimeMs: { type: number, minimum: 0 }
+        contentFormat: { type: string, enum: [html, slides] }
+        viewedSlides: { type: [integer, 'null'], minimum: 0, description: Null for HTML. }
+        completion: { type: [number, 'null'], minimum: 0, maximum: 1, description: Null for HTML. }
+        furthestSlide: { type: [integer, 'null'], minimum: 0, description: Null for HTML. }
+        lastSlide: { type: [integer, 'null'], minimum: 0, description: Null for HTML. }
+        sequenceComplete: { type: boolean }
+        slideSequence:
+          type: array
+          description: Empty for HTML visits.
+          items:
+            type: object
+            required: [slideId, ordinal, title, activeDurationMs, viewCount]
+            properties:
+              slideId: { type: string, format: uuid }
+              ordinal: { type: integer, minimum: 1 }
+              title: { type: [string, 'null'] }
+              activeDurationMs: { type: number, minimum: 0 }
+              viewCount: { type: integer, minimum: 0 }
 
     ShareLinkRequest:
       type: object
@@ -1842,6 +2385,10 @@ components:
       additionalProperties: false
       required: [visible, interacted, analyticsConsent, deviceClass, browserFamily, countryCode]
       properties:
+        revisionId:
+          type: string
+          format: uuid
+          description: Displayed revision to bind this visit to; omitted by legacy clients to use latest.
         visible:
           { type: boolean, description: True only when the viewer is at least 50 percent visible. }
         interacted: { type: boolean }
@@ -1876,7 +2423,12 @@ components:
             properties:
               id: { type: string, format: uuid, description: Idempotency key. }
               eventType: { type: string, enum: [start, heartbeat, slide_view, close] }
-              slideId: { type: string, format: uuid }
+              slideId:
+                {
+                  type: string,
+                  format: uuid,
+                  description: Legacy slide events only; omit for HTML visit-level events.,
+                }
               eventAt: { type: string, format: date-time }
               sequence: { type: integer, minimum: 0 }
               visibleRatio: { type: number, minimum: 0, maximum: 1 }
@@ -1885,9 +2437,7 @@ components:
               recentlyActive:
                 {
                   type: boolean,
-                  description: False after 60 seconds without mouse,
-                  touch,
-                  or keyboard activity.,
+                  description: 'False after 60 seconds without mouse, touch, or keyboard activity.',
                 }
 
     OAuthError:

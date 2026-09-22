@@ -71,9 +71,12 @@ export function tabFromHash(hash: string): DetailTab {
 export function availableDeckDetailTabs(
   hasAnalytics: boolean,
   canManage: boolean,
+  hasSlides = true,
 ): readonly DetailTab[] {
   const analyticsTabs: readonly DetailTab[] = hasAnalytics
-    ? ['overview', 'visitors', 'slides']
+    ? hasSlides
+      ? ['overview', 'visitors', 'slides']
+      : ['overview', 'visitors']
     : [];
   const managementTabs: readonly DetailTab[] = canManage ? ['links', 'access'] : [];
   return ['preview', ...analyticsTabs, ...managementTabs];

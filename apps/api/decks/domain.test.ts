@@ -25,7 +25,7 @@ describe('deck boundary schemas', () => {
 
     // Then
     expect(result.success).toBe(true);
-    if (result.success)
+    if (result.success && 'slides' in result.data)
       expect(result.data.slides.map((slide) => slide.id)).toEqual(['cover', 'plan']);
   });
 

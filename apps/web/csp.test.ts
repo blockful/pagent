@@ -13,6 +13,19 @@ const ALL_DIRECTIVES = [
 ] as const;
 
 describe('buildCsp', () => {
+  it('allows protected document navigation without allowing inline scripts in the app', () => {
+    const csp = buildCsp('https://api.pagent.link');
+    const directives = new Map(
+      csp.split('; ').map((directive) => {
+        const [name, ...values] = directive.split(' ');
+        return [name, values.join(' ')];
+      }),
+    );
+    expect(directives.get('script-src')).toBe("'self'");
+    expect(directives.get('frame-src')).toContain('https://api.pagent.link/v1/viewer/document');
+    expect(directives.get('form-action')).toContain('https://api.pagent.link/v1/owner/document');
+  });
+
   it('includes only fixed application origins when VITE_API_URL is unset', () => {
     const csp = buildCsp(undefined);
     expect(csp).toContain("connect-src 'self'");

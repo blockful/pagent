@@ -5,6 +5,7 @@ import type {
   AnalyticsEventRow,
   AnalyticsSlideRow,
   AnalyticsVisitRow,
+  AnalyticsRevisionRow,
   DeckAnalytics,
 } from './analytics-types.ts';
 import { canViewAnalytics } from './authorization.ts';
@@ -98,6 +99,14 @@ export async function getDeckAnalytics(
   const database = db.database();
   const viewerSearch = filters.viewer === undefined ? null : `%${filters.viewer.toLowerCase()}%`;
   const sender = access.restrictToCreator ? userId : (filters.sender ?? null);
+  const revisionRows = await database<AnalyticsRevisionRow[]>`
+    select revision_number as "revisionNumber",
+      case when html is null then 'slides' else 'html' end as "contentFormat"
+    from deck_revisions
+    where deck_id = ${deckId}
+      and (${filters.revision ?? null}::integer is null or revision_number = ${filters.revision ?? null})
+    order by revision_number desc
+  `;
   const visits = await database<
     {
       id: string;
@@ -113,11 +122,13 @@ export async function getDeckAnalytics(
       sender_id: string;
       sender_email: string;
       total_slides: string;
+      content_format: 'html' | 'slides';
     }[]
   >`
     select v.id, v.viewer_session_id, vs.viewer_user_id, v.viewer_email,
       v.identity_confidence, v.started_at, v.last_activity_at,
       r.revision_number, sl.id as link_id, sl.name as link_name,
+      case when r.html is null then 'slides' else 'html' end as content_format,
       sl.creator_id as sender_id, sender.email as sender_email,
       (select count(*) from deck_slides ds where ds.revision_id = v.revision_id)::text as total_slides
     from visits v
@@ -151,6 +162,7 @@ export async function getDeckAnalytics(
     senderId: visit.sender_id,
     senderEmail: visit.sender_email,
     totalSlides: Number(visit.total_slides),
+    contentFormat: visit.content_format,
   }));
   const slideRows = await database<
     {
@@ -177,6 +189,7 @@ export async function getDeckAnalytics(
   if (visitRows.length === 0) {
     return aggregateDeckAnalytics({
       owner: { id: access.ownerId, email: access.ownerEmail },
+      revisionRows,
       visitRows,
       slideRows: slides,
       engagementRows: [],
@@ -229,6 +242,7 @@ export async function getDeckAnalytics(
   `;
   return aggregateDeckAnalytics({
     owner: { id: access.ownerId, email: access.ownerEmail },
+    revisionRows,
     visitRows,
     slideRows: slides,
     engagementRows: engagements,

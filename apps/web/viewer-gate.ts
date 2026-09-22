@@ -137,9 +137,9 @@ export function renderViewerGate(input: GateInput): TemplateResult {
 
 function renderNotice(input: GateInput): TemplateResult {
   return html`<div class="notice">
-    <strong>Privacy & analytics.</strong> Pagent records slide engagement only after the
-    presentation is visible and you interact. <a href="/privacy">Read the privacy notice</a>.${input
-      .metadata?.analyticsConsentRequired
+    <strong>Privacy & analytics.</strong> Pagent records page engagement only after the presentation
+    is visible and you interact. <a href="/privacy">Read the privacy notice</a>.${input.metadata
+      ?.analyticsConsentRequired
       ? html`<label class="choice"
           ><input
             type="checkbox"

@@ -2,7 +2,7 @@ import type { ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AnySchema, ZodRawShapeCompat } from '@modelcontextprotocol/sdk/server/zod-compat.js';
 import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { deckIdSchema, publishDeckBodySchema, type PublishDeckBody } from '../decks/domain.ts';
+import { deckIdSchema, htmlPublishDeckBodySchema, type PublishDeckBody } from '../decks/domain.ts';
 import { HTML_MAX_BYTES } from '../limits.ts';
 
 export type PageState = 'open' | 'submitted' | 'received';
@@ -95,7 +95,7 @@ const documentWriteSchema = z
   })
   .strict();
 
-const presentationWriteSchema = publishDeckBodySchema
+const presentationWriteSchema = htmlPublishDeckBodySchema
   .omit({ update_deck_id: true })
   .extend({
     type: z.literal('presentation'),
@@ -118,7 +118,7 @@ const readInputSchema = z
   .strict();
 
 const WRITE_DESCRIPTION =
-  'Write one Pagent page. Interactive and document pages are temporary. Presentation pages are durable, revisioned, shareable, and analyzable. Return the page URL to the user.';
+  'Write one Pagent page. Interactive and document pages are temporary. A durable presentation is one complete HTML document, with its own layout and inline JavaScript in an isolated sandbox. No slide schema is required. Presentation pages are revisioned, shareable, and analyzable. Use self-contained assets; network access is blocked. Return the page URL to the user.';
 
 const READ_DESCRIPTION =
   'Read a page response or durable presentation analytics. The page id selects the sensible default; use include only to be explicit. This call returns immediately and never waits.';
@@ -160,7 +160,7 @@ export function registerPagentTools(server: PagentToolRegistrar, ops: PageOps): 
         title: input.title,
         description: input.description,
         client_label: input.client_label,
-        slides: input.slides,
+        html: input.html,
       };
       const publishInput: PublishDeckBody =
         input.page_id === undefined ? base : { ...base, update_deck_id: input.page_id };

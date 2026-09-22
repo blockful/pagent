@@ -46,14 +46,17 @@ const newPageLimiter = createNewPageLimiter();
 
 export const app = new Hono<{ Variables: RequestIdVariables & AuthVariables }>();
 app.use('*', requestId());
+app.use('*', async (c, next) => {
+  c.header('X-Frame-Options', 'DENY');
+  await next();
+});
 app.use(
   '*',
   secureHeaders({
     // contentSecurityPolicy is intentionally omitted — Hono does not set CSP
     // by default, and its HTML-page preset would be noise on a JSON API.
-    // Hono defaults X-Frame-Options to SAMEORIGIN; bump to DENY — this API
-    // has no frames to embed and DENY is more restrictive.
-    xFrameOptions: 'DENY',
+    // Framing defaults run before handlers; only protected document responses opt out.
+    xFrameOptions: false,
     // Browsers default Cross-Origin-Resource-Policy to same-origin which would
     // block the renderer at pagent.link from reading API responses at
     // api.pagent.link. CORS already gates cross-origin reads explicitly.

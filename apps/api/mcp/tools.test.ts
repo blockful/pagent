@@ -99,9 +99,13 @@ describe('registerPagentTools', () => {
 
   it('writes a durable presentation page and maps page_id to the existing revision model', async () => {
     let updateDeckId: string | undefined;
+    let submittedHtml: unknown;
+    const html =
+      '<!doctype html><html><head><title>Northstar</title></head><body><button onclick="this.textContent=42">Go</button></body></html>';
     const tools = makeTools({
       writePresentation: async (input, publisher) => {
         updateDeckId = input.update_deck_id;
+        submittedHtml = 'html' in input ? input.html : undefined;
         expect(publisher).toEqual({
           id: '00000000-0000-4000-8000-000000000010',
           email: 'owner@example.com',
@@ -115,12 +119,13 @@ describe('registerPagentTools', () => {
         type: 'presentation',
         page_id: '00000000-0000-4000-8000-000000000001',
         title: 'Northstar',
-        slides: [{ id: 'cover', html: '<h1>Northstar</h1>' }],
+        html,
       },
       auth,
     );
 
     expect(updateDeckId).toBe('00000000-0000-4000-8000-000000000001');
+    expect(submittedHtml).toBe(html);
     expect(structuredContent(result)).toMatchObject({ type: 'presentation', durable: true });
   });
 

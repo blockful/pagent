@@ -224,6 +224,7 @@ class DeckViewer extends LitElement {
     this.tracker?.stop();
     const tracker = new EngagementTracker({
       sessionToken: this.sessionToken,
+      revisionId: this.deck.revisionId,
       currentSlideId: () => this.deck?.slides[this.slideIndex]?.id ?? null,
       analyticsConsent: this.consent,
     });
@@ -240,6 +241,7 @@ class DeckViewer extends LitElement {
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
+    if (this.deck?.html != null) return;
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
       return;
     this.tracker?.markActivity();
@@ -272,6 +274,7 @@ class DeckViewer extends LitElement {
       state: this.state,
       metadata: this.metadata,
       deck: this.deck,
+      sessionToken: this.sessionToken ?? '',
       message: this.message,
       slideIndex: this.slideIndex,
       consent: this.consent,

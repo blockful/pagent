@@ -130,6 +130,10 @@ export const productLayoutStyles = [
       grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.5fr);
       gap: var(--pg-space-5);
     }
+    .document-preview {
+      height: 70dvh;
+      border: 1px solid var(--pg-rule);
+    }
     .slide-stage {
       display: grid;
       place-items: center;

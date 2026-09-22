@@ -5,6 +5,7 @@ import { DeckDataInvariantError } from './errors.ts';
 import { hashOpaqueToken } from './tokens.ts';
 
 export type StartVisitInput = {
+  readonly revisionId?: string;
   readonly visible: boolean;
   readonly interacted: boolean;
   readonly analyticsConsent: boolean;
@@ -52,7 +53,10 @@ export async function startVisit(
     join decks d on d.id = sl.deck_id
     join workspaces w on w.id = d.workspace_id
     join deck_revisions r
-      on r.deck_id = d.id and r.revision_number = d.latest_revision_number
+      on r.deck_id = d.id and (
+        (${input.revisionId ?? null}::uuid is null and r.revision_number = d.latest_revision_number)
+        or r.id = ${input.revisionId ?? null}
+      )
     where vs.token_hash = ${hashOpaqueToken(sessionToken)}
       and vs.revoked_at is null and vs.expires_at > now()
       and sl.revoked_at is null and (sl.expires_at is null or sl.expires_at > now())
@@ -86,6 +90,7 @@ export async function startVisit(
     const existing = await tx<{ id: string }[]>`
       select id from visits
       where viewer_session_id = ${session.session_id} and share_link_id = ${session.share_link_id}
+        and revision_id = ${session.revision_id}
         and ended_at is null and last_activity_at > now() - interval '30 minutes'
       order by started_at desc limit 1
     `;
