@@ -3,7 +3,10 @@ import type { DeckAnalytics } from './deck-types.ts';
 
 export function visitSequence(visit: DeckAnalytics['visits'][number]): TemplateResult {
   if (visit.sequenceComplete === false) return html`Not recorded (older visit)`;
-  return html`<span>${visit.slideSequence.map((slide) => slide.ordinal).join(' → ') || '—'}</span>
+  return html`<div>
+    <span class="mono"
+      >${visit.slideSequence.map((slide) => slide.ordinal).join(' → ') || '—'}</span
+    >
     ${visit.slideSequence.length === 0
       ? nothing
       : html`<details>
@@ -18,7 +21,8 @@ export function visitSequence(visit: DeckAnalytics['visits'][number]): TemplateR
                 </li>`,
             )}
           </ol>
-        </details>`}`;
+        </details>`}
+  </div>`;
 }
 
 export function metric(label: string, value: string | number): TemplateResult {
