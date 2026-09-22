@@ -30,7 +30,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pagent_e2e?sslmode=disable
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pagent_e2e?sslmode=verify-full
       PAGENT_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +52,27 @@ jobs:
       - name: Audit dependencies
         run: npm audit --audit-level=high
 
+      - name: Configure trusted PostgreSQL TLS for production-mode tests
+        env:
+          PAGENT_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+          PGPASSWORD: postgres
+          PGSSLMODE: disable
+        run: |
+          pagent_tls_dir=$(mktemp -d)
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "$pagent_tls_dir/server.key" -out "$pagent_tls_dir/server.crt" \
+            -days 1 -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+          docker cp "$pagent_tls_dir/server.key" "$PAGENT_POSTGRES_CONTAINER:/tmp/pagent-test.key"
+          docker cp "$pagent_tls_dir/server.crt" "$PAGENT_POSTGRES_CONTAINER:/tmp/pagent-test.crt"
+          docker exec --user root "$PAGENT_POSTGRES_CONTAINER" chown postgres:postgres /tmp/pagent-test.key /tmp/pagent-test.crt
+          docker exec --user root "$PAGENT_POSTGRES_CONTAINER" chmod 600 /tmp/pagent-test.key
+          psql --host=127.0.0.1 --port=5432 --username=postgres --dbname=postgres \
+            -c "ALTER SYSTEM SET ssl_cert_file = '/tmp/pagent-test.crt'" \
+            -c "ALTER SYSTEM SET ssl_key_file = '/tmp/pagent-test.key'" \
+            -c "ALTER SYSTEM SET ssl = 'on'" -c 'SELECT pg_reload_conf()'
+          echo "NODE_EXTRA_CA_CERTS=$pagent_tls_dir/server.crt" >> "$GITHUB_ENV"
+          echo "PGSSLROOTCERT=$pagent_tls_dir/server.crt" >> "$GITHUB_ENV"
+
       - name: Prepare deck integration databases
         env:
           PGPASSWORD: postgres
@@ -61,6 +82,8 @@ jobs:
             pagent_deck_schema_d3a0_test \
             pagent_deck_routes_permissions_d3a0_test \
             pagent_deck_engagement_d3a0_test \
+            pagent_deck_engagement_concurrent_d3a0_test \
+            pagent_engagement_readiness_20260922_test \
             pagent_deck_permissions_d3a0_test \
             pagent_deck_sharing_d3a0_test \
             pagent_deck_routes_sharing_d3a0_test \
