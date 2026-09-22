@@ -6,6 +6,7 @@ import {
   emptyAnalytics,
   metric,
   percent,
+  visitSequence,
 } from './analytics-format.ts';
 import type { DeckAnalytics } from './deck-types.ts';
 
@@ -238,9 +239,7 @@ function renderVisitTable(analytics: DeckAnalytics): TemplateResult {
               <td data-label="Sender">
                 ${visit.senderEmail}<br /><span class="caption">${visit.linkName}</span>
               </td>
-              <td data-label="Sequence" class="mono">
-                ${visit.slideSequence.map((slide) => slide.ordinal).join(' → ') || '—'}
-              </td>
+              <td data-label="Sequence" class="mono">${visitSequence(visit)}</td>
               <td data-label="Active">${duration(visit.totalActiveTimeMs)}</td>
               <td data-label="Completion">${percent(visit.completion)}</td>
               <td data-label="Furthest">${visit.furthestSlide ?? '—'}</td>

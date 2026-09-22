@@ -1,4 +1,10 @@
 import { html, type TemplateResult } from 'lit';
+import type { DeckAnalytics } from './deck-types.ts';
+
+export function visitSequence(visit: DeckAnalytics['visits'][number]): string {
+  if (visit.sequenceComplete === false) return 'Not recorded (older visit)';
+  return visit.slideSequence.map((slide) => slide.ordinal).join(' → ') || '—';
+}
 
 export function metric(label: string, value: string | number): TemplateResult {
   return html`<article class="surface metric">

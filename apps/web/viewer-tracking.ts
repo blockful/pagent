@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { ApiError, apiEmpty, apiJson } from './deck-api.ts';
+import { ApiError, apiJson } from './deck-api.ts';
+import {
+  EngagementDelivery,
+  isExpectedTrackingError,
+  type EngagementEvent,
+} from './viewer-tracking-delivery.ts';
 
 const startVisitSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('started'), visitId: z.string().uuid() }),
@@ -13,34 +18,13 @@ type TrackerInput = {
   readonly analyticsConsent: boolean;
 };
 
-type EngagementEvent = {
-  readonly id: string;
-  readonly eventType: 'start' | 'heartbeat' | 'slide_view' | 'close';
-  readonly slideId?: string;
-  readonly eventAt: string;
-  readonly sequence: number;
-  readonly visibleRatio: number;
-  readonly visibleDurationMs: number;
-  readonly tabVisible: boolean;
-  readonly recentlyActive: boolean;
-};
-
 type QueuedEvent = {
   readonly eventType: EngagementEvent['eventType'];
   readonly slideId?: string;
   readonly visibleDurationMs: number;
   readonly keepalive?: boolean;
+  readonly visibleRatio?: number;
 };
-
-type PendingEvent = {
-  readonly event: EngagementEvent;
-  readonly keepalive: boolean;
-  attempts: number;
-};
-
-const MAX_QUEUED_EVENTS = 20;
-const MAX_EVENTS_PER_REQUEST = 10;
-const MAX_DELIVERY_ATTEMPTS = 3;
 
 export class EngagementTracker {
   private readonly sessionToken: string;
@@ -50,17 +34,27 @@ export class EngagementTracker {
   private sequence = 0;
   private visibleRatio = 0;
   private lastActivityAt = Date.now();
+  private lastActiveEventAt = Date.now();
+  private activeSlideId: string | null;
+  private slideQualified = false;
+  private tabVisible = document.visibilityState === 'visible';
+  private stopped = false;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private slideTimer: ReturnType<typeof setTimeout> | null = null;
-  private queue: PendingEvent[] = [];
+  private readonly delivery: EngagementDelivery;
   private starting = false;
-  private deliveryInFlight = false;
   private closeRecorded = false;
 
   constructor(input: TrackerInput) {
     this.sessionToken = input.sessionToken;
     this.currentSlideId = input.currentSlideId;
     this.analyticsConsent = input.analyticsConsent;
+    this.delivery = new EngagementDelivery(input.sessionToken, (error) => {
+      if (error.status === 410) this.resetVisit();
+      else this.stop();
+    });
+    this.activeSlideId = input.currentSlideId();
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
   }
 
   setConsent(consent: boolean): void {
@@ -68,39 +62,118 @@ export class EngagementTracker {
   }
 
   setVisibleRatio(ratio: number): void {
-    this.visibleRatio = Math.max(0, Math.min(1, ratio));
+    const nextRatio = Math.max(0, Math.min(1, ratio));
+    if (this.visibleRatio >= 0.5 !== nextRatio >= 0.5) {
+      this.flushInterval();
+      this.cancelSlideTimer();
+    }
+    this.visibleRatio = nextRatio;
+    this.qualifySlide();
   }
 
   markActivity(): void {
+    if (this.stopped) return;
+    if (this.visitId !== null && Date.now() - this.lastActiveEventAt >= 30 * 60_000) {
+      this.resetVisit();
+    }
+    const resuming = Date.now() - this.lastActivityAt > 60_000;
     this.lastActivityAt = Date.now();
-    if (this.visibleRatio >= 0.5 && this.visitId === null) void this.start();
+    if (resuming) this.flushInterval(0);
+    if (this.visibleRatio >= 0.5 && this.tabVisible && this.visitId === null) void this.start();
+    this.qualifySlide();
   }
 
   recordSlide(slideId: string): void {
+    if (slideId !== this.activeSlideId) {
+      this.flushInterval();
+      this.activeSlideId = slideId;
+      this.slideQualified = false;
+      this.cancelSlideTimer();
+    }
     this.markActivity();
-    if (this.slideTimer !== null) clearTimeout(this.slideTimer);
+  }
+
+  private qualifySlide(): void {
+    const slideId = this.activeSlideId;
+    if (
+      this.stopped ||
+      this.visitId === null ||
+      this.slideTimer !== null ||
+      this.slideQualified ||
+      slideId === null ||
+      this.visibleRatio < 0.5 ||
+      !this.tabVisible
+    )
+      return;
     this.slideTimer = setTimeout(() => {
-      if (this.currentSlideId() !== slideId || this.visibleRatio < 0.5) return;
+      this.slideTimer = null;
+      if (
+        this.currentSlideId() !== slideId ||
+        this.visibleRatio < 0.5 ||
+        !this.tabVisible ||
+        Date.now() - this.lastActivityAt > 60_000
+      )
+        return;
+      this.slideQualified = true;
       void this.enqueue({ eventType: 'slide_view', slideId, visibleDurationMs: 1_000 });
     }, 1_000);
   }
 
   close(): void {
-    if (this.visitId === null || this.closeRecorded) return;
+    if (this.closeRecorded) return;
     this.closeRecorded = true;
     void this.enqueue({
       eventType: 'close',
-      slideId: this.currentSlideId() ?? undefined,
+      slideId: this.activeSlideId ?? undefined,
       visibleDurationMs: 0,
       keepalive: true,
     });
+    this.stop();
   }
 
   stop(): void {
+    this.stopped = true;
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.clearTimers();
+  }
+
+  private clearTimers(): void {
     if (this.heartbeat !== null) clearInterval(this.heartbeat);
-    if (this.slideTimer !== null) clearTimeout(this.slideTimer);
     this.heartbeat = null;
+    this.cancelSlideTimer();
+  }
+
+  private resetVisit(): void {
+    this.clearTimers();
+    this.visitId = null;
+    this.delivery.setVisit(null);
+    this.sequence = 0;
+    this.slideQualified = false;
+    this.closeRecorded = false;
+  }
+
+  private cancelSlideTimer(): void {
+    if (this.slideTimer !== null) clearTimeout(this.slideTimer);
     this.slideTimer = null;
+  }
+
+  private onVisibilityChange = (): void => {
+    const visible = document.visibilityState === 'visible';
+    if (visible === this.tabVisible) return;
+    if (!visible) this.flushInterval();
+    this.tabVisible = visible;
+    this.cancelSlideTimer();
+    if (visible) this.flushInterval(0);
+    this.qualifySlide();
+  };
+
+  private flushInterval(visibleRatio = this.visibleRatio): void {
+    void this.enqueue({
+      eventType: 'heartbeat',
+      slideId: this.activeSlideId ?? undefined,
+      visibleDurationMs: 0,
+      visibleRatio,
+    });
   }
 
   private async start(): Promise<void> {
@@ -119,77 +192,53 @@ export class EngagementTracker {
           countryCode: null,
         }),
       });
-      if (result.kind !== 'started') return;
+      if (this.stopped) return;
+      if (result.kind !== 'started') {
+        this.stop();
+        return;
+      }
       this.visitId = result.visitId;
-      await this.enqueue({
+      this.delivery.setVisit(result.visitId);
+      this.activeSlideId = this.currentSlideId();
+      void this.enqueue({
         eventType: 'start',
         slideId: this.currentSlideId() ?? undefined,
         visibleDurationMs: 0,
+        visibleRatio: 0,
       });
-      const slideId = this.currentSlideId();
-      if (slideId !== null) this.recordSlide(slideId);
+      this.qualifySlide();
       this.heartbeat = setInterval(() => {
+        if (Date.now() - this.lastActiveEventAt >= 30 * 60_000) return;
         void this.enqueue({
           eventType: 'heartbeat',
-          slideId: this.currentSlideId() ?? undefined,
+          slideId: this.activeSlideId ?? undefined,
           visibleDurationMs: 10_000,
         });
       }, 10_000);
+    } catch (error) {
+      if (!isExpectedTrackingError(error)) throw error;
+      if (error instanceof ApiError && [401, 403, 410].includes(error.status)) this.stop();
     } finally {
       this.starting = false;
     }
   }
 
   private async enqueue(input: QueuedEvent): Promise<void> {
-    if (this.visitId === null) return;
-    if (this.queue.length >= MAX_QUEUED_EVENTS) {
-      if (input.eventType !== 'close') return;
-      this.queue.pop();
-    }
+    if (this.visitId === null || this.stopped) return;
     const event: EngagementEvent = {
       id: crypto.randomUUID(),
       eventType: input.eventType,
       ...(input.slideId === undefined ? {} : { slideId: input.slideId }),
       eventAt: new Date().toISOString(),
       sequence: ++this.sequence,
-      visibleRatio: this.visibleRatio,
+      visibleRatio: input.visibleRatio ?? this.visibleRatio,
       visibleDurationMs: input.visibleDurationMs,
-      tabVisible: document.visibilityState === 'visible',
+      tabVisible: this.tabVisible,
       recentlyActive: Date.now() - this.lastActivityAt <= 60_000,
     };
-    this.queue.push({ event, keepalive: input.keepalive === true, attempts: 0 });
-    await this.deliverPending();
+    if (event.tabVisible && event.recentlyActive) this.lastActiveEventAt = Date.now();
+    await this.delivery.enqueue(event, input.keepalive === true);
   }
-
-  private async deliverPending(): Promise<void> {
-    if (this.deliveryInFlight || this.visitId === null) return;
-    this.deliveryInFlight = true;
-    try {
-      while (this.queue.length > 0) {
-        const batch = this.queue.slice(0, MAX_EVENTS_PER_REQUEST);
-        try {
-          await apiEmpty(`/v1/viewer/visits/${this.visitId}/events`, {
-            method: 'POST',
-            keepalive: batch.some((pending) => pending.keepalive),
-            headers: { 'x-viewer-session': this.sessionToken },
-            body: JSON.stringify({ events: batch.map((pending) => pending.event) }),
-          });
-          this.queue.splice(0, batch.length);
-        } catch (error) {
-          if (!isExpectedDeliveryError(error)) throw error;
-          for (const pending of batch) pending.attempts += 1;
-          this.queue = this.queue.filter((pending) => pending.attempts < MAX_DELIVERY_ATTEMPTS);
-          return;
-        }
-      }
-    } finally {
-      this.deliveryInFlight = false;
-    }
-  }
-}
-
-function isExpectedDeliveryError(error: unknown): error is ApiError | TypeError {
-  return error instanceof ApiError || error instanceof TypeError;
 }
 
 function deviceClass(): 'mobile' | 'tablet' | 'desktop' {

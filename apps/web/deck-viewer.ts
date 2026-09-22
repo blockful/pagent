@@ -65,6 +65,7 @@ class DeckViewer extends LitElement {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('focus', this.onFocus);
     window.addEventListener('pagehide', this.onPageHide);
+    window.addEventListener('pageshow', this.onPageShow);
     void this.load();
   }
 
@@ -72,6 +73,7 @@ class DeckViewer extends LitElement {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('focus', this.onFocus);
     window.removeEventListener('pagehide', this.onPageHide);
+    window.removeEventListener('pageshow', this.onPageShow);
     this.observer?.disconnect();
     this.tracker?.stop();
     super.disconnectedCallback();
@@ -250,6 +252,9 @@ class DeckViewer extends LitElement {
   };
 
   private onPageHide = (): void => this.tracker?.close();
+  private onPageShow = (event: PageTransitionEvent): void => {
+    if (event.persisted) this.startTracking();
+  };
   private onFocus = (): void => this.tracker?.markActivity();
   private handleError(error: unknown): void {
     const failure = viewerFailure(error);

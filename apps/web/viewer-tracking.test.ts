@@ -162,7 +162,7 @@ describe('EngagementTracker retry queue', () => {
       eventsBeforePageHide
         .filter((event) => event.eventType === 'heartbeat')
         .map((event) => event.tabVisible),
-    ).toEqual([false, true]);
+    ).toEqual([true, false, true, true]);
 
     window.dispatchEvent(new Event('pagehide'));
     window.dispatchEvent(new Event('pagehide'));

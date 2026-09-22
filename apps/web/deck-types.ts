@@ -207,6 +207,7 @@ export const analyticsSchema = z.object({
       completion: z.number(),
       furthestSlide: z.number().int().nullable(),
       lastSlide: z.number().int().nullable(),
+      sequenceComplete: z.boolean().optional(),
       slideSequence: z.array(
         z.object({
           slideId: z.string().uuid(),
