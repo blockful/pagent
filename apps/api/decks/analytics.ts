@@ -1,5 +1,5 @@
 const HEARTBEAT_CEILING_MS = 10_000;
-const FUTURE_SKEW_MS = 30_000;
+export const FUTURE_SKEW_MS = 30_000;
 
 export type VisitSummary = {
   readonly completion: number;

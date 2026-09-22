@@ -2,6 +2,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { initialDeckSchemaMigration } from './migrations/0001-initial-deck-schema.ts';
 import { viewerSessionAnalyticsExclusionMigration } from './migrations/0002-add-viewer-session-analytics-exclusion.ts';
+import { engagementEventQualificationMigration } from './migrations/0003-add-engagement-event-qualification.ts';
 import {
   DeckMigrationHistoryError,
   runDeckMigrations,
@@ -74,6 +75,7 @@ integration('deck database schema', () => {
     const expectedMigrations = [
       { version: 1, name: 'initial_deck_schema' },
       { version: 2, name: 'add_viewer_session_analytics_exclusion' },
+      { version: 3, name: 'add_engagement_event_qualification' },
     ];
 
     const rows = await sql<{ version: number; name: string }[]>`
@@ -118,13 +120,13 @@ integration('deck database schema', () => {
     const rows = await sql<{ count: number }[]>`
       select count(*)::integer as count from deck_schema_migrations
     `;
-    expect(rows).toEqual([{ count: 2 }]);
+    expect(rows).toEqual([{ count: 3 }]);
   });
 
   it('rolls back schema and ledger changes when a migration fails', async () => {
     class PlannedMigrationError extends Error {}
     const failingMigration = {
-      version: 3,
+      version: 4,
       name: 'planned_failure',
       async up(database) {
         await database`create table migration_should_roll_back (id integer primary key)`;
@@ -135,6 +137,7 @@ integration('deck database schema', () => {
     const migration = runDeckMigrations(sql, [
       initialDeckSchemaMigration,
       viewerSessionAnalyticsExclusionMigration,
+      engagementEventQualificationMigration,
       failingMigration,
     ]);
 
@@ -146,7 +149,7 @@ integration('deck database schema', () => {
     const ledger = await sql<{ version: number }[]>`
       select version from deck_schema_migrations order by version
     `;
-    expect(ledger).toEqual([{ version: 1 }, { version: 2 }]);
+    expect(ledger).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
   });
 
   it('rejects divergent applied migration history', async () => {

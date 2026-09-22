@@ -1,5 +1,5 @@
 import * as db from '../db.ts';
-import { deriveAcceptedInterval } from './analytics.ts';
+import { deriveAcceptedInterval, FUTURE_SKEW_MS } from './analytics.ts';
 import type { IdentityConfidence } from './domain.ts';
 import { DeckDataInvariantError } from './errors.ts';
 import { hashOpaqueToken } from './tokens.ts';
@@ -150,6 +150,7 @@ export async function ingestEngagement(
       join share_links sl on sl.id = v.share_link_id
       join decks d on d.id = sl.deck_id
       where v.id = ${visitId} and vs.token_hash = ${hashOpaqueToken(sessionToken)}
+        and v.ended_at is null and v.last_activity_at > now() - interval '30 minutes'
         and vs.revoked_at is null and vs.expires_at > now()
         and sl.revoked_at is null and (sl.expires_at is null or sl.expires_at > now())
         and d.deleted_at is null
@@ -164,6 +165,7 @@ export async function ingestEngagement(
     let lastActivity = visit.last_activity_at;
     const serverReceivedAt = new Date();
     for (const event of events) {
+      if (event.eventAt.getTime() > serverReceivedAt.getTime() + FUTURE_SKEW_MS) continue;
       const slideId =
         event.slideId !== undefined && slideIds.has(event.slideId) ? event.slideId : null;
       const acceptedDurationMs = deriveAcceptedInterval({
@@ -174,18 +176,6 @@ export async function ingestEngagement(
         tabVisible: event.tabVisible,
         recentlyActive: event.recentlyActive,
       });
-      const inserted = await tx<{ idempotency_key: string }[]>`
-        insert into engagement_events (
-          idempotency_key, visit_id, event_type, slide_id, event_at, sequence,
-          visible_ratio, tab_visible, recently_active, accepted_duration_ms
-        ) values (
-          ${event.id}, ${visitId}, ${event.eventType}, ${slideId}, ${event.eventAt},
-          ${event.sequence}, ${event.visibleRatio}, ${event.tabVisible},
-          ${event.recentlyActive}, ${acceptedDurationMs}
-        ) on conflict (idempotency_key) do nothing
-        returning idempotency_key
-      `;
-      if (inserted.length === 0) continue;
       const qualifies =
         event.eventType === 'slide_view' &&
         slideId !== null &&
@@ -193,6 +183,18 @@ export async function ingestEngagement(
         event.visibleDurationMs >= 1_000 &&
         event.tabVisible &&
         event.recentlyActive;
+      const inserted = await tx<{ idempotency_key: string }[]>`
+        insert into engagement_events (
+          idempotency_key, visit_id, event_type, slide_id, event_at, sequence,
+          visible_ratio, tab_visible, recently_active, accepted_duration_ms, qualified
+        ) values (
+          ${event.id}, ${visitId}, ${event.eventType}, ${slideId}, ${event.eventAt},
+          ${event.sequence}, ${event.visibleRatio}, ${event.tabVisible},
+          ${event.recentlyActive}, ${acceptedDurationMs}, ${qualifies}
+        ) on conflict (idempotency_key) do nothing
+        returning idempotency_key
+      `;
+      if (inserted.length === 0) continue;
       if (slideId !== null) {
         await tx`
           insert into slide_engagement (
@@ -203,6 +205,7 @@ export async function ingestEngagement(
             ${acceptedDurationMs}, ${qualifies ? 1 : 0}, ${event.sequence},
             ${event.sequence}, ${qualifies}
           ) on conflict (visit_id, slide_id) do update set
+            first_seen_at = least(slide_engagement.first_seen_at, excluded.first_seen_at),
             last_seen_at = greatest(slide_engagement.last_seen_at, excluded.last_seen_at),
             active_duration_ms = slide_engagement.active_duration_ms + excluded.active_duration_ms,
             view_count = slide_engagement.view_count + excluded.view_count,

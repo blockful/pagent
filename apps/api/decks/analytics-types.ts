@@ -33,6 +33,15 @@ export type AnalyticsEngagementRow = AnalyticsSlideRow & {
   readonly lastSequence: number;
 };
 
+export type AnalyticsEventRow = {
+  readonly visitId: string;
+  readonly slideId: string | null;
+  readonly eventAt: Date;
+  readonly sequence: number;
+  readonly activeDurationMs: number;
+  readonly qualified: boolean | null;
+};
+
 export type VisitDetail = {
   readonly id: string;
   readonly viewer: string;
@@ -49,6 +58,7 @@ export type VisitDetail = {
   readonly completion: number;
   readonly furthestSlide: number | null;
   readonly lastSlide: number | null;
+  readonly sequenceComplete: boolean;
   readonly slideSequence: readonly {
     readonly slideId: string;
     readonly ordinal: number;
@@ -119,4 +129,5 @@ export type AnalyticsAggregationInput = {
   readonly visitRows: readonly AnalyticsVisitRow[];
   readonly slideRows: readonly AnalyticsSlideRow[];
   readonly engagementRows: readonly AnalyticsEngagementRow[];
+  readonly eventRows: readonly AnalyticsEventRow[];
 };

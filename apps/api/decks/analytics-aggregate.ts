@@ -1,6 +1,7 @@
 import type {
   AnalyticsAggregationInput,
   AnalyticsEngagementRow,
+  AnalyticsEventRow,
   AnalyticsVisitRow,
   DeckAnalytics,
   MutableVisitor,
@@ -8,6 +9,7 @@ import type {
   SlideRollup,
   VisitDetail,
 } from './analytics-types.ts';
+import { qualifyingSlideSequence } from './analytics-sequence.ts';
 
 function viewerKey(visit: AnalyticsVisitRow): string {
   if (visit.viewerUserId !== null) return `user:${visit.viewerUserId}`;
@@ -17,7 +19,14 @@ function viewerKey(visit: AnalyticsVisitRow): string {
 }
 
 export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAnalytics {
-  const { owner, visitRows, slideRows, engagementRows } = input;
+  const { owner, visitRows, slideRows, engagementRows, eventRows } = input;
+  const slidesById = new Map(slideRows.map((slide) => [slide.id, slide]));
+  const eventsByVisit = new Map<string, AnalyticsEventRow[]>();
+  for (const event of eventRows) {
+    const current = eventsByVisit.get(event.visitId) ?? [];
+    current.push(event);
+    eventsByVisit.set(event.visitId, current);
+  }
   const visitRowsById = new Map<string, AnalyticsVisitRow>();
   for (const visit of visitRows) {
     if (!visitRowsById.has(visit.id)) visitRowsById.set(visit.id, visit);
@@ -31,7 +40,11 @@ export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAn
   const visits: VisitDetail[] = visitRows.map((visit) => {
     const engagements = engagementsByVisit.get(visit.id) ?? [];
     const qualified = engagements.filter((engagement) => engagement.qualified);
-    const ordered = [...qualified].sort((left, right) => left.firstSequence - right.firstSequence);
+    const events = eventsByVisit.get(visit.id) ?? [];
+    const sequenceComplete =
+      events.every((event) => event.qualified !== null) &&
+      (events.length > 0 || engagements.length === 0);
+    const slideSequence = sequenceComplete ? qualifyingSlideSequence(events, slidesById) : [];
     const distinct = new Set(qualified.map((engagement) => engagement.id));
     const totalActiveTimeMs = engagements.reduce(
       (total, engagement) => total + engagement.activeDurationMs,
@@ -55,14 +68,9 @@ export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAn
         qualified.length === 0
           ? null
           : Math.max(...qualified.map((engagement) => engagement.ordinal)),
-      lastSlide: ordered.at(-1)?.ordinal ?? null,
-      slideSequence: ordered.map((engagement) => ({
-        slideId: engagement.id,
-        ordinal: engagement.ordinal,
-        title: engagement.title,
-        activeDurationMs: engagement.activeDurationMs,
-        viewCount: engagement.viewCount,
-      })),
+      lastSlide: slideSequence.at(-1)?.ordinal ?? null,
+      sequenceComplete,
+      slideSequence,
     };
   });
   const visitDetailsById = new Map<string, VisitDetail>();

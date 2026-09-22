@@ -115,7 +115,15 @@ describe('deck analytics aggregation', () => {
     };
 
     // When
-    const analytics = aggregateDeckAnalytics(analyticsInput);
+    const eventRows = analyticsInput.engagementRows.map((row) => ({
+      visitId: row.visitId,
+      slideId: row.id,
+      eventAt: firstStartedAt,
+      sequence: row.firstSequence,
+      activeDurationMs: row.activeDurationMs,
+      qualified: row.qualified,
+    }));
+    const analytics = aggregateDeckAnalytics({ ...analyticsInput, eventRows });
 
     // Then
     expect(analytics).toEqual({
@@ -202,6 +210,7 @@ describe('deck analytics aggregation', () => {
           completion: 1,
           furthestSlide: 2,
           lastSlide: 1,
+          sequenceComplete: true,
           slideSequence: [
             {
               slideId: 'slide-2',
@@ -235,6 +244,7 @@ describe('deck analytics aggregation', () => {
           completion: 0.5,
           furthestSlide: 1,
           lastSlide: 1,
+          sequenceComplete: true,
           slideSequence: [
             {
               slideId: 'slide-1',

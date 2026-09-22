@@ -2,6 +2,7 @@ import * as db from '../db.ts';
 import { aggregateDeckAnalytics } from './analytics-aggregate.ts';
 import type {
   AnalyticsEngagementRow,
+  AnalyticsEventRow,
   AnalyticsSlideRow,
   AnalyticsVisitRow,
   DeckAnalytics,
@@ -179,6 +180,7 @@ export async function getDeckAnalytics(
       visitRows,
       slideRows: slides,
       engagementRows: [],
+      eventRows: [],
     });
   }
   const visitIds = visitRows.map((visit) => visit.id);
@@ -218,10 +220,18 @@ export async function getDeckAnalytics(
     firstSequence: row.first_sequence,
     lastSequence: row.last_sequence,
   }));
+  const eventRows = await database<AnalyticsEventRow[]>`
+    select visit_id as "visitId", slide_id as "slideId", event_at as "eventAt",
+      sequence, accepted_duration_ms as "activeDurationMs", qualified
+    from engagement_events
+    where visit_id in ${database(visitIds)}
+    order by event_at, sequence, server_received_at, idempotency_key
+  `;
   return aggregateDeckAnalytics({
     owner: { id: access.ownerId, email: access.ownerEmail },
     visitRows,
     slideRows: slides,
     engagementRows: engagements,
+    eventRows,
   });
 }
