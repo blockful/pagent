@@ -38,6 +38,31 @@ describe('EngagementTracker asynchronous lifecycle', () => {
     vi.unstubAllGlobals();
   });
 
+  it('Given activity before visibility is observed, when the stage becomes visible, then tracking starts once without another interaction', async () => {
+    tracker.setVisibleRatio(0);
+    tracker.markActivity();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.json).not.toHaveBeenCalled();
+    tracker.setVisibleRatio(1);
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(api.json).toHaveBeenCalledTimes(1);
+    expect(api.empty).toHaveBeenCalled();
+    tracker.setVisibleRatio(0.75);
+    expect(api.json).toHaveBeenCalledTimes(1);
+  });
+
+  it('Given no recent interaction, when visibility changes, then it cannot manufacture activity or start a visit', async () => {
+    tracker.setVisibleRatio(0.75);
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(api.json).not.toHaveBeenCalled();
+    tracker.setVisibleRatio(0);
+    tracker.markActivity();
+    await vi.advanceTimersByTimeAsync(60_001);
+    tracker.setVisibleRatio(1);
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(api.json).not.toHaveBeenCalled();
+  });
+
   it.each(['stop', 'close'] as const)(
     'Given an unresolved start, when %s happens first, then the late response cannot start events or timers',
     async (action) => {

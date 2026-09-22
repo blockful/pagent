@@ -33,6 +33,7 @@ export class EngagementTracker {
   private visitId: string | null = null;
   private sequence = 0;
   private visibleRatio = 0;
+  private hasInteracted = false;
   private lastActivityAt = Date.now();
   private lastActiveEventAt = Date.now();
   private activeSlideId: string | null;
@@ -68,6 +69,7 @@ export class EngagementTracker {
       this.cancelSlideTimer();
     }
     this.visibleRatio = nextRatio;
+    void this.start();
     this.qualifySlide();
   }
 
@@ -78,8 +80,9 @@ export class EngagementTracker {
     }
     const resuming = Date.now() - this.lastActivityAt > 60_000;
     this.lastActivityAt = Date.now();
+    this.hasInteracted = true;
     if (resuming) this.flushInterval(0);
-    if (this.visibleRatio >= 0.5 && this.tabVisible && this.visitId === null) void this.start();
+    void this.start();
     this.qualifySlide();
   }
 
@@ -146,6 +149,7 @@ export class EngagementTracker {
   private resetVisit(): void {
     this.clearTimers();
     this.visitId = null;
+    this.hasInteracted = false;
     this.delivery.setVisit(null);
     this.sequence = 0;
     this.slideQualified = false;
@@ -163,7 +167,10 @@ export class EngagementTracker {
     if (!visible) this.flushInterval();
     this.tabVisible = visible;
     this.cancelSlideTimer();
-    if (visible) this.flushInterval(0);
+    if (visible) {
+      this.flushInterval(0);
+      void this.start();
+    }
     this.qualifySlide();
   };
 
@@ -177,7 +184,16 @@ export class EngagementTracker {
   }
 
   private async start(): Promise<void> {
-    if (this.starting || this.visitId !== null) return;
+    if (
+      this.stopped ||
+      this.starting ||
+      this.visitId !== null ||
+      !this.hasInteracted ||
+      Date.now() - this.lastActivityAt > 60_000 ||
+      this.visibleRatio < 0.5 ||
+      !this.tabVisible
+    )
+      return;
     this.starting = true;
     try {
       const result = await apiJson('/v1/viewer/visits', startVisitSchema, {

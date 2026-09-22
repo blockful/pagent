@@ -141,6 +141,32 @@ test('reading and revisiting slides preserves dwell, actual sequence, and drop-o
   }
 });
 
+test('interaction before the first visibility observation still starts a qualified visit', async ({
+  page,
+}) => {
+  const fixture = await presentation();
+  await page.addInitScript(() => {
+    const NativeObserver = window.IntersectionObserver;
+    window.IntersectionObserver = class extends NativeObserver {
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        super((entries, observer) => {
+          window.addEventListener('release-observation', () => callback(entries, observer), {
+            once: true,
+          });
+          document.documentElement.dataset.observationReady = 'true';
+        }, options);
+      }
+    };
+  });
+  await page.goto(`/share/${fixture.token}`);
+  await expect(page.getByRole('status')).toHaveText('Slide 1 of 3');
+  await expect(page.locator('html')).toHaveAttribute('data-observation-ready', 'true');
+  await page.keyboard.press('Home');
+  const qualified = qualifyingResponse(page);
+  await page.evaluate(() => window.dispatchEvent(new Event('release-observation')));
+  expect((await qualified).ok()).toBe(true);
+});
+
 test('a same-tab return after thirty minutes starts a new visit without blocking navigation', async ({
   page,
 }) => {
