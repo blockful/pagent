@@ -13,9 +13,10 @@ export function buildCsp(apiUrl: string | undefined): string {
   let documentSources = "'self'";
   if (apiUrl) {
     try {
-      connectSrc = `'self' ${new URL(apiUrl).origin} ${googleFontsStylesheetOrigin}`;
-      const origin = new URL(apiUrl).origin;
-      documentSources += ` ${origin}/v1/viewer/document ${origin}/v1/owner/document`;
+      const api = new URL(apiUrl);
+      connectSrc = `'self' ${api.origin} ${googleFontsStylesheetOrigin}`;
+      const base = `${api.origin}${api.pathname.replace(/\/$/, '')}`;
+      documentSources += ` ${base}/v1/viewer/document ${base}/v1/owner/document`;
     } catch {
       connectSrc = `'self' ${googleFontsStylesheetOrigin}`;
     }

@@ -40,12 +40,26 @@ describe('buildCsp', () => {
     );
   });
 
-  it('strips path and query from VITE_API_URL (uses origin only)', () => {
+  it('uses only the origin for connections and excludes query strings from CSP', () => {
     const csp = buildCsp('https://api.example.com/path?x=1');
     expect(csp).toContain("connect-src 'self' https://api.example.com");
-    expect(csp).not.toContain('/path');
+    expect(csp.split('; ').find((directive) => directive.startsWith('connect-src'))).toBe(
+      "connect-src 'self' https://api.example.com https://fonts.googleapis.com",
+    );
     expect(csp).not.toContain('?x=1');
   });
+
+  it.each(['https://example.test/api', 'https://example.test/api/'])(
+    'preserves the configured API prefix for protected frames at %s',
+    (apiUrl) => {
+      const expected =
+        "'self' https://example.test/api/v1/viewer/document https://example.test/api/v1/owner/document";
+      const csp = buildCsp(apiUrl);
+      expect(csp).toContain(`form-action ${expected}`);
+      expect(csp).toContain(`frame-src ${expected}`);
+      expect(csp).toContain("script-src 'self'");
+    },
+  );
 
   it('falls back to fixed application origins on malformed VITE_API_URL', () => {
     const csp = buildCsp('not a url');
