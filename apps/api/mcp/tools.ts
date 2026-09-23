@@ -109,6 +109,18 @@ const writeInputSchema = z.discriminatedUnion('type', [
   presentationWriteSchema,
 ]);
 
+// The MCP SDK only advertises object schemas; enforce the per-type union on calls.
+const writeToolSchema = presentationWriteSchema.partial().extend({
+  type: z.enum(['interactive', 'document', 'presentation']),
+  title: presentationWriteSchema.shape.title
+    .optional()
+    .describe('Required for presentation pages.'),
+  html: presentationWriteSchema.shape.html
+    .optional()
+    .describe('Complete HTML, required for presentation and document pages.'),
+  spec: interactiveWriteSchema.shape.spec.optional().describe('Required for interactive pages.'),
+});
+
 const ephemeralPageIdSchema = z.string().regex(/^[a-f0-9]{32}$/, 'invalid page_id');
 const readInputSchema = z
   .object({
@@ -144,9 +156,10 @@ export interface PagentToolRegistrar {
 export function registerPagentTools(server: PagentToolRegistrar, ops: PageOps): void {
   server.registerTool(
     'write',
-    { title: 'Write a page', description: WRITE_DESCRIPTION, inputSchema: writeInputSchema },
-    async (input, extra) => {
+    { title: 'Write a page', description: WRITE_DESCRIPTION, inputSchema: writeToolSchema },
+    async (rawInput, extra) => {
       requireScope(extra, 'page:create');
+      const input = writeInputSchema.parse(rawInput);
       if (input.type === 'interactive') {
         const created = await ops.writeInteractive(input.spec, ownerIdFromExtra(extra));
         return ephemeralWriteResponse('interactive', created);

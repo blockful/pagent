@@ -87,6 +87,17 @@ describe('SDK client', () => {
     try {
       const result = await client.listTools();
       expect(result.tools.map((tool) => tool.name).sort()).toEqual(['read', 'write']);
+      expect(result.tools.find(({ name }) => name === 'write')?.inputSchema).toMatchObject({
+        type: 'object',
+        required: ['type'],
+        properties: {
+          type: { enum: ['interactive', 'document', 'presentation'] },
+          html: { type: 'string' },
+          title: { type: 'string' },
+          spec: { type: 'array' },
+          page_id: { type: 'string', format: 'uuid' },
+        },
+      });
     } finally {
       await client.close();
     }

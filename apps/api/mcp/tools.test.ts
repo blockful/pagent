@@ -70,6 +70,17 @@ describe('registerPagentTools', () => {
     expect([...makeTools().keys()].sort()).toEqual(['read', 'write']);
   });
 
+  it.each([
+    { type: 'presentation', title: 'Missing HTML' },
+    { type: 'presentation', html: '<p>Missing title</p>' },
+    { type: 'presentation', title: '', html: '<p>Empty title</p>' },
+    { type: 'document', html: '<p>Document</p>', title: 'Unexpected title' },
+    { type: 'interactive', spec: [], html: '<p>Unexpected HTML</p>' },
+    { type: 'presentation', title: 'Old format', slides: [{ id: 'one', html: '<p>Slide</p>' }] },
+  ])('rejects invalid write variant %# before routing', async (input) => {
+    await expect(tool(makeTools(), 'write').handler(input, auth)).rejects.toThrow();
+  });
+
   it('writes interactive and document pages through one tool', async () => {
     const seen: string[] = [];
     const tools = makeTools({

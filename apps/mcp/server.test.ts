@@ -23,6 +23,17 @@ describe('stdio MCP contract', () => {
       const tools = await client.listTools();
 
       expect(tools.tools.map(({ name }) => name).sort()).toEqual(['read', 'write']);
+      expect(tools.tools.find(({ name }) => name === 'write')?.inputSchema).toMatchObject({
+        type: 'object',
+        required: ['type'],
+        properties: {
+          type: { enum: ['interactive', 'document', 'presentation'] },
+          html: { type: 'string' },
+          title: { type: 'string' },
+          spec: { type: 'array' },
+          page_id: { type: 'string', format: 'uuid' },
+        },
+      });
     } finally {
       await client.close();
     }

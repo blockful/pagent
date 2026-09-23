@@ -21538,6 +21538,12 @@ var writeInputSchema = external_exports.discriminatedUnion("type", [
   documentWriteSchema,
   presentationWriteSchema
 ]);
+var writeToolSchema = presentationWriteSchema.partial().extend({
+  type: external_exports.enum(["interactive", "document", "presentation"]),
+  title: presentationWriteSchema.shape.title.optional().describe("Required for presentation pages."),
+  html: presentationWriteSchema.shape.html.optional().describe("Complete HTML, required for presentation and document pages."),
+  spec: interactiveWriteSchema.shape.spec.optional().describe("Required for interactive pages.")
+});
 var ephemeralPageIdSchema = external_exports.string().regex(/^[a-f0-9]{32}$/, "invalid page_id");
 var readInputSchema = external_exports.object({
   page_id: external_exports.union([ephemeralPageIdSchema, deckIdSchema]),
@@ -21548,9 +21554,10 @@ var READ_DESCRIPTION = "Read a page response or durable presentation analytics. 
 function registerPagentTools(server2, ops) {
   server2.registerTool(
     "write",
-    { title: "Write a page", description: WRITE_DESCRIPTION, inputSchema: writeInputSchema },
-    async (input, extra) => {
+    { title: "Write a page", description: WRITE_DESCRIPTION, inputSchema: writeToolSchema },
+    async (rawInput, extra) => {
       requireScope(extra, "page:create");
+      const input = writeInputSchema.parse(rawInput);
       if (input.type === "interactive") {
         const created = await ops.writeInteractive(input.spec, ownerIdFromExtra(extra));
         return ephemeralWriteResponse("interactive", created);
