@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { aggregateDeckAnalytics } from './analytics-aggregate.ts';
+import { analyticsInput } from './analytics-aggregate-fixture.ts';
 
 const startedAt = new Date('2026-09-01T12:00:00.000Z');
 const htmlVisit = {
@@ -45,6 +46,23 @@ const htmlInput = {
 };
 
 describe('HTML deck analytics', () => {
+  it.each([
+    { revisionNumber: 2, contentFormat: 'html' as const },
+    { revisionNumber: 3, contentFormat: 'slides' as const },
+  ])('scopes legacy slide view rates to eligible revision viewers: %j', (revision) => {
+    const input = {
+      ...analyticsInput,
+      visitRows: [
+        ...analyticsInput.visitRows,
+        { ...htmlVisit, ...revision, viewerEmail: 'other-revision@example.test' },
+      ],
+      eventRows: [],
+    };
+    const result = aggregateDeckAnalytics(input);
+    expect(result.overview.uniqueViewers).toBe(3);
+    expect(result.slides.map((slide) => slide.viewRate)).toEqual([1, 0.5]);
+  });
+
   it('uses accepted visit events when an HTML revision has no slide engagement', () => {
     // Given / When
     const result = aggregateDeckAnalytics(htmlInput);

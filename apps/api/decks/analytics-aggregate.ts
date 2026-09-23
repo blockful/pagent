@@ -153,21 +153,31 @@ export function aggregateDeckAnalytics(input: AnalyticsAggregationInput): DeckAn
       accumulator.exits += 1;
   }
   const uniqueViewerCount = new Set(visitRows.map(viewerKey)).size;
-  const slides: SlideRollup[] = [...slideAccumulators.values()].map((accumulator) => ({
-    slideId: accumulator.definition.id,
-    stableSlideId: accumulator.definition.stableSlideId,
-    revisionNumber: accumulator.definition.revisionNumber,
-    ordinal: accumulator.definition.ordinal,
-    title: accumulator.definition.title,
-    uniqueViewers: accumulator.viewers.size,
-    viewRate: uniqueViewerCount === 0 ? 0 : accumulator.viewers.size / uniqueViewerCount,
-    averageActiveTimeMs:
-      accumulator.qualifiedVisits === 0
-        ? 0
-        : accumulator.activeDurationMs / accumulator.qualifiedVisits,
-    totalActiveTimeMs: accumulator.activeDurationMs,
-    exits: accumulator.exits,
-  }));
+  const viewersByRevision = new Map<number, Set<string>>();
+  for (const visit of visitRows) {
+    if ((visit.contentFormat ?? 'slides') !== 'slides') continue;
+    const viewers = viewersByRevision.get(visit.revisionNumber) ?? new Set<string>();
+    viewers.add(viewerKey(visit));
+    viewersByRevision.set(visit.revisionNumber, viewers);
+  }
+  const slides: SlideRollup[] = [...slideAccumulators.values()].map((accumulator) => {
+    const eligibleViewers = viewersByRevision.get(accumulator.definition.revisionNumber)?.size ?? 0;
+    return {
+      slideId: accumulator.definition.id,
+      stableSlideId: accumulator.definition.stableSlideId,
+      revisionNumber: accumulator.definition.revisionNumber,
+      ordinal: accumulator.definition.ordinal,
+      title: accumulator.definition.title,
+      uniqueViewers: accumulator.viewers.size,
+      viewRate: eligibleViewers === 0 ? 0 : accumulator.viewers.size / eligibleViewers,
+      averageActiveTimeMs:
+        accumulator.qualifiedVisits === 0
+          ? 0
+          : accumulator.activeDurationMs / accumulator.qualifiedVisits,
+      totalActiveTimeMs: accumulator.activeDurationMs,
+      exits: accumulator.exits,
+    };
+  });
   const totalActive = visits.reduce((total, visit) => total + visit.totalActiveTimeMs, 0);
   const knownCompletions = visits.flatMap((visit) =>
     visit.completion === null ? [] : [visit.completion],
