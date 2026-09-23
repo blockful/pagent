@@ -2031,7 +2031,7 @@ components:
           maxLength: 1000000
           description: |
             Exact full HTML source, capped at 1,000,000 UTF-8 bytes without
-            trimming or sanitization. The overall HTTP body has the same byte
+            trimming or sanitization. NUL characters are rejected. The overall HTTP body has the same byte
             cap, so JSON escaping and metadata can lower the effective limit.
             Use self-contained CSS/inline JavaScript; see protected document
             delivery for sandbox restrictions. No slide structure is inferred.
@@ -2286,7 +2286,11 @@ components:
         ordinal: { type: integer, minimum: 1 }
         title: { type: [string, 'null'] }
         uniqueViewers: { type: integer, minimum: 0 }
-        viewRate: { type: number, minimum: 0, maximum: 1 }
+        viewRate:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Qualified unique viewers divided by unique viewers of this legacy slide revision, within the selected filters. Zero when the revision has no viewers.
         averageActiveTimeMs: { type: number, minimum: 0 }
         totalActiveTimeMs: { type: number, minimum: 0 }
         exits: { type: integer, minimum: 0 }
