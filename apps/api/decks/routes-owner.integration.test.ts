@@ -37,6 +37,14 @@ integration('authenticated deck routes', () => {
     await setup.end({ timeout: 5 });
   });
 
+  it('rejects NUL-containing HTML before attempting text persistence', async () => {
+    const response = await request('/v1/decks', 'POST', {
+      title: 'Invalid text',
+      html: '<main>Before\u0000after</main>',
+    });
+    expect(response.status).toBe(400);
+  });
+
   it('publishes, lists, previews, revises, and manages a deck lifecycle', async () => {
     // When
     const published = await request('/v1/decks', 'POST', {

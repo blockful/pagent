@@ -33,6 +33,7 @@ describe('HTML deck publishing boundary', () => {
 
   it.each([
     ['empty', ''],
+    ['a NUL byte', '<main>Before\u0000after</main>'],
     ['ASCII bytes over the limit', 'a'.repeat(HTML_MAX_BYTES + 1)],
     ['multibyte bytes over the limit', 'é'.repeat(HTML_MAX_BYTES / 2 + 1)],
   ])('rejects HTML when it contains %s', (_description, html) => {

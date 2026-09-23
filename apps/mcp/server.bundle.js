@@ -21433,7 +21433,7 @@ var deckMetadataSchema = external_exports.object({
 var htmlPublishDeckBodySchema = deckMetadataSchema.extend({
   html: external_exports.string().min(1).refine((html) => Buffer.byteLength(html, "utf8") <= HTML_MAX_BYTES, {
     message: `HTML must not exceed ${HTML_MAX_BYTES} UTF-8 bytes`
-  })
+  }).refine((html) => !html.includes("\0"), { message: "HTML cannot contain NUL bytes" })
 }).strict();
 var slidesPublishDeckBodySchema = deckMetadataSchema.extend({
   slides: external_exports.array(

@@ -33,7 +33,8 @@ export const htmlPublishDeckBodySchema = deckMetadataSchema
       .min(1)
       .refine((html) => Buffer.byteLength(html, 'utf8') <= HTML_MAX_BYTES, {
         message: `HTML must not exceed ${HTML_MAX_BYTES} UTF-8 bytes`,
-      }),
+      })
+      .refine((html) => !html.includes('\u0000'), { message: 'HTML cannot contain NUL bytes' }),
   })
   .strict();
 
